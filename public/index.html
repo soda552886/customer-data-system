@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>客戶資料填寫</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <header class="header">
+    <div class="header-inner">
+      <h1>客戶資料管理系統</h1>
+      <nav>
+        <a href="/" class="nav-link active">填寫表單</a>
+        <a href="/search.html" class="nav-link">查看資料</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="card setup-card">
+      <h2>基本設定</h2>
+      <div class="form-grid">
+        <div class="form-group">
+          <label for="siteSelect">工地名稱 <span class="required">*</span></label>
+          <select id="siteSelect" required>
+            <option value="">請選擇案場</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>客戶類型 <span class="required">*</span></label>
+          <div class="radio-group">
+            <label class="radio-label"><input type="radio" name="visitType" value="新客" checked> 新客</label>
+            <label class="radio-label"><input type="radio" name="visitType" value="回訪"> 回訪</label>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>是否成交 <span class="required">*</span></label>
+          <div class="radio-group">
+            <label class="radio-label"><input type="radio" name="isDeal" value="0" checked> 否</label>
+            <label class="radio-label"><input type="radio" name="isDeal" value="1"> 是</label>
+          </div>
+        </div>
+      </div>
+
+      <div id="lookupPanel" class="lookup-panel hidden">
+        <h3>回訪客戶檢索</h3>
+        <p class="hint">輸入電話號碼，系統將自動帶出初訪客況</p>
+        <div class="lookup-row">
+          <input type="tel" id="lookupPhone" placeholder="輸入電話號碼搜尋">
+          <button type="button" id="lookupBtn" class="btn btn-secondary">檢索初訪資料</button>
+        </div>
+        <div id="lookupResult" class="lookup-result hidden"></div>
+      </div>
+    </section>
+
+    <form id="customerForm" class="hidden">
+      <div id="formSections"></div>
+      <div class="form-actions">
+        <button type="button" id="resetBtn" class="btn btn-outline">清除重填</button>
+        <button type="submit" class="btn btn-primary">儲存客戶資料</button>
+      </div>
+    </form>
+
+    <div id="emptyState" class="empty-state">
+      <p>請先選擇工地名稱與客戶類型，即可開始填寫表單</p>
+    </div>
+  </main>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="/js/app.js"></script>
+</body>
+</html>

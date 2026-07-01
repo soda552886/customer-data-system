@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>查看資料</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <header class="header">
+    <div class="header-inner">
+      <h1>客戶資料管理系統</h1>
+      <nav>
+        <a href="/" class="nav-link">填寫表單</a>
+        <a href="/search.html" class="nav-link active">查看資料</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="card site-filter-card">
+      <h2>選擇案場</h2>
+      <div class="site-filter-row">
+        <div class="form-group site-select-group">
+          <label for="searchSite">查看哪個案場的資料</label>
+          <select id="searchSite" class="site-select">
+            <option value="">全部案場</option>
+          </select>
+        </div>
+        <div id="currentSiteLabel" class="current-site-label">目前顯示：全部案場</div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>篩選條件</h2>
+      <div class="search-grid">
+        <div class="form-group">
+          <label for="searchYear">年度</label>
+          <select id="searchYear">
+            <option value="">全部年度</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="searchStartDate">起始日期</label>
+          <input type="date" id="searchStartDate">
+        </div>
+        <div class="form-group">
+          <label for="searchEndDate">結束日期</label>
+          <input type="date" id="searchEndDate">
+        </div>
+        <div class="form-group">
+          <label for="searchRegion">區域</label>
+          <input type="text" id="searchRegion" placeholder="輸入區域名稱">
+        </div>
+        <div class="form-group">
+          <label for="searchVisitType">客戶類型</label>
+          <select id="searchVisitType">
+            <option value="">全部</option>
+            <option value="新客">新客</option>
+            <option value="回訪">回訪</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="searchDeal">是否成交</label>
+          <select id="searchDeal">
+            <option value="">全部</option>
+            <option value="1">是</option>
+            <option value="0">否</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="searchPhone">電話</label>
+          <input type="tel" id="searchPhone" placeholder="電話號碼">
+        </div>
+        <div class="form-group">
+          <label for="searchName">姓名</label>
+          <input type="text" id="searchName" placeholder="客戶姓名">
+        </div>
+      </div>
+      <div class="form-actions">
+        <button type="button" id="searchBtn" class="btn btn-primary">查詢資料</button>
+        <button type="button" id="clearSearchBtn" class="btn btn-outline">清除條件</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="column-picker-header">
+        <h2>報表欄位設定</h2>
+        <div class="column-picker-actions">
+          <button type="button" id="selectAllCols" class="btn-sm">全選</button>
+          <button type="button" id="deselectAllCols" class="btn-sm">全不選</button>
+          <button type="button" id="resetCols" class="btn-sm">恢復預設</button>
+        </div>
+      </div>
+      <p class="hint">勾選要顯示在列表與匯出報表中的欄位</p>
+      <div id="columnPicker" class="column-picker"></div>
+    </section>
+
+    <section class="card">
+      <div class="results-header">
+        <h2>資料列表 <span id="resultCount" class="badge">0 筆</span></h2>
+        <button type="button" id="exportBtn" class="btn btn-secondary">匯出報表 (CSV)</button>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table" id="resultsTable">
+          <thead id="resultsHead">
+            <tr><th>請先查詢資料</th></tr>
+          </thead>
+          <tbody id="resultsBody">
+            <tr><td class="empty-row">請選擇案場與條件後按「查詢資料」</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div id="pagination" class="pagination hidden"></div>
+    </section>
+
+    <section class="card">
+      <h2>統計摘要</h2>
+      <div id="statsPanel" class="stats-grid"></div>
+    </section>
+  </main>
+
+  <div id="detailModal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>客戶資料詳情</h3>
+        <button type="button" class="modal-close" id="closeModal">&times;</button>
+      </div>
+      <div id="detailContent" class="modal-body"></div>
+    </div>
+  </div>
+
+  <script src="/js/search.js"></script>
+</body>
+</html>
