@@ -493,3 +493,8 @@ body {
 .result-errors { margin-top: 1rem; padding: 1rem; background: #fdecea; border-radius: 8px; font-size: 0.9rem; }
 .result-errors h3 { font-size: 0.95rem; margin-bottom: 0.5rem; color: var(--danger); }
 .result-errors ul { padding-left: 1.25rem; max-height: 200px; overflow-y: auto; }
+
+.site-add-form { align-items: end; }
+.form-group-btn { display: flex; flex-direction: column; }
+.btn-danger-sm { color: var(--danger); border-color: #f5c6cb; }
+.btn-danger-sm:hover { background: #fdecea; }

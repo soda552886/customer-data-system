@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>案場管理 - 得意佳</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <header class="header">
+    <div class="header-inner">
+      <h1><span class="brand">得意佳</span>客戶資料管理系統</h1>
+      <nav>
+        <a href="/" class="nav-link">填寫表單</a>
+        <a href="/search.html" class="nav-link">查看資料</a>
+        <a href="/import.html" class="nav-link">匯入資料</a>
+        <a href="/sites.html" class="nav-link active">案場管理</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="card">
+      <h2>新增案場</h2>
+      <form id="addSiteForm" class="form-grid site-add-form">
+        <div class="form-group">
+          <label for="siteName">案場名稱 <span class="required">*</span></label>
+          <input type="text" id="siteName" placeholder="例如：新案場名稱" required maxlength="80">
+        </div>
+        <div class="form-group">
+          <label for="siteGroup">案場類型</label>
+          <select id="siteGroup">
+            <option value="residential">住宅建案</option>
+            <option value="commercial">商用不動產</option>
+          </select>
+        </div>
+        <div class="form-group form-group-btn">
+          <label>&nbsp;</label>
+          <button type="submit" class="btn btn-primary">新增案場</button>
+        </div>
+      </form>
+      <p class="hint">新增後即可在「填寫表單」、「匯入資料」、「查看資料」中選擇使用。</p>
+    </section>
+
+    <section class="card">
+      <div class="results-header">
+        <h2>案場列表 <span id="siteCount" class="badge">0 個</span></h2>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>案場名稱</th>
+              <th>類型</th>
+              <th>客戶筆數</th>
+              <th>建立時間</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="sitesBody">
+            <tr><td colspan="5" class="empty-row">載入中…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="/js/sites.js"></script>
+</body>
+</html>

@@ -9,7 +9,7 @@ from pathlib import Path
 
 from flask import Flask, jsonify, request, send_from_directory, Response
 
-from config.sites import SITES
+from config.sites import SITES as DEFAULT_SITES
 
 BASE_DIR = Path(__file__).parent
 
@@ -35,6 +35,12 @@ def get_db():
 def init_db():
     conn = get_db()
     conn.executescript('''
+        CREATE TABLE IF NOT EXISTS sites (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            group_type TEXT NOT NULL DEFAULT 'residential',
+            created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+        );
         CREATE TABLE IF NOT EXISTS customers (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             site_id TEXT NOT NULL,
@@ -53,15 +59,69 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_customers_visit_date ON customers(visit_date);
     ''')
     conn.commit()
+
+    count = conn.execute('SELECT COUNT(*) FROM sites').fetchone()[0]
+    if count == 0:
+        for s in DEFAULT_SITES:
+            conn.execute(
+                'INSERT OR IGNORE INTO sites (id, name, group_type) VALUES (?, ?, ?)',
+                (s['id'], s['name'], s.get('group', 'residential')),
+            )
+        conn.commit()
     conn.close()
+
+
+def load_sites():
+    conn = get_db()
+    rows = conn.execute('''
+        SELECT s.id, s.name, s.group_type, s.created_at,
+               (SELECT COUNT(*) FROM customers c WHERE c.site_id = s.id) AS customer_count
+        FROM sites s ORDER BY s.name
+    ''').fetchall()
+    conn.close()
+    return [{
+        'id': r['id'], 'name': r['name'], 'group': r['group_type'],
+        'created_at': r['created_at'], 'customer_count': r['customer_count'],
+    } for r in rows]
+
+
+def make_site_id(name):
+    base = re.sub(r'[\s/\\]+', '_', name.strip())
+    base = re.sub(r'[^\w\u4e00-\u9fff-]', '', base, flags=re.UNICODE)
+    if not base:
+        base = f'site_{int(datetime.now().timestamp())}'
+    base = base[:60]
+    conn = get_db()
+    candidate = base
+    n = 1
+    while conn.execute('SELECT 1 FROM sites WHERE id = ?', (candidate,)).fetchone():
+        candidate = f'{base}_{n}'
+        n += 1
+    conn.close()
+    return candidate
+
+
+def get_site_by_id(site_id):
+    if not site_id:
+        return None
+    conn = get_db()
+    row = conn.execute(
+        'SELECT id, name, group_type FROM sites WHERE id = ?', (site_id,)
+    ).fetchone()
+    conn.close()
+    if not row:
+        return None
+    return {'id': row['id'], 'name': row['name'], 'group': row['group_type']}
+
+
+def get_site_maps():
+    sites = load_sites()
+    return {s['name']: s for s in sites}, {s['id']: s for s in sites}
 
 
 def normalize_phone(phone):
     return re.sub(r'\D', '', str(phone or ''))
 
-
-SITE_BY_NAME = {s['name']: s for s in SITES}
-SITE_BY_ID = {s['id']: s for s in SITES}
 
 MULTISELECT_KEYS = {
     'roomType', 'floorNeed', 'areaNeed', 'unitType', 'unitNeed',
@@ -129,15 +189,16 @@ def parse_cell_value(key, val):
 
 
 def resolve_site(site_name, default_site_id=None):
+    by_name, by_id = get_site_maps()
     if site_name:
         name = str(site_name).strip()
-        if name in SITE_BY_NAME:
-            return SITE_BY_NAME[name]
-        for s in SITES:
+        if name in by_name:
+            return by_name[name]
+        for s in load_sites():
             if s['name'] in name or name in s['name']:
                 return s
-    if default_site_id and default_site_id in SITE_BY_ID:
-        return SITE_BY_ID[default_site_id]
+    if default_site_id and default_site_id in by_id:
+        return by_id[default_site_id]
     return None
 
 
@@ -306,7 +367,61 @@ def import_customers():
 
 @app.route('/api/sites')
 def api_sites():
-    return jsonify(SITES)
+    return jsonify(load_sites())
+
+
+@app.route('/api/sites', methods=['POST'])
+def create_site():
+    body = request.get_json() or {}
+    name = (body.get('name') or '').strip()
+    group = (body.get('group') or 'residential').strip()
+    if not name:
+        return jsonify({'error': '請輸入案場名稱'}), 400
+    if group not in ('residential', 'commercial'):
+        group = 'residential'
+
+    site_id = make_site_id(name)
+    conn = get_db()
+    try:
+        conn.execute(
+            'INSERT INTO sites (id, name, group_type) VALUES (?, ?, ?)',
+            (site_id, name, group),
+        )
+        conn.commit()
+    except sqlite3.IntegrityError:
+        conn.close()
+        return jsonify({'error': '此案場名稱已存在'}), 409
+    conn.close()
+    site = {'id': site_id, 'name': name, 'group': group}
+    return jsonify({'success': True, 'site': site}), 201
+
+
+@app.route('/api/sites/<site_id>', methods=['DELETE'])
+def delete_site(site_id):
+    conn = get_db()
+    row = conn.execute('SELECT id, name FROM sites WHERE id = ?', (site_id,)).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({'error': '找不到此案場'}), 404
+
+    count = conn.execute(
+        'SELECT COUNT(*) FROM customers WHERE site_id = ?', (site_id,)
+    ).fetchone()[0]
+    if count > 0:
+        conn.close()
+        return jsonify({
+            'error': f'此案場已有 {count} 筆客戶資料，無法刪除',
+        }), 400
+
+    conn.execute('DELETE FROM sites WHERE id = ?', (site_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True})
+
+
+@app.route('/sites.html')
+def sites_page():
+    return send_from_directory('public', 'sites.html')
 
 
 @app.route('/api/fields')
@@ -349,6 +464,10 @@ def create_customer():
     if not site_id or not visit_type or not data:
         return jsonify({'error': '缺少必要欄位'}), 400
 
+    site = get_site_by_id(site_id)
+    if not site:
+        return jsonify({'error': '找不到所選案場'}), 400
+
     visit_date = (
         data.get('returnVisitDate') if visit_type == '回訪'
         else data.get('visitDate')
@@ -356,7 +475,7 @@ def create_customer():
 
     new_id = insert_customer_record({
         'site_id': site_id,
-        'site_name': body.get('siteName', site_id),
+        'site_name': site['name'],
         'visit_type': visit_type,
         'is_deal': 1 if body.get('isDeal') else 0,
         'visit_date': visit_date,
