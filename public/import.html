@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>匯入資料 - 得意佳</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <header class="header">
+    <div class="header-inner">
+      <h1><span class="brand">得意佳</span>客戶資料管理系統</h1>
+      <nav>
+        <a href="/" class="nav-link">填寫表單</a>
+        <a href="/search.html" class="nav-link">查看資料</a>
+        <a href="/import.html" class="nav-link active">匯入資料</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="card">
+      <h2>批次匯入客戶資料</h2>
+      <p class="hint">支援 CSV 檔案（UTF-8 或 Excel 另存 CSV），一次匯入多筆客戶資料。可下載範本填寫，或使用「查看資料」匯出的報表格式。</p>
+
+      <div class="form-grid import-options">
+        <div class="form-group">
+          <label for="defaultSite">預設案場（CSV 無「案場」欄時使用）</label>
+          <select id="defaultSite">
+            <option value="">請選擇（或於 CSV 填寫案場欄）</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>&nbsp;</label>
+          <a href="/api/import/template" class="btn btn-outline btn-block" download>下載匯入範本 CSV</a>
+        </div>
+      </div>
+
+      <div class="upload-zone" id="uploadZone">
+        <input type="file" id="fileInput" accept=".csv,.txt" hidden>
+        <div class="upload-icon">📄</div>
+        <p>拖曳 CSV 檔案到這裡，或 <button type="button" class="link-btn" id="pickFileBtn">選擇檔案</button></p>
+        <p class="hint" id="fileName">尚未選擇檔案</p>
+      </div>
+
+      <div class="form-actions">
+        <button type="button" id="previewBtn" class="btn btn-outline" disabled>預覽前 5 筆</button>
+        <button type="button" id="importBtn" class="btn btn-primary" disabled>開始匯入</button>
+      </div>
+    </section>
+
+    <section class="card hidden" id="previewSection">
+      <h2>資料預覽</h2>
+      <div class="table-wrap">
+        <table class="data-table" id="previewTable">
+          <thead id="previewHead"></thead>
+          <tbody id="previewBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>匯入說明</h2>
+      <ul class="import-notes">
+        <li><strong>必填欄位</strong>：客戶姓名、主要電話、案場（或在上方選預設案場）</li>
+        <li><strong>案場名稱</strong>須與系統一致，例如：首學杭州、麗寶鐸藝、商用不動產…</li>
+        <li><strong>客戶類型</strong>：新客 或 回訪（預設新客）</li>
+        <li><strong>是否成交</strong>：是 或 否（預設否）</li>
+        <li><strong>日期格式</strong>：2026-07-01 或 2026/7/1</li>
+        <li>多選欄位（如未購因素）可用頓號「、」分隔多個值</li>
+        <li>從 Google 表單匯出的資料可先整理成 CSV 再匯入</li>
+      </ul>
+    </section>
+
+    <section class="card hidden" id="resultSection">
+      <h2>匯入結果</h2>
+      <div id="resultSummary" class="result-summary"></div>
+      <div id="resultErrors" class="result-errors hidden"></div>
+      <div class="form-actions">
+        <a href="/search.html" class="btn btn-primary">前往查看資料</a>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="/js/import.js"></script>
+</body>
+</html>

@@ -1,3 +1,5 @@
+import csv
+import io
 import json
 import os
 import re
@@ -5,7 +7,7 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, request, send_from_directory, Response
 
 from config.sites import SITES
 
@@ -58,6 +60,164 @@ def normalize_phone(phone):
     return re.sub(r'\D', '', str(phone or ''))
 
 
+SITE_BY_NAME = {s['name']: s for s in SITES}
+SITE_BY_ID = {s['id']: s for s in SITES}
+
+MULTISELECT_KEYS = {
+    'roomType', 'floorNeed', 'areaNeed', 'unitType', 'unitNeed',
+    'notPurchasedReason', 'purchasedReason',
+}
+
+LABEL_TO_KEY = {
+    '日期': '_visit_date', '案場': '_site_name', '客戶類型': '_visit_type',
+    '是否成交': '_is_deal', '建檔時間': '_created_at',
+    '參觀日期': 'visitDate', '首次參觀日期': 'firstVisitDate',
+    '回訪日期': 'returnVisitDate', '前次來訪日期': 'prevVisitDate',
+    '回訪次數': 'visitCount', '回籠次數': 'returnCount',
+    '客戶姓名': 'customerName', '主要電話': 'phone', '次要電話': 'phoneSecondary',
+    '居住地址': 'address', '街道路名或社區': 'streetCommunity', '區域': 'region',
+    '年齡': 'age', '職業': 'occupation', '購屋用途': 'purchasePurpose',
+    '購屋動機': 'purchaseMotive', '購屋需求': 'purchaseNeed',
+    '總價預算': 'budget', '自備款': 'downPayment',
+    '媒體1': 'media1', '媒體2': 'media2', '媒體3': 'media3', '媒體': 'media',
+    '介紹建案': 'commercialProject', '需求房型': 'roomType', '需求樓層': 'floorNeed',
+    '需求坪數': 'areaNeed', '需求戶型': 'unitType', '需求戶別': 'unitNeed',
+    '房間需求': 'roomNeed', '車位需求': 'parkingNeed',
+    '產品需求-住宅': 'productResidential', '產品需求-事務所': 'productOffice',
+    '介紹戶別樓層': 'introUnit', '當日來人': 'visitorCount', '來人關係': 'visitorRelation',
+    '未購因素': 'notPurchasedReason', '成交因素': 'purchasedReason',
+    '已購/成交因素': 'purchasedReason', '洽談內容': 'discussion',
+    '客戶來源': 'customerSource', '客戶誠意度': 'sincerity',
+    '銷售人員1': 'salesperson1', '銷售人員2': 'salesperson2',
+}
+
+ALL_FIELD_KEYS = set(LABEL_TO_KEY.values()) | MULTISELECT_KEYS | {
+    'visitDate', 'firstVisitDate', 'returnVisitDate', 'customerName', 'phone',
+    'discussion', 'salesperson1', 'region',
+}
+
+
+def map_header_to_key(header):
+    h = str(header).strip().lstrip('\ufeff')
+    if h in LABEL_TO_KEY:
+        return LABEL_TO_KEY[h]
+    if h in ALL_FIELD_KEYS:
+        return h
+    return None
+
+TEMPLATE_HEADERS = [
+    '案場', '客戶類型', '是否成交', '日期', '客戶姓名', '主要電話', '區域',
+    '年齡', '職業', '總價預算', '媒體1', '媒體2', '洽談內容', '銷售人員1',
+]
+
+
+def parse_bool_deal(val):
+    if val is None or str(val).strip() == '':
+        return 0
+    s = str(val).strip().lower()
+    return 1 if s in ('是', '1', 'true', 'yes', 'y', '成交') else 0
+
+
+def parse_cell_value(key, val):
+    if val is None or str(val).strip() == '':
+        return None
+    s = str(val).strip()
+    if key in MULTISELECT_KEYS:
+        parts = re.split(r'[、;；,，]', s)
+        return [p.strip() for p in parts if p.strip()]
+    return s
+
+
+def resolve_site(site_name, default_site_id=None):
+    if site_name:
+        name = str(site_name).strip()
+        if name in SITE_BY_NAME:
+            return SITE_BY_NAME[name]
+        for s in SITES:
+            if s['name'] in name or name in s['name']:
+                return s
+    if default_site_id and default_site_id in SITE_BY_ID:
+        return SITE_BY_ID[default_site_id]
+    return None
+
+
+def row_to_record(row_dict, default_site_id=None):
+    system = {
+        'site_id': None, 'site_name': None, 'visit_type': '新客',
+        'is_deal': 0, 'visit_date': None,
+        'first_visit_date': None, 'return_visit_date': None,
+    }
+    data = {}
+
+    for header, raw_val in row_dict.items():
+        if raw_val is None or str(raw_val).strip() == '':
+            continue
+        key = map_header_to_key(header)
+        if not key:
+            continue
+
+        if key == '_site_name':
+            system['site_name'] = str(raw_val).strip()
+            continue
+        if key == '_visit_type':
+            system['visit_type'] = str(raw_val).strip() or '新客'
+            continue
+        if key == '_is_deal':
+            system['is_deal'] = parse_bool_deal(raw_val)
+            continue
+        if key == '_visit_date':
+            system['visit_date'] = str(raw_val).strip()
+            continue
+        if key == '_created_at':
+            continue
+
+        parsed = parse_cell_value(key, raw_val)
+        if parsed is not None:
+            data[key] = parsed
+
+    site = resolve_site(system['site_name'], default_site_id)
+    if not site:
+        return None, '找不到案場（請填寫正確案場名稱或於匯入頁選擇預設案場）'
+
+    system['site_id'] = site['id']
+    system['site_name'] = site['name']
+
+    if not data.get('customerName'):
+        return None, '缺少客戶姓名'
+    if not data.get('phone'):
+        return None, '缺少主要電話'
+
+    visit_type = system['visit_type']
+    if not system['visit_date']:
+        system['visit_date'] = (
+            data.get('returnVisitDate') if visit_type == '回訪'
+            else data.get('visitDate')
+        ) or datetime.now().strftime('%Y-%m-%d')
+
+    system['first_visit_date'] = data.get('firstVisitDate')
+    system['return_visit_date'] = data.get('returnVisitDate')
+
+    return {'system': system, 'data': data}, None
+
+
+def insert_customer_record(system, data):
+    conn = get_db()
+    cur = conn.execute('''
+        INSERT INTO customers (site_id, site_name, visit_type, is_deal, visit_date,
+                               first_visit_date, return_visit_date, data)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (
+        system['site_id'], system['site_name'], system['visit_type'],
+        system['is_deal'], system['visit_date'],
+        system.get('first_visit_date'), system.get('return_visit_date'),
+        json.dumps(data, ensure_ascii=False),
+    ))
+    conn.commit()
+    new_id = cur.lastrowid
+    conn.close()
+    return new_id
+
+
 @app.route('/')
 def index():
     return send_from_directory('public', 'index.html')
@@ -66,6 +226,82 @@ def index():
 @app.route('/search.html')
 def search_page():
     return send_from_directory('public', 'search.html')
+
+
+@app.route('/import.html')
+def import_page():
+    return send_from_directory('public', 'import.html')
+
+
+@app.route('/api/import/template')
+def import_template():
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(TEMPLATE_HEADERS)
+    writer.writerow([
+        '首學杭州', '新客', '否', '2026-07-01', '王小明', '0912345678', '大安區',
+        '31-40歲', '上班族', '2000萬以下', 'FB', '介紹', '客戶對產品有興趣，需回去討論', '簡婉如',
+    ])
+    bom = '\ufeff'
+    return Response(
+        bom + output.getvalue(),
+        mimetype='text/csv; charset=utf-8',
+        headers={'Content-Disposition': 'attachment; filename=得意佳_客戶資料匯入範本.csv'},
+    )
+
+
+@app.route('/api/customers/import', methods=['POST'])
+def import_customers():
+    default_site_id = request.form.get('defaultSiteId', '').strip() or None
+
+    if 'file' not in request.files:
+        return jsonify({'error': '請上傳 CSV 檔案'}), 400
+
+    file = request.files['file']
+    if not file.filename:
+        return jsonify({'error': '請選擇檔案'}), 400
+
+    try:
+        raw = file.read()
+        for encoding in ('utf-8-sig', 'utf-8', 'big5', 'cp950'):
+            try:
+                text = raw.decode(encoding)
+                break
+            except UnicodeDecodeError:
+                continue
+        else:
+            return jsonify({'error': '無法讀取檔案編碼，請使用 UTF-8 或 Big5 編碼的 CSV'}), 400
+
+        reader = csv.DictReader(io.StringIO(text))
+        if not reader.fieldnames:
+            return jsonify({'error': 'CSV 檔案沒有欄位標題列'}), 400
+
+        imported = 0
+        errors = []
+
+        for i, row in enumerate(reader, start=2):
+            if not any(str(v).strip() for v in row.values() if v):
+                continue
+            record, err = row_to_record(row, default_site_id)
+            if err:
+                errors.append({'row': i, 'message': err})
+                continue
+            try:
+                insert_customer_record(record['system'], record['data'])
+                imported += 1
+            except Exception as e:
+                errors.append({'row': i, 'message': str(e)})
+
+        return jsonify({
+            'success': True,
+            'imported': imported,
+            'failed': len(errors),
+            'errors': errors[:50],
+        })
+    except csv.Error as e:
+        return jsonify({'error': f'CSV 格式錯誤：{e}'}), 400
+    except Exception as e:
+        return jsonify({'error': f'匯入失敗：{e}'}), 500
 
 
 @app.route('/api/sites')
@@ -118,24 +354,15 @@ def create_customer():
         else data.get('visitDate')
     ) or datetime.now().strftime('%Y-%m-%d')
 
-    conn = get_db()
-    cur = conn.execute('''
-        INSERT INTO customers (site_id, site_name, visit_type, is_deal, visit_date,
-                               first_visit_date, return_visit_date, data)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (
-        site_id,
-        body.get('siteName', site_id),
-        visit_type,
-        1 if body.get('isDeal') else 0,
-        visit_date,
-        data.get('firstVisitDate'),
-        data.get('returnVisitDate'),
-        json.dumps(data, ensure_ascii=False),
-    ))
-    conn.commit()
-    new_id = cur.lastrowid
-    conn.close()
+    new_id = insert_customer_record({
+        'site_id': site_id,
+        'site_name': body.get('siteName', site_id),
+        'visit_type': visit_type,
+        'is_deal': 1 if body.get('isDeal') else 0,
+        'visit_date': visit_date,
+        'first_visit_date': data.get('firstVisitDate'),
+        'return_visit_date': data.get('returnVisitDate'),
+    }, data)
     return jsonify({'success': True, 'id': new_id})
 
 
