@@ -26,12 +26,13 @@ python server.py
 
 ### 資料持久化
 
-`render.yaml` 已設定 1GB 持久化磁碟（`/var/data`），客戶資料庫會保存在雲端，重新部署不會遺失。
+**免費方案**：資料存在容器內，重新部署後可能清空。適合測試使用。
 
-> 若使用免費方案手動建立 Web Service（不用 Blueprint），請在 Render 控制台：
-> - **Start Command**: `gunicorn --bind 0.0.0.0:$PORT --workers 2 --timeout 120 server:app`
-> - **Environment**: 新增 `DATA_DIR` = `/var/data`
-> - **Disk**: 掛載 Persistent Disk 至 `/var/data`
+**正式使用（建議）**：升級為付費方案後，在 Render 控制台加入 Persistent Disk：
+- 掛載路徑：`/var/data`
+- 環境變數：`DATA_DIR` = `/var/data`
+
+資料庫會保存在雲端，重新部署不會遺失。
 
 ## 資料儲存
 
