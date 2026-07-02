@@ -20,6 +20,22 @@ async function loadSites() {
   });
 }
 
+function inferFromFileName(name) {
+  const sites = [
+    ['商用不動產', 'commercial'], ['首御臨沂', 'shouyu'], ['首學杭州', 'shouxue'],
+    ['麗寶鐸藝', 'libao_duoyi'], ['新潤世界都心', 'xinrun'], ['名軒心城市', 'mingxuan'],
+    ['天水一墅', 'tianshui'], ['麗寶之丘-霞舞', 'libao_xiawu'], ['麗寶之丘-雲頂', 'libao_yunding'],
+  ];
+  let site = '';
+  let visitType = '';
+  sites.forEach(([label, id]) => {
+    if (name.includes(label)) site = label;
+  });
+  if (name.includes('回訪')) visitType = '回訪';
+  else if (name.includes('新客')) visitType = '新客';
+  return { site, visitType };
+}
+
 function setFile(file) {
   if (!file) return;
   if (!file.name.toLowerCase().endsWith('.csv') && !file.name.toLowerCase().endsWith('.txt')) {
@@ -27,7 +43,12 @@ function setFile(file) {
     return;
   }
   selectedFile = file;
-  document.getElementById('fileName').textContent = `已選擇：${file.name}（${(file.size / 1024).toFixed(1)} KB）`;
+  const inferred = inferFromFileName(file.name);
+  let hint = `已選擇：${file.name}（${(file.size / 1024).toFixed(1)} KB）`;
+  if (inferred.site || inferred.visitType) {
+    hint += ` — 自動辨識：${inferred.site || '案場待選'}${inferred.visitType ? ` / ${inferred.visitType}` : ''}`;
+  }
+  document.getElementById('fileName').textContent = hint;
   document.getElementById('previewBtn').disabled = false;
   document.getElementById('importBtn').disabled = false;
   document.getElementById('resultSection').classList.add('hidden');
@@ -138,7 +159,15 @@ async function doImport() {
       errorsEl.classList.add('hidden');
       showToast(json.error || '匯入失敗', 'error');
     } else {
+      const inferred = [];
+      if (json.inferredSiteId) inferred.push(`案場：${json.inferredSiteId}`);
+      if (json.inferredVisitType) inferred.push(`類型：${json.inferredVisitType}`);
+      const inferredText = inferred.length
+        ? `<p class="hint">自動辨識 ${inferred.join('、')}</p>`
+        : '';
+
       summary.innerHTML = `
+        ${inferredText}
         <div class="result-stats">
           <div class="stat-card result-ok">
             <div class="stat-value">${json.imported}</div>

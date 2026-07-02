@@ -123,6 +123,81 @@ def normalize_phone(phone):
     return re.sub(r'\D', '', str(phone or ''))
 
 
+def format_phone_for_storage(phone):
+    digits = normalize_phone(phone)
+    if len(digits) == 9 and digits.startswith('9'):
+        return '0' + digits
+    if digits:
+        return digits
+    return str(phone or '').strip()
+
+
+def normalize_date_value(val):
+    if val is None or str(val).strip() == '':
+        return None
+    s = str(val).strip().split()[0]
+
+    m = re.match(r'^(\d{2,3})[./](\d{1,2})[./](\d{1,2})$', s)
+    if m:
+        year, month, day = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        if year < 1911:
+            year += 1911
+        return f'{year}-{month:02d}-{day:02d}'
+
+    m = re.match(r'^(\d{4})[./-](\d{1,2})[./-](\d{1,2})$', s)
+    if m:
+        year, month, day = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        return f'{year}-{month:02d}-{day:02d}'
+
+    m = re.match(r'^(\d{1,2})[./](\d{1,2})[./](\d{4})$', s)
+    if m:
+        month, day, year = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        return f'{year}-{month:02d}-{day:02d}'
+
+    return s
+
+
+def normalize_record_dates(system, data):
+    for key in ('visitDate', 'firstVisitDate', 'returnVisitDate', 'prevVisitDate'):
+        if data.get(key):
+            normalized = normalize_date_value(data[key])
+            if normalized:
+                data[key] = normalized
+    if system.get('visit_date'):
+        normalized = normalize_date_value(system['visit_date'])
+        if normalized:
+            system['visit_date'] = normalized
+    if not system.get('visit_date'):
+        for key in ('returnVisitDate', 'visitDate', 'firstVisitDate', 'prevVisitDate'):
+            if data.get(key):
+                system['visit_date'] = data[key]
+                break
+        if not system.get('visit_date') and system.get('_timestamp'):
+            system['visit_date'] = system['_timestamp']
+
+
+def infer_from_filename(filename):
+    name = filename or ''
+    site_id = None
+    visit_type = None
+    for site in load_sites():
+        if site['name'] in name:
+            site_id = site['id']
+            break
+    if '回訪' in name:
+        visit_type = '回訪'
+    elif '新客' in name:
+        visit_type = '新客'
+    return site_id, visit_type
+
+
+def row_has_visit_type(row_dict):
+    for header, raw_val in row_dict.items():
+        if map_header_to_key(header) == '_visit_type' and str(raw_val or '').strip():
+            return True
+    return False
+
+
 MULTISELECT_KEYS = {
     'roomType', 'floorNeed', 'areaNeed', 'unitType', 'unitNeed',
     'notPurchasedReason', 'purchasedReason',
@@ -138,18 +213,24 @@ LABEL_TO_KEY = {
     '居住地址': 'address', '街道路名或社區': 'streetCommunity', '區域': 'region',
     '年齡': 'age', '職業': 'occupation', '購屋用途': 'purchasePurpose',
     '購屋動機': 'purchaseMotive', '購屋需求': 'purchaseNeed',
-    '總價預算': 'budget', '自備款': 'downPayment',
+    '總價預算': 'budget', '預算總價': 'budget', '自備款': 'downPayment',
     '媒體1': 'media1', '媒體2': 'media2', '媒體3': 'media3', '媒體': 'media',
     '介紹建案': 'commercialProject', '需求房型': 'roomType', '需求樓層': 'floorNeed',
     '需求坪數': 'areaNeed', '需求戶型': 'unitType', '需求戶別': 'unitNeed',
     '房間需求': 'roomNeed', '車位需求': 'parkingNeed',
     '產品需求-住宅': 'productResidential', '產品需求-事務所': 'productOffice',
-    '介紹戶別樓層': 'introUnit', '當日來人': 'visitorCount', '來人關係': 'visitorRelation',
+    '介紹戶別樓層': 'introUnit', '介紹戶別': 'introUnit',
+    '介紹戶別樓層（ex︰A1-2F）': 'introUnit',
+    '當日來人': 'visitorCount', '當日來訪人數': 'visitorCount',
+    '來人關係': 'visitorRelation', '同行人員關係': 'visitorRelation',
     '未購因素': 'notPurchasedReason', '成交因素': 'purchasedReason',
-    '已購/成交因素': 'purchasedReason', '洽談內容': 'discussion',
-    '客戶來源': 'customerSource', '客戶誠意度': 'sincerity',
+    '已購/成交因素': 'purchasedReason', '已購因素': 'purchasedReason',
+    '洽談內容': 'discussion', '客戶來源': 'customerSource', '客戶誠意度': 'sincerity',
     '銷售人員1': 'salesperson1', '銷售人員2': 'salesperson2',
     '備註': 'remark', '客戶狀態': 'customerStatus',
+    '時間戳記': '_timestamp',
+    '第一次及前次來訪日期': 'prevVisitDate',
+    '回訪次數(不含首次參觀)': 'visitCount',
 }
 
 ALL_FIELD_KEYS = set(LABEL_TO_KEY.values()) | MULTISELECT_KEYS | {
@@ -321,13 +402,14 @@ def resolve_site(site_name, default_site_id=None):
     return None
 
 
-def row_to_record(row_dict, default_site_id=None):
+def row_to_record(row_dict, default_site_id=None, default_visit_type=None):
     system = {
         'site_id': None, 'site_name': None, 'visit_type': '新客',
         'is_deal': 0, 'visit_date': None,
         'first_visit_date': None, 'return_visit_date': None,
     }
     data = {}
+    has_visit_type = row_has_visit_type(row_dict)
 
     for header, raw_val in row_dict.items():
         if raw_val is None or str(raw_val).strip() == '':
@@ -348,6 +430,11 @@ def row_to_record(row_dict, default_site_id=None):
         if key == '_visit_date':
             system['visit_date'] = str(raw_val).strip()
             continue
+        if key == '_timestamp':
+            normalized = normalize_date_value(raw_val)
+            if normalized:
+                system['_timestamp'] = normalized
+            continue
         if key == '_created_at':
             continue
 
@@ -355,17 +442,25 @@ def row_to_record(row_dict, default_site_id=None):
         if parsed is not None:
             data[key] = parsed
 
+    if not has_visit_type and default_visit_type in ('新客', '回訪'):
+        system['visit_type'] = default_visit_type
+
     site = resolve_site(system['site_name'], default_site_id)
     if not site:
-        return None, '找不到案場（請填寫正確案場名稱或於匯入頁選擇預設案場）'
+        return None, '找不到案場（請填寫正確案場名稱、於匯入頁選擇預設案場，或使用含案場名稱的檔名）'
 
     system['site_id'] = site['id']
     system['site_name'] = site['name']
+
+    if data.get('phone'):
+        data['phone'] = format_phone_for_storage(data['phone'])
 
     if not data.get('customerName'):
         return None, '缺少客戶姓名'
     if not data.get('phone'):
         return None, '缺少主要電話'
+
+    normalize_record_dates(system, data)
 
     system['visit_type'] = infer_visit_type(system, data)
     system['is_deal'] = infer_deal_status(system, data)
@@ -374,13 +469,14 @@ def row_to_record(row_dict, default_site_id=None):
         system['visit_date'] = (
             data.get('returnVisitDate') if visit_type == '回訪'
             else data.get('visitDate')
-        ) or datetime.now().strftime('%Y-%m-%d')
+        ) or system.get('_timestamp') or datetime.now().strftime('%Y-%m-%d')
 
     system['first_visit_date'] = data.get('firstVisitDate')
     system['return_visit_date'] = data.get('returnVisitDate')
     if '退戶' in str(data.get('remark') or ''):
         data['customerStatus'] = '退戶'
 
+    system.pop('_timestamp', None)
     return {'system': system, 'data': data}, None
 
 
@@ -465,6 +561,10 @@ def import_customers():
     if not file.filename:
         return jsonify({'error': '請選擇檔案'}), 400
 
+    inferred_site_id, inferred_visit_type = infer_from_filename(file.filename)
+    if not default_site_id and inferred_site_id:
+        default_site_id = inferred_site_id
+
     try:
         raw = file.read()
         for encoding in ('utf-8-sig', 'utf-8', 'big5', 'cp950'):
@@ -486,7 +586,7 @@ def import_customers():
         for i, row in enumerate(reader, start=2):
             if not any(str(v).strip() for v in row.values() if v):
                 continue
-            record, err = row_to_record(row, default_site_id)
+            record, err = row_to_record(row, default_site_id, inferred_visit_type)
             if err:
                 errors.append({'row': i, 'message': err})
                 continue
@@ -501,6 +601,8 @@ def import_customers():
             'imported': imported,
             'failed': len(errors),
             'errors': errors[:50],
+            'inferredSiteId': inferred_site_id,
+            'inferredVisitType': inferred_visit_type,
         })
     except csv.Error as e:
         return jsonify({'error': f'CSV 格式錯誤：{e}'}), 400
