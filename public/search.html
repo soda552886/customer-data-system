@@ -134,6 +134,14 @@
       <h2>統計摘要</h2>
       <div id="statsPanel" class="stats-grid"></div>
     </section>
+
+    <section class="card danger-zone">
+      <h2>資料管理</h2>
+      <p class="hint danger-hint">以下操作無法復原，請謹慎使用。建議先匯出 CSV 備份。</p>
+      <div class="form-actions">
+        <button type="button" id="deleteAllBtn" class="btn btn-danger">清空全部客戶資料</button>
+      </div>
+    </section>
   </main>
 
   <div id="detailModal" class="modal hidden">
@@ -143,6 +151,46 @@
         <button type="button" class="modal-close" id="closeModal">&times;</button>
       </div>
       <div id="detailContent" class="modal-body"></div>
+      <div class="modal-footer">
+        <button type="button" id="detailEditBtn" class="btn btn-secondary">編輯</button>
+        <button type="button" id="detailDeleteBtn" class="btn btn-danger">刪除此筆</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="editModal" class="modal hidden">
+    <div class="modal-content modal-content-lg">
+      <div class="modal-header">
+        <h3>編輯客戶資料</h3>
+        <button type="button" class="modal-close" id="closeEditModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="edit-system-fields form-grid">
+          <div class="form-group">
+            <label for="editSite">案場</label>
+            <select id="editSite"></select>
+          </div>
+          <div class="form-group">
+            <label>客戶類型</label>
+            <div class="radio-row">
+              <label class="radio-label"><input type="radio" name="editVisitType" value="新客"> 新客</label>
+              <label class="radio-label"><input type="radio" name="editVisitType" value="回訪"> 回訪</label>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>是否成交</label>
+            <div class="radio-row">
+              <label class="radio-label"><input type="radio" name="editIsDeal" value="0"> 否</label>
+              <label class="radio-label"><input type="radio" name="editIsDeal" value="1"> 是</label>
+            </div>
+          </div>
+        </div>
+        <div id="editFormSections" class="edit-form-sections"></div>
+        <div class="form-actions edit-form-actions">
+          <button type="button" id="saveEditBtn" class="btn btn-primary">儲存變更</button>
+          <button type="button" id="cancelEditBtn" class="btn btn-outline">取消</button>
+        </div>
+      </div>
     </div>
   </div>
 

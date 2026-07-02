@@ -189,17 +189,19 @@ def parse_cell_value(key, val):
     return s
 
 
-def has_existing_customer(site_id, phone):
+def has_existing_customer(site_id, phone, exclude_record_id=None):
     normalized = normalize_phone(phone)
     if not normalized:
         return False
     conn = get_db()
     rows = conn.execute(
-        'SELECT data FROM customers WHERE site_id = ?',
+        'SELECT id, data FROM customers WHERE site_id = ?',
         (site_id,),
     ).fetchall()
     conn.close()
     for row in rows:
+        if exclude_record_id and row['id'] == exclude_record_id:
+            continue
         try:
             d = json.loads(row['data'])
         except Exception:
@@ -209,7 +211,7 @@ def has_existing_customer(site_id, phone):
     return False
 
 
-def infer_visit_type(system, data):
+def infer_visit_type(system, data, exclude_record_id=None):
     vt = str(system.get('visit_type') or '').strip()
     has_return_signals = any([
         data.get('returnVisitDate'),
@@ -218,13 +220,54 @@ def infer_visit_type(system, data):
         data.get('visitCount'),
     ])
     if vt not in ('新客', '回訪'):
-        # 首御臨沂與其他案場一致：若有回訪欄位或既有紀錄，判定為回訪
-        if has_return_signals or has_existing_customer(system['site_id'], data.get('phone')):
+        if has_return_signals or has_existing_customer(
+            system['site_id'], data.get('phone'), exclude_record_id,
+        ):
             return '回訪'
         return '新客'
     if vt == '新客' and has_return_signals:
         return '回訪'
     return vt
+
+
+def prepare_customer_system(site_id, data, visit_type=None, is_deal=None, exclude_record_id=None):
+    site = get_site_by_id(site_id)
+    if not site:
+        return None, '找不到所選案場'
+    if not data.get('customerName'):
+        return None, '缺少客戶姓名'
+    if not data.get('phone'):
+        return None, '缺少主要電話'
+
+    system = {
+        'site_id': site_id,
+        'site_name': site['name'],
+        'visit_type': '新客',
+        'is_deal': 0,
+        'visit_date': None,
+        'first_visit_date': data.get('firstVisitDate'),
+        'return_visit_date': data.get('returnVisitDate'),
+    }
+    if visit_type in ('新客', '回訪'):
+        system['visit_type'] = visit_type
+    system['visit_type'] = infer_visit_type(system, data, exclude_record_id)
+
+    if is_deal is None:
+        system['is_deal'] = infer_deal_status(system, data)
+    else:
+        system['is_deal'] = infer_deal_status(
+            {'is_deal': 1 if is_deal else 0}, data,
+        )
+
+    vt = system['visit_type']
+    system['visit_date'] = (
+        data.get('returnVisitDate') if vt == '回訪' else data.get('visitDate')
+    ) or datetime.now().strftime('%Y-%m-%d')
+
+    if '退戶' in str(data.get('remark') or ''):
+        data['customerStatus'] = '退戶'
+
+    return system, None
 
 
 DEAL_KEYWORDS = ('成交', '已購', '斡旋', '小訂', '足訂', '足定', '已下訂', '下訂', '簽約')
@@ -339,6 +382,26 @@ def row_to_record(row_dict, default_site_id=None):
         data['customerStatus'] = '退戶'
 
     return {'system': system, 'data': data}, None
+
+
+def update_customer_record(record_id, system, data):
+    conn = get_db()
+    cur = conn.execute('''
+        UPDATE customers
+        SET site_id = ?, site_name = ?, visit_type = ?, is_deal = ?, visit_date = ?,
+            first_visit_date = ?, return_visit_date = ?, data = ?,
+            updated_at = datetime('now', 'localtime')
+        WHERE id = ?
+    ''', (
+        system['site_id'], system['site_name'], system['visit_type'],
+        system['is_deal'], system['visit_date'],
+        system.get('first_visit_date'), system.get('return_visit_date'),
+        json.dumps(data, ensure_ascii=False),
+        record_id,
+    ))
+    conn.commit()
+    conn.close()
+    return cur.rowcount > 0
 
 
 def insert_customer_record(system, data):
@@ -544,24 +607,12 @@ def create_customer():
     if not site_id or not visit_type or not data:
         return jsonify({'error': '缺少必要欄位'}), 400
 
-    site = get_site_by_id(site_id)
-    if not site:
-        return jsonify({'error': '找不到所選案場'}), 400
+    is_deal = body.get('isDeal') if 'isDeal' in body else None
+    system, err = prepare_customer_system(site_id, data, visit_type, is_deal)
+    if err:
+        return jsonify({'error': err}), 400
 
-    visit_date = (
-        data.get('returnVisitDate') if visit_type == '回訪'
-        else data.get('visitDate')
-    ) or datetime.now().strftime('%Y-%m-%d')
-
-    new_id = insert_customer_record({
-        'site_id': site_id,
-        'site_name': site['name'],
-        'visit_type': visit_type,
-        'is_deal': 1 if body.get('isDeal') else 0,
-        'visit_date': visit_date,
-        'first_visit_date': data.get('firstVisitDate'),
-        'return_visit_date': data.get('returnVisitDate'),
-    }, data)
+    new_id = insert_customer_record(system, data)
     return jsonify({'success': True, 'id': new_id})
 
 
@@ -667,6 +718,34 @@ def get_customer(record_id):
     return jsonify(record)
 
 
+@app.route('/api/customers/<int:record_id>', methods=['PUT'])
+def update_customer(record_id):
+    body = request.get_json() or {}
+    data = body.get('data')
+    if not data:
+        return jsonify({'error': '缺少資料內容'}), 400
+
+    conn = get_db()
+    row = conn.execute('SELECT * FROM customers WHERE id = ?', (record_id,)).fetchone()
+    conn.close()
+    if not row:
+        return jsonify({'error': '找不到資料'}), 404
+
+    site_id = body.get('siteId') or row['site_id']
+    visit_type = body.get('visitType') or row['visit_type']
+    is_deal = body.get('isDeal') if 'isDeal' in body else bool(row['is_deal'])
+
+    system, err = prepare_customer_system(
+        site_id, data, visit_type, is_deal, exclude_record_id=record_id,
+    )
+    if err:
+        return jsonify({'error': err}), 400
+
+    if not update_customer_record(record_id, system, data):
+        return jsonify({'error': '更新失敗'}), 500
+    return jsonify({'success': True, 'id': record_id})
+
+
 @app.route('/api/customers/<int:record_id>', methods=['DELETE'])
 def delete_customer(record_id):
     conn = get_db()
@@ -676,6 +755,24 @@ def delete_customer(record_id):
     if cur.rowcount == 0:
         return jsonify({'error': '找不到資料'}), 404
     return jsonify({'success': True})
+
+
+@app.route('/api/customers/all', methods=['DELETE'])
+def delete_all_customers():
+    body = request.get_json() or {}
+    if body.get('confirm') != 'DELETE ALL':
+        return jsonify({'error': '請輸入正確確認碼 DELETE ALL'}), 400
+
+    site_id = (body.get('siteId') or '').strip()
+    conn = get_db()
+    if site_id:
+        cur = conn.execute('DELETE FROM customers WHERE site_id = ?', (site_id,))
+    else:
+        cur = conn.execute('DELETE FROM customers')
+    deleted = cur.rowcount
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True, 'deleted': deleted})
 
 
 @app.route('/api/stats')

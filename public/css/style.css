@@ -366,6 +366,44 @@ body {
   flex-direction: column;
 }
 
+.modal-content-lg { max-width: 920px; }
+
+.modal-footer {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: flex-end;
+  padding: 1rem 1.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.edit-form-sections .card {
+  margin-top: 1rem;
+  padding: 1rem 1.25rem;
+  box-shadow: none;
+  border: 1px solid var(--border);
+}
+
+.edit-form-sections .section-title {
+  font-size: 1rem;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.edit-system-fields { margin-bottom: 0.5rem; }
+
+.danger-zone { border-left: 4px solid var(--danger); }
+.danger-hint { color: var(--danger); }
+
+.btn-danger {
+  background: var(--danger);
+  color: #fff;
+  border: none;
+}
+.btn-danger:hover { filter: brightness(0.92); }
+
+.action-btns { display: flex; gap: 0.35rem; flex-wrap: wrap; }
+
 .modal-header {
   display: flex;
   justify-content: space-between;

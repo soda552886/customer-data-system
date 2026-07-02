@@ -2,6 +2,10 @@ let sites = [];
 let currentPage = 1;
 let lastResults = [];
 let lastTotal = 0;
+let fieldConfig = { sections: [], salesStaff: {} };
+let editingRecordId = null;
+let editingRecord = null;
+let detailRecordId = null;
 
 const STORAGE_KEY = 'customer_report_columns';
 
@@ -259,7 +263,10 @@ function renderResults(data) {
       const val = getCellValue(r, c.key);
       return `<td>${formatCellHtml(c.key, val, r)}</td>`;
     }).join('');
-    return `<tr>${cells}<td><button class="btn-sm" onclick="showDetail(${r.id})">詳情</button></td></tr>`;
+    return `<tr>${cells}<td class="action-btns">
+      <button class="btn-sm" onclick="showDetail(${r.id})">詳情</button>
+      <button class="btn-sm" onclick="openEdit(${r.id})">編輯</button>
+    </td></tr>`;
   }).join('');
 
   renderPagination(data.total, data.page, data.limit);
@@ -338,6 +345,11 @@ async function loadStats() {
 window.showDetail = async function (id) {
   const res = await fetch(`/api/customers/${id}`);
   const record = await res.json();
+  if (record.error) {
+    alert(record.error);
+    return;
+  }
+  detailRecordId = id;
   const d = record.data;
   const modal = document.getElementById('detailModal');
   const content = document.getElementById('detailContent');
@@ -360,6 +372,266 @@ window.showDetail = async function (id) {
   content.innerHTML = html;
   modal.classList.remove('hidden');
 };
+
+function getEditVisitType() {
+  return document.querySelector('input[name="editVisitType"]:checked')?.value || '新客';
+}
+
+function getEditIsDeal() {
+  return document.querySelector('input[name="editIsDeal"]:checked')?.value === '1';
+}
+
+function fieldVisibleForEdit(field, siteId, visitType) {
+  if (field.showFor && !field.showFor.includes(visitType)) return false;
+  if (field.sites && !field.sites.includes(siteId)) return false;
+  if (field.hideFor && field.hideFor.includes(visitType)) return false;
+  return true;
+}
+
+function buildEditForm() {
+  const siteId = document.getElementById('editSite').value;
+  const visitType = getEditVisitType();
+  const container = document.getElementById('editFormSections');
+  container.innerHTML = '';
+
+  fieldConfig.sections.forEach((section) => {
+    const visibleFields = section.fields.filter((f) => fieldVisibleForEdit(f, siteId, visitType));
+    if (visibleFields.length === 0) return;
+
+    const sectionEl = document.createElement('div');
+    sectionEl.className = 'card';
+    sectionEl.innerHTML = `<h2 class="section-title">${section.title}</h2>`;
+    const grid = document.createElement('div');
+    grid.className = 'form-grid';
+
+    visibleFields.forEach((field) => {
+      const group = document.createElement('div');
+      group.className = `form-group${field.type === 'textarea' || field.type === 'multiselect' ? ' full-width' : ''}`;
+
+      const label = document.createElement('label');
+      label.htmlFor = `edit_${field.key}`;
+      label.innerHTML = `${field.label}${field.required ? ' <span class="required">*</span>' : ''}`;
+      group.appendChild(label);
+
+      if (field.type === 'select') {
+        const input = document.createElement('select');
+        input.id = `edit_${field.key}`;
+        input.name = field.key;
+        const empty = document.createElement('option');
+        empty.value = '';
+        empty.textContent = '請選擇';
+        input.appendChild(empty);
+        let options = field.options || [];
+        if (field.dynamicStaff) {
+          options = fieldConfig.salesStaff[siteId] || [];
+        }
+        options.forEach((opt) => {
+          const o = document.createElement('option');
+          o.value = opt;
+          o.textContent = opt;
+          input.appendChild(o);
+        });
+        group.appendChild(input);
+      } else if (field.type === 'multiselect') {
+        const wrap = document.createElement('div');
+        wrap.className = 'checkbox-grid';
+        wrap.id = `edit_${field.key}`;
+        (field.options || []).forEach((opt) => {
+          const lbl = document.createElement('label');
+          lbl.className = 'checkbox-label';
+          const cb = document.createElement('input');
+          cb.type = 'checkbox';
+          cb.name = field.key;
+          cb.value = opt;
+          lbl.appendChild(cb);
+          lbl.appendChild(document.createTextNode(opt));
+          wrap.appendChild(lbl);
+        });
+        group.appendChild(wrap);
+      } else if (field.type === 'textarea') {
+        const input = document.createElement('textarea');
+        input.id = `edit_${field.key}`;
+        input.name = field.key;
+        if (field.placeholder) input.placeholder = field.placeholder;
+        group.appendChild(input);
+      } else {
+        const input = document.createElement('input');
+        input.type = field.type;
+        input.id = `edit_${field.key}`;
+        input.name = field.key;
+        if (field.placeholder) input.placeholder = field.placeholder;
+        group.appendChild(input);
+      }
+
+      grid.appendChild(group);
+    });
+
+    sectionEl.appendChild(grid);
+    container.appendChild(sectionEl);
+  });
+}
+
+function fillEditFormData(data) {
+  const siteId = document.getElementById('editSite').value;
+  const visitType = getEditVisitType();
+
+  fieldConfig.sections.forEach((section) => {
+    section.fields.filter((f) => fieldVisibleForEdit(f, siteId, visitType)).forEach((field) => {
+      const val = data[field.key];
+      if (val === undefined || val === null) return;
+
+      if (field.type === 'multiselect' && Array.isArray(val)) {
+        val.forEach((v) => {
+          const cb = document.querySelector(`#edit_${field.key} input[value="${CSS.escape(v)}"]`);
+          if (cb) cb.checked = true;
+        });
+      } else {
+        const el = document.getElementById(`edit_${field.key}`);
+        if (el) el.value = val;
+      }
+    });
+  });
+}
+
+function collectEditFormData() {
+  const siteId = document.getElementById('editSite').value;
+  const visitType = getEditVisitType();
+  const data = {};
+
+  fieldConfig.sections.forEach((section) => {
+    section.fields.filter((f) => fieldVisibleForEdit(f, siteId, visitType)).forEach((field) => {
+      if (field.type === 'multiselect') {
+        const checked = document.querySelectorAll(`#edit_${field.key} input:checked`);
+        data[field.key] = Array.from(checked).map((cb) => cb.value);
+      } else {
+        const el = document.getElementById(`edit_${field.key}`);
+        if (el) data[field.key] = el.value;
+      }
+    });
+  });
+  return data;
+}
+
+function populateEditSiteSelect(selectedSiteId) {
+  const sel = document.getElementById('editSite');
+  sel.innerHTML = sites.map((s) =>
+    `<option value="${s.id}" ${s.id === selectedSiteId ? 'selected' : ''}>${escapeHtml(s.name)}</option>`,
+  ).join('');
+}
+
+window.openEdit = async function (id) {
+  const res = await fetch(`/api/customers/${id}`);
+  const record = await res.json();
+  if (record.error) {
+    alert(record.error);
+    return;
+  }
+
+  editingRecordId = id;
+  editingRecord = record;
+  document.getElementById('detailModal').classList.add('hidden');
+
+  populateEditSiteSelect(record.site_id);
+  document.querySelector(`input[name="editVisitType"][value="${record.visit_type}"]`)?.click();
+  document.querySelector(`input[name="editIsDeal"][value="${record.is_deal ? '1' : '0'}"]`)?.click();
+
+  buildEditForm();
+  fillEditFormData(record.data);
+
+  document.getElementById('editModal').classList.remove('hidden');
+};
+
+async function saveEdit() {
+  if (!editingRecordId) return;
+  const data = collectEditFormData();
+  if (!data.customerName || !data.phone) {
+    alert('請填寫客戶姓名與主要電話');
+    return;
+  }
+
+  const siteId = document.getElementById('editSite').value;
+  const visitType = getEditVisitType();
+
+  try {
+    const res = await fetch(`/api/customers/${editingRecordId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        siteId,
+        visitType,
+        isDeal: getEditIsDeal(),
+        data,
+      }),
+    });
+    const json = await res.json();
+    if (!res.ok) {
+      alert(json.error || '儲存失敗');
+      return;
+    }
+    document.getElementById('editModal').classList.add('hidden');
+    editingRecordId = null;
+    doSearch();
+  } catch {
+    alert('儲存失敗，請稍後再試');
+  }
+}
+
+async function deleteRecord(id) {
+  if (!confirm('確定要刪除此筆客戶資料？此操作無法復原。')) return;
+  try {
+    const res = await fetch(`/api/customers/${id}`, { method: 'DELETE' });
+    const json = await res.json();
+    if (!res.ok) {
+      alert(json.error || '刪除失敗');
+      return;
+    }
+    document.getElementById('detailModal').classList.add('hidden');
+    document.getElementById('editModal').classList.add('hidden');
+    detailRecordId = null;
+    editingRecordId = null;
+    doSearch();
+  } catch {
+    alert('刪除失敗，請稍後再試');
+  }
+}
+
+async function deleteAllCustomers() {
+  const typed = prompt(
+    '此操作將刪除全部客戶資料且無法復原。\n請輸入 DELETE ALL 以確認：',
+  );
+  if (typed !== 'DELETE ALL') {
+    if (typed !== null) alert('確認碼不正確，已取消');
+    return;
+  }
+
+  const siteId = document.getElementById('searchSite').value;
+  const siteName = siteId
+    ? (sites.find((s) => s.id === siteId)?.name || '選定案場')
+    : '全部案場';
+  if (!confirm(`最後確認：將清空「${siteName}」的所有客戶資料？`)) return;
+
+  try {
+    const res = await fetch('/api/customers/all', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirm: 'DELETE ALL', siteId: siteId || undefined }),
+    });
+    const json = await res.json();
+    if (!res.ok) {
+      alert(json.error || '清空失敗');
+      return;
+    }
+    alert(`已刪除 ${json.deleted} 筆資料`);
+    doSearch();
+  } catch {
+    alert('清空失敗，請稍後再試');
+  }
+}
+
+async function loadFieldConfig() {
+  const res = await fetch('/api/fields');
+  fieldConfig = await res.json();
+}
 
 async function exportCSV() {
   const cols = getSelectedColumns();
@@ -424,9 +696,39 @@ document.getElementById('closeModal').addEventListener('click', () => {
 document.getElementById('detailModal').addEventListener('click', (e) => {
   if (e.target.id === 'detailModal') document.getElementById('detailModal').classList.add('hidden');
 });
+document.getElementById('detailEditBtn').addEventListener('click', () => {
+  if (detailRecordId) openEdit(detailRecordId);
+});
+document.getElementById('detailDeleteBtn').addEventListener('click', () => {
+  if (detailRecordId) deleteRecord(detailRecordId);
+});
+document.getElementById('closeEditModal').addEventListener('click', () => {
+  document.getElementById('editModal').classList.add('hidden');
+});
+document.getElementById('cancelEditBtn').addEventListener('click', () => {
+  document.getElementById('editModal').classList.add('hidden');
+});
+document.getElementById('editModal').addEventListener('click', (e) => {
+  if (e.target.id === 'editModal') document.getElementById('editModal').classList.add('hidden');
+});
+document.getElementById('saveEditBtn').addEventListener('click', saveEdit);
+document.getElementById('deleteAllBtn').addEventListener('click', deleteAllCustomers);
+document.getElementById('editSite').addEventListener('change', () => {
+  const data = editingRecord ? { ...editingRecord.data, ...collectEditFormData() } : collectEditFormData();
+  buildEditForm();
+  fillEditFormData(data);
+});
+document.querySelectorAll('input[name="editVisitType"]').forEach((el) => {
+  el.addEventListener('change', () => {
+    const data = { ...collectEditFormData() };
+    buildEditForm();
+    fillEditFormData(data);
+  });
+});
 
 initYearSelect();
 renderColumnPicker();
+loadFieldConfig();
 loadSites().then(() => {
   updateSiteLabel();
   doSearch();
