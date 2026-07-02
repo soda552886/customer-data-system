@@ -227,28 +227,40 @@ def infer_visit_type(system, data):
     return vt
 
 
+DEAL_KEYWORDS = ('成交', '已購', '斡旋', '小訂', '足訂', '足定', '已下訂', '下訂', '簽約')
+
+
+def collect_text_values(data, keys):
+    parts = []
+    for key in keys:
+        val = data.get(key)
+        if isinstance(val, list):
+            parts.extend(str(x) for x in val if x)
+        elif val:
+            parts.append(str(val))
+    return ' '.join(parts)
+
+
 def infer_deal_status(system, data):
     if int(system.get('is_deal') or 0) == 1:
         return 1
-    reasons = []
-    for key in ('purchasedReason', 'notPurchasedReason'):
-        val = data.get(key)
-        if isinstance(val, list):
-            reasons.extend(val)
-        elif val:
-            reasons.append(str(val))
-    status = str(data.get('customerStatus') or '')
-    text = ' '.join(reasons + [status])
+
+    combined = collect_text_values(data, (
+        'purchasedReason', 'notPurchasedReason', 'sincerity', 'discussion', 'remark',
+    ))
+    for kw in DEAL_KEYWORDS:
+        if kw in combined:
+            return 1
+
     purchased = data.get('purchasedReason')
     if purchased:
         if isinstance(purchased, list):
             purchased_text = ' '.join(str(x) for x in purchased)
         else:
             purchased_text = str(purchased)
-        if purchased_text.strip() and '未購' not in purchased_text:
+        if purchased_text.strip() and '未購' not in purchased_text and '未成交' not in purchased_text:
             return 1
-    if '成交' in text:
-        return 1
+
     return 0
 
 

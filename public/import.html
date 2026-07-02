@@ -66,7 +66,13 @@
         <li><strong>必填欄位</strong>：客戶姓名、主要電話、案場（或在上方選預設案場）</li>
         <li><strong>案場名稱</strong>須與系統一致，例如：首學杭州、麗寶鐸藝、商用不動產…</li>
         <li><strong>客戶類型</strong>可留空，系統會依回訪欄位/既有電話自動判斷新客或回訪（含首御臨沂）</li>
-        <li><strong>是否成交</strong>可留空，系統會依成交相關欄位自動判定</li>
+        <li><strong>是否成交</strong>可留空，系統會依下列欄位自動判定：
+          <ul>
+            <li>優先欄位：<strong>是否成交</strong>（填「是」直接判定成交）</li>
+            <li>關鍵字欄位：<strong>未購因素</strong>、<strong>已購/成交因素</strong>、<strong>客戶誠意度</strong>、<strong>洽談內容</strong>、<strong>備註</strong></li>
+            <li>關鍵字：成交、已購、斡旋、小訂、足訂、足定、下訂、簽約（例如未購因素填「已購」會判定為成交）</li>
+          </ul>
+        </li>
         <li><strong>日期格式</strong>：2026-07-01 或 2026/7/1</li>
         <li>多選欄位（如未購因素）可用頓號「、」分隔多個值，備註輸入「退戶」會標示退戶</li>
         <li>從 Google 表單匯出的資料可先整理成 CSV 再匯入</li>
