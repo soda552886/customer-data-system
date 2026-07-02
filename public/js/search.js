@@ -15,6 +15,7 @@ const REPORT_COLUMNS = [
   { group: '基本', key: 'returnVisitDate', label: '回訪日期' },
   { group: '基本', key: 'prevVisitDate', label: '前次來訪日期' },
   { group: '基本', key: 'visitCount', label: '回訪次數' },
+  { group: '基本', key: 'return_visit_total', label: '回訪次數(累計)' },
   { group: '基本', key: 'returnCount', label: '回籠次數' },
   { group: '基本', key: 'customerName', label: '客戶姓名' },
   { group: '基本', key: 'phone', label: '主要電話' },
@@ -50,6 +51,8 @@ const REPORT_COLUMNS = [
   { group: '洽談', key: 'purchasedReason', label: '成交因素' },
   { group: '洽談', key: 'discussion', label: '洽談內容' },
   { group: '洽談', key: 'customerSource', label: '客戶來源' },
+  { group: '洽談', key: 'customerStatus', label: '客戶狀態' },
+  { group: '洽談', key: 'remark', label: '備註' },
   { group: '洽談', key: 'sincerity', label: '客戶誠意度' },
   { group: '洽談', key: 'salesperson1', label: '銷售人員1' },
   { group: '洽談', key: 'salesperson2', label: '銷售人員2' },
@@ -58,7 +61,7 @@ const REPORT_COLUMNS = [
 
 const DEFAULT_COLUMNS = [
   'visit_date', 'site_name', 'visit_type', 'is_deal',
-  'customerName', 'phone', 'region', 'age', 'budget',
+  'customerName', 'phone', 'region', 'age', 'budget', 'visitCount',
   'media1', 'media2', 'sincerity', 'salesperson1', 'discussion',
 ];
 
@@ -137,6 +140,8 @@ function getCellValue(record, key) {
       return record.is_deal ? '是' : '否';
     case 'created_at':
       return record.created_at || '';
+    case 'return_visit_total':
+      return record.return_visit_total || 0;
     default: {
       const val = d[key];
       if (Array.isArray(val)) return val.join('、');
@@ -211,14 +216,17 @@ async function loadSites() {
 function getSearchParams(extraLimit) {
   const params = new URLSearchParams();
   const fields = ['searchYear', 'searchStartDate', 'searchEndDate', 'searchSite',
-    'searchRegion', 'searchVisitType', 'searchDeal', 'searchPhone', 'searchName'];
-  const keys = ['year', 'startDate', 'endDate', 'siteId', 'region', 'visitType', 'isDeal', 'phone', 'name'];
+    'searchRegion', 'searchVisitType', 'searchDeal', 'searchPhone', 'searchName', 'searchStatus'];
+  const keys = ['year', 'startDate', 'endDate', 'siteId', 'region', 'visitType', 'isDeal', 'phone', 'name', 'customerStatus'];
   fields.forEach((id, i) => {
     const val = document.getElementById(id).value.trim();
     if (val) params.set(keys[i], val);
   });
   params.set('page', currentPage);
   params.set('limit', String(extraLimit || 50));
+  if (document.getElementById('excludeNew').checked) params.set('excludeNew', '1');
+  if (document.getElementById('excludeReturn').checked) params.set('excludeReturn', '1');
+  if (document.getElementById('excludeDeal').checked) params.set('excludeDeal', '1');
   return params;
 }
 
@@ -391,8 +399,9 @@ async function exportCSV() {
 
 function clearSearch() {
   ['searchYear', 'searchStartDate', 'searchEndDate',
-    'searchRegion', 'searchVisitType', 'searchDeal', 'searchPhone', 'searchName'
+    'searchRegion', 'searchVisitType', 'searchDeal', 'searchPhone', 'searchName', 'searchStatus'
   ].forEach((id) => { document.getElementById(id).value = ''; });
+  ['excludeNew', 'excludeReturn', 'excludeDeal'].forEach((id) => { document.getElementById(id).checked = false; });
   document.getElementById('searchSite').value = '';
   updateSiteLabel();
   currentPage = 1;
@@ -400,6 +409,11 @@ function clearSearch() {
 
 document.getElementById('searchBtn').addEventListener('click', () => { currentPage = 1; doSearch(); });
 document.getElementById('clearSearchBtn').addEventListener('click', () => { clearSearch(); doSearch(); });
+document.getElementById('dealPresetBtn').addEventListener('click', () => {
+  document.getElementById('searchDeal').value = '1';
+  currentPage = 1;
+  doSearch();
+});
 document.getElementById('exportBtn').addEventListener('click', exportCSV);
 document.getElementById('selectAllCols').addEventListener('click', () => setAllColumns(true));
 document.getElementById('deselectAllCols').addEventListener('click', () => setAllColumns(false));

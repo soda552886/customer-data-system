@@ -71,6 +71,14 @@
           </select>
         </div>
         <div class="form-group">
+          <label for="searchStatus">客戶狀態</label>
+          <select id="searchStatus">
+            <option value="">全部</option>
+            <option value="退戶">退戶</option>
+            <option value="正常">正常</option>
+          </select>
+        </div>
+        <div class="form-group">
           <label for="searchPhone">電話</label>
           <input type="tel" id="searchPhone" placeholder="電話號碼">
         </div>
@@ -79,8 +87,14 @@
           <input type="text" id="searchName" placeholder="客戶姓名">
         </div>
       </div>
+      <div class="exclude-row">
+        <label class="radio-label"><input type="checkbox" id="excludeNew"> 剔除新客</label>
+        <label class="radio-label"><input type="checkbox" id="excludeReturn"> 剔除回訪</label>
+        <label class="radio-label"><input type="checkbox" id="excludeDeal"> 剔除成交</label>
+      </div>
       <div class="form-actions">
         <button type="button" id="searchBtn" class="btn btn-primary">查詢資料</button>
+        <button type="button" id="dealPresetBtn" class="btn btn-secondary">成交表單</button>
         <button type="button" id="clearSearchBtn" class="btn btn-outline">清除條件</button>
       </div>
     </section>

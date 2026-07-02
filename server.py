@@ -149,6 +149,7 @@ LABEL_TO_KEY = {
     '已購/成交因素': 'purchasedReason', '洽談內容': 'discussion',
     '客戶來源': 'customerSource', '客戶誠意度': 'sincerity',
     '銷售人員1': 'salesperson1', '銷售人員2': 'salesperson2',
+    '備註': 'remark', '客戶狀態': 'customerStatus',
 }
 
 ALL_FIELD_KEYS = set(LABEL_TO_KEY.values()) | MULTISELECT_KEYS | {
@@ -167,7 +168,7 @@ def map_header_to_key(header):
 
 TEMPLATE_HEADERS = [
     '案場', '客戶類型', '是否成交', '日期', '客戶姓名', '主要電話', '區域',
-    '年齡', '職業', '總價預算', '媒體1', '媒體2', '洽談內容', '銷售人員1',
+    '年齡', '職業', '總價預算', '媒體1', '媒體2', '洽談內容', '銷售人員1', '備註',
 ]
 
 
@@ -186,6 +187,69 @@ def parse_cell_value(key, val):
         parts = re.split(r'[、;；,，]', s)
         return [p.strip() for p in parts if p.strip()]
     return s
+
+
+def has_existing_customer(site_id, phone):
+    normalized = normalize_phone(phone)
+    if not normalized:
+        return False
+    conn = get_db()
+    rows = conn.execute(
+        'SELECT data FROM customers WHERE site_id = ?',
+        (site_id,),
+    ).fetchall()
+    conn.close()
+    for row in rows:
+        try:
+            d = json.loads(row['data'])
+        except Exception:
+            continue
+        if normalized == normalize_phone(d.get('phone', '')):
+            return True
+    return False
+
+
+def infer_visit_type(system, data):
+    vt = str(system.get('visit_type') or '').strip()
+    has_return_signals = any([
+        data.get('returnVisitDate'),
+        data.get('firstVisitDate'),
+        data.get('prevVisitDate'),
+        data.get('visitCount'),
+    ])
+    if vt not in ('新客', '回訪'):
+        # 首御臨沂與其他案場一致：若有回訪欄位或既有紀錄，判定為回訪
+        if has_return_signals or has_existing_customer(system['site_id'], data.get('phone')):
+            return '回訪'
+        return '新客'
+    if vt == '新客' and has_return_signals:
+        return '回訪'
+    return vt
+
+
+def infer_deal_status(system, data):
+    if int(system.get('is_deal') or 0) == 1:
+        return 1
+    reasons = []
+    for key in ('purchasedReason', 'notPurchasedReason'):
+        val = data.get(key)
+        if isinstance(val, list):
+            reasons.extend(val)
+        elif val:
+            reasons.append(str(val))
+    status = str(data.get('customerStatus') or '')
+    text = ' '.join(reasons + [status])
+    purchased = data.get('purchasedReason')
+    if purchased:
+        if isinstance(purchased, list):
+            purchased_text = ' '.join(str(x) for x in purchased)
+        else:
+            purchased_text = str(purchased)
+        if purchased_text.strip() and '未購' not in purchased_text:
+            return 1
+    if '成交' in text:
+        return 1
+    return 0
 
 
 def resolve_site(site_name, default_site_id=None):
@@ -248,6 +312,8 @@ def row_to_record(row_dict, default_site_id=None):
     if not data.get('phone'):
         return None, '缺少主要電話'
 
+    system['visit_type'] = infer_visit_type(system, data)
+    system['is_deal'] = infer_deal_status(system, data)
     visit_type = system['visit_type']
     if not system['visit_date']:
         system['visit_date'] = (
@@ -257,6 +323,8 @@ def row_to_record(row_dict, default_site_id=None):
 
     system['first_visit_date'] = data.get('firstVisitDate')
     system['return_visit_date'] = data.get('returnVisitDate')
+    if '退戶' in str(data.get('remark') or ''):
+        data['customerStatus'] = '退戶'
 
     return {'system': system, 'data': data}, None
 
@@ -301,7 +369,7 @@ def import_template():
     writer.writerow(TEMPLATE_HEADERS)
     writer.writerow([
         '首學杭州', '新客', '否', '2026-07-01', '王小明', '0912345678', '大安區',
-        '31-40歲', '上班族', '2000萬以下', 'FB', '介紹', '客戶對產品有興趣，需回去討論', '簡婉如',
+        '31-40歲', '上班族', '2000萬以下', 'FB', '介紹', '客戶對產品有興趣，需回去討論', '簡婉如', '',
     ])
     bom = '\ufeff'
     return Response(
@@ -496,6 +564,10 @@ def list_customers():
     region = request.args.get('region', '')
     phone = request.args.get('phone', '')
     name = request.args.get('name', '')
+    exclude_new = request.args.get('excludeNew', '') in ('1', 'true')
+    exclude_return = request.args.get('excludeReturn', '') in ('1', 'true')
+    exclude_deal = request.args.get('excludeDeal', '') in ('1', 'true')
+    status_filter = request.args.get('customerStatus', '').strip()
     page = max(1, int(request.args.get('page', 1)))
     limit = min(200, max(1, int(request.args.get('limit', 50))))
 
@@ -524,9 +596,31 @@ def list_customers():
     conn = get_db()
     all_rows = conn.execute(sql, params).fetchall()
 
+    return_count_map = {}
+    for row in all_rows:
+        if row['visit_type'] != '回訪':
+            continue
+        data = json.loads(row['data'])
+        key = (row['site_id'], normalize_phone(data.get('phone')))
+        if key[1]:
+            return_count_map[key] = return_count_map.get(key, 0) + 1
+
     filtered = []
     for row in all_rows:
         data = json.loads(row['data'])
+        if exclude_new and row['visit_type'] == '新客':
+            continue
+        if exclude_return and row['visit_type'] == '回訪':
+            continue
+        if exclude_deal and int(row['is_deal']) == 1:
+            continue
+        if status_filter:
+            row_status = str(data.get('customerStatus', '')).strip()
+            if status_filter == '正常':
+                if row_status == '退戶':
+                    continue
+            elif status_filter != row_status:
+                continue
         if region and region not in str(data.get('region', '')):
             continue
         if phone and normalize_phone(phone) not in normalize_phone(data.get('phone', '')):
@@ -534,6 +628,10 @@ def list_customers():
         if name and name not in str(data.get('customerName', '')):
             continue
         record = dict(row)
+        phone_key = normalize_phone(data.get('phone'))
+        record['return_visit_total'] = return_count_map.get((row['site_id'], phone_key), 0)
+        if row['visit_type'] == '回訪' and not data.get('visitCount') and record['return_visit_total'] > 0:
+            data['visitCount'] = f"第{record['return_visit_total']}次"
         record['data'] = data
         filtered.append(record)
 

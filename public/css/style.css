@@ -425,6 +425,7 @@ body {
 }
 .column-picker-header h2 { margin-bottom: 0; border: none; padding: 0; }
 .column-picker-actions { display: flex; gap: 0.5rem; }
+.exclude-row { display: flex; gap: 1.25rem; flex-wrap: wrap; margin-top: 0.75rem; }
 
 .column-picker {
   display: grid;
