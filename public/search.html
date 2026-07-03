@@ -138,8 +138,17 @@
     <section class="card danger-zone">
       <h2>資料管理</h2>
       <p class="hint danger-hint">以下操作無法復原，請謹慎使用。建議先匯出 CSV 備份。</p>
-      <div class="form-actions">
-        <button type="button" id="deleteAllBtn" class="btn btn-danger">清空全部客戶資料</button>
+      <div class="delete-site-row">
+        <div class="form-group">
+          <label for="deleteSiteSelect">選擇案場</label>
+          <select id="deleteSiteSelect" class="site-select">
+            <option value="">全部案場</option>
+          </select>
+        </div>
+        <div class="form-actions">
+          <button type="button" id="deleteSiteDataBtn" class="btn btn-danger">清空選定案場資料</button>
+          <button type="button" id="deleteAllBtn" class="btn btn-outline btn-danger-outline">清空全部案場資料</button>
+        </div>
       </div>
     </section>
   </main>

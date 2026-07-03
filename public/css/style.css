@@ -402,7 +402,28 @@ body {
 }
 .btn-danger:hover { filter: brightness(0.92); }
 
+.btn-danger-outline {
+  color: var(--danger);
+  border: 1px solid var(--danger);
+  background: #fff;
+}
+.btn-danger-outline:hover { background: #fdecea; }
+
+.delete-site-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.delete-site-row .form-group { flex: 1; min-width: 220px; margin-bottom: 0; }
+
 .action-btns { display: flex; gap: 0.35rem; flex-wrap: wrap; }
+.btn-sm.btn-danger-sm-solid {
+  color: #fff;
+  background: var(--danger);
+  border-color: var(--danger);
+}
+.btn-sm.btn-danger-sm-solid:hover { filter: brightness(0.92); }
 
 .modal-header {
   display: flex;

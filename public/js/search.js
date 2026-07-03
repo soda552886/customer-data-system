@@ -204,11 +204,15 @@ async function loadSites() {
   const res = await fetch('/api/sites');
   sites = await res.json();
   const sel = document.getElementById('searchSite');
+  const deleteSel = document.getElementById('deleteSiteSelect');
   sites.forEach((s) => {
     const opt = document.createElement('option');
     opt.value = s.id;
     opt.textContent = s.name;
     sel.appendChild(opt);
+
+    const delOpt = opt.cloneNode(true);
+    deleteSel.appendChild(delOpt);
   });
   sel.addEventListener('change', () => {
     updateSiteLabel();
@@ -266,6 +270,7 @@ function renderResults(data) {
     return `<tr>${cells}<td class="action-btns">
       <button class="btn-sm" onclick="showDetail(${r.id})">詳情</button>
       <button class="btn-sm" onclick="openEdit(${r.id})">編輯</button>
+      <button class="btn-sm btn-danger-sm-solid" onclick="deleteRecord(${r.id})">刪除</button>
     </td></tr>`;
   }).join('');
 
@@ -594,17 +599,17 @@ async function deleteRecord(id) {
     alert('刪除失敗，請稍後再試');
   }
 }
+window.deleteRecord = deleteRecord;
 
-async function deleteAllCustomers() {
+async function requestDeleteCustomers(siteId) {
   const typed = prompt(
-    '此操作將刪除全部客戶資料且無法復原。\n請輸入 DELETE ALL 以確認：',
+    '此操作將刪除客戶資料且無法復原。\n請輸入 DELETE ALL 以確認：',
   );
   if (typed !== 'DELETE ALL') {
     if (typed !== null) alert('確認碼不正確，已取消');
     return;
   }
 
-  const siteId = document.getElementById('searchSite').value;
   const siteName = siteId
     ? (sites.find((s) => s.id === siteId)?.name || '選定案場')
     : '全部案場';
@@ -623,9 +628,24 @@ async function deleteAllCustomers() {
     }
     alert(`已刪除 ${json.deleted} 筆資料`);
     doSearch();
+    return true;
   } catch {
     alert('清空失敗，請稍後再試');
+    return false;
   }
+}
+
+async function deleteSiteCustomers() {
+  const siteId = document.getElementById('deleteSiteSelect').value;
+  if (!siteId) {
+    alert('請先選擇要清空的案場');
+    return;
+  }
+  await requestDeleteCustomers(siteId);
+}
+
+async function deleteAllCustomers() {
+  await requestDeleteCustomers('');
 }
 
 async function loadFieldConfig() {
@@ -712,6 +732,7 @@ document.getElementById('editModal').addEventListener('click', (e) => {
   if (e.target.id === 'editModal') document.getElementById('editModal').classList.add('hidden');
 });
 document.getElementById('saveEditBtn').addEventListener('click', saveEdit);
+document.getElementById('deleteSiteDataBtn').addEventListener('click', deleteSiteCustomers);
 document.getElementById('deleteAllBtn').addEventListener('click', deleteAllCustomers);
 document.getElementById('editSite').addEventListener('change', () => {
   const data = editingRecord ? { ...editingRecord.data, ...collectEditFormData() } : collectEditFormData();

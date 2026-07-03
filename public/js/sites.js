@@ -21,17 +21,21 @@ async function loadSitesList() {
 
     tbody.innerHTML = sites.map((s) => {
       const count = s.customer_count || 0;
-      const canDelete = count === 0;
+      const canDeleteSite = count === 0;
       const created = s.created_at ? s.created_at.slice(0, 10) : '-';
+      const clearBtn = count > 0
+        ? `<button class="btn-sm btn-danger-sm" onclick="clearSiteData('${s.id}', '${escapeAttr(s.name)}', ${count})">清空資料</button>`
+        : '';
+      const deleteSiteBtn = canDeleteSite
+        ? `<button class="btn-sm btn-danger-sm" onclick="deleteSite('${s.id}', '${escapeAttr(s.name)}')">刪除案場</button>`
+        : '';
+      const actions = [clearBtn, deleteSiteBtn].filter(Boolean).join(' ') || '<span class="hint">—</span>';
       return `<tr>
         <td><strong>${escapeHtml(s.name)}</strong></td>
         <td>${GROUP_LABELS[s.group] || s.group}</td>
         <td>${count} 筆</td>
         <td>${created}</td>
-        <td>${canDelete
-          ? `<button class="btn-sm btn-danger-sm" onclick="deleteSite('${s.id}', '${escapeAttr(s.name)}')">刪除</button>`
-          : '<span class="hint">有資料不可刪</span>'
-        }</td>
+        <td class="action-btns">${actions}</td>
       </tr>`;
     }).join('');
   } catch {
@@ -62,6 +66,33 @@ window.deleteSite = async function (id, name) {
     }
   } catch {
     showToast('刪除失敗', 'error');
+  }
+};
+
+window.clearSiteData = async function (id, name, count) {
+  if (!confirm(`確定要清空案場「${name}」的全部 ${count} 筆客戶資料？\n案場設定會保留，此操作無法復原。`)) return;
+
+  const typed = prompt('請輸入 DELETE ALL 以確認：');
+  if (typed !== 'DELETE ALL') {
+    if (typed !== null) showToast('確認碼不正確，已取消', 'error');
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/customers/all', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirm: 'DELETE ALL', siteId: id }),
+    });
+    const json = await res.json();
+    if (res.ok) {
+      showToast(`已清空 ${name}：刪除 ${json.deleted} 筆`);
+      loadSitesList();
+    } else {
+      showToast(json.error || '清空失敗', 'error');
+    }
+  } catch {
+    showToast('清空失敗', 'error');
   }
 };
 
