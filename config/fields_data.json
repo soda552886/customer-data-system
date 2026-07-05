@@ -1118,6 +1118,31 @@
           "label": "銷售人員2",
           "type": "select",
           "dynamicStaff": true
+        },
+        {
+          "key": "customerStatus",
+          "label": "客戶狀態",
+          "type": "select",
+          "options": [
+            "正常",
+            "退戶"
+          ]
+        },
+        {
+          "key": "cancelDate",
+          "label": "退戶日期",
+          "type": "date"
+        },
+        {
+          "key": "cancelReason",
+          "label": "退戶原因",
+          "type": "textarea",
+          "placeholder": "請說明退戶原因"
+        },
+        {
+          "key": "remark",
+          "label": "備註",
+          "type": "textarea"
         }
       ]
     }

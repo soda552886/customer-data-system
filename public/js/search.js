@@ -56,6 +56,8 @@ const REPORT_COLUMNS = [
   { group: '洽談', key: 'discussion', label: '洽談內容' },
   { group: '洽談', key: 'customerSource', label: '客戶來源' },
   { group: '洽談', key: 'customerStatus', label: '客戶狀態' },
+  { group: '洽談', key: 'cancelDate', label: '退戶日期' },
+  { group: '洽談', key: 'cancelReason', label: '退戶原因' },
   { group: '洽談', key: 'remark', label: '備註' },
   { group: '洽談', key: 'sincerity', label: '客戶誠意度' },
   { group: '洽談', key: 'salesperson1', label: '銷售人員1' },

@@ -228,6 +228,7 @@ LABEL_TO_KEY = {
     '洽談內容': 'discussion', '客戶來源': 'customerSource', '客戶誠意度': 'sincerity',
     '銷售人員1': 'salesperson1', '銷售人員2': 'salesperson2',
     '備註': 'remark', '客戶狀態': 'customerStatus',
+    '退戶日期': 'cancelDate', '退戶原因': 'cancelReason',
     '時間戳記': '_timestamp',
     '第一次及前次來訪日期': 'prevVisitDate',
     '回訪次數(不含首次參觀)': 'visitCount',
@@ -336,53 +337,81 @@ def prepare_customer_system(site_id, data, visit_type=None, is_deal=None, exclud
     if is_deal is None:
         system['is_deal'] = infer_deal_status(system, data)
     else:
-        system['is_deal'] = infer_deal_status(
-            {'is_deal': 1 if is_deal else 0}, data,
-        )
+        system['is_deal'] = infer_deal_status(system, data, explicit=bool(is_deal))
 
     vt = system['visit_type']
     system['visit_date'] = (
         data.get('returnVisitDate') if vt == '回訪' else data.get('visitDate')
     ) or datetime.now().strftime('%Y-%m-%d')
 
-    if '退戶' in str(data.get('remark') or ''):
-        data['customerStatus'] = '退戶'
+    apply_customer_status(data)
 
     return system, None
 
 
-DEAL_KEYWORDS = ('成交', '已購', '斡旋', '小訂', '足訂', '足定', '已下訂', '下訂', '簽約')
+def apply_customer_status(data):
+    if data.get('cancelDate') or data.get('cancelReason'):
+        data['customerStatus'] = '退戶'
+    elif data.get('customerStatus') == '退戶':
+        pass
+    elif '退戶' in str(data.get('remark') or ''):
+        data['customerStatus'] = '退戶'
+    elif not data.get('customerStatus'):
+        data['customerStatus'] = '正常'
 
 
-def collect_text_values(data, keys):
-    parts = []
-    for key in keys:
-        val = data.get(key)
-        if isinstance(val, list):
-            parts.extend(str(x) for x in val if x)
-        elif val:
-            parts.append(str(val))
-    return ' '.join(parts)
+DEAL_KEYWORDS_STRICT = ('斡旋', '小訂', '足訂', '足定', '已下訂', '簽約')
+DEAL_MARKERS = ('成交', '已購')
+NOT_DEAL_MARKERS = ('未購', '未成交')
 
 
-def infer_deal_status(system, data):
+def field_text(data, key):
+    val = data.get(key)
+    if isinstance(val, list):
+        return ' '.join(str(x) for x in val if x)
+    return str(val or '').strip()
+
+
+def infer_deal_status(system, data, explicit=None):
+    if explicit is not None:
+        return 1 if explicit else 0
+
     if int(system.get('is_deal') or 0) == 1:
         return 1
 
-    combined = collect_text_values(data, (
-        'purchasedReason', 'notPurchasedReason', 'sincerity', 'discussion', 'remark',
-    ))
-    for kw in DEAL_KEYWORDS:
-        if kw in combined:
+    purchased_text = field_text(data, 'purchasedReason')
+    not_purchased_text = field_text(data, 'notPurchasedReason')
+
+    if any(marker in not_purchased_text for marker in DEAL_MARKERS):
+        return 1
+
+    if purchased_text:
+        if any(marker in purchased_text for marker in NOT_DEAL_MARKERS):
+            if not any(marker in purchased_text for marker in DEAL_MARKERS):
+                return 0
+        elif not any(marker in purchased_text for marker in NOT_DEAL_MARKERS):
             return 1
 
-    purchased = data.get('purchasedReason')
-    if purchased:
-        if isinstance(purchased, list):
-            purchased_text = ' '.join(str(x) for x in purchased)
-        else:
-            purchased_text = str(purchased)
-        if purchased_text.strip() and '未購' not in purchased_text and '未成交' not in purchased_text:
+    if not_purchased_text and not any(marker in not_purchased_text for marker in DEAL_MARKERS):
+        return 0
+
+    sincerity = field_text(data, 'sincerity')
+    if sincerity and not any(marker in sincerity for marker in NOT_DEAL_MARKERS):
+        if any(marker in sincerity for marker in DEAL_MARKERS + DEAL_KEYWORDS_STRICT):
+            return 1
+
+    for key in ('remark',):
+        text = field_text(data, key)
+        if not text:
+            continue
+        if any(marker in text for marker in DEAL_MARKERS):
+            return 1
+        if any(kw in text for kw in DEAL_KEYWORDS_STRICT):
+            return 1
+
+    discussion = field_text(data, 'discussion')
+    if discussion:
+        if any(kw in discussion for kw in DEAL_KEYWORDS_STRICT):
             return 1
 
     return 0
@@ -473,8 +502,7 @@ def row_to_record(row_dict, default_site_id=None, default_visit_type=None):
 
     system['first_visit_date'] = data.get('firstVisitDate')
     system['return_visit_date'] = data.get('returnVisitDate')
-    if '退戶' in str(data.get('remark') or ''):
-        data['customerStatus'] = '退戶'
+    apply_customer_status(data)
 
     system.pop('_timestamp', None)
     return {'system': system, 'data': data}, None
