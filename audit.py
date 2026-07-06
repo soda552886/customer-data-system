@@ -14,6 +14,7 @@ ACTION_LABELS = {
     'report_column_order_update': '更新報表欄位順序',
     'user_create': '新增人員',
     'user_update': '更新人員',
+    'user_delete': '刪除人員',
     'site_create': '新增案場',
     'site_delete': '刪除案場',
 }

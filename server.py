@@ -809,6 +809,41 @@ def update_user(user_id):
     return jsonify({'success': True, 'user': updated})
 
 
+@app.route('/api/users/<int:user_id>', methods=['DELETE'])
+def delete_user(user_id):
+    conn, actor, err = auth_guard('manage_users')
+    if err:
+        return err
+    row = conn.execute('SELECT * FROM users WHERE id = ?', (user_id,)).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({'error': '找不到使用者'}), 404
+    if actor['id'] == user_id:
+        conn.close()
+        return jsonify({'error': '無法刪除自己的帳號'}), 400
+
+    if row['role'] == 'executive' and row['is_active']:
+        exec_count = conn.execute(
+            "SELECT COUNT(*) FROM users WHERE role = 'executive' AND is_active = 1",
+        ).fetchone()[0]
+        if exec_count <= 1:
+            conn.close()
+            return jsonify({'error': '系統至少需保留一位啟用中的最高主管'}), 400
+
+    display_name = row['display_name']
+    username = row['username']
+    conn.execute('DELETE FROM users WHERE id = ?', (user_id,))
+    log_operation(
+        conn, actor, 'user_delete',
+        f'刪除人員 {display_name}（{username}）',
+        entity_type='user', entity_id=user_id,
+        detail={'role': row['role']},
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True})
+
+
 @app.route('/')
 def index():
     return send_from_directory('public', 'index.html')

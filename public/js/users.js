@@ -62,21 +62,46 @@ async function loadUsers() {
   }
   users = await res.json();
   const tbody = document.getElementById('usersBody');
+  const currentUserId = window.currentUser?.id;
   if (users.length === 0) {
     tbody.innerHTML = '<tr><td colspan="6" class="empty-row">尚無人員</td></tr>';
     return;
   }
-  tbody.innerHTML = users.map((u) => `
+  tbody.innerHTML = users.map((u) => {
+    const isSelf = currentUserId === u.id;
+    const deleteBtn = isSelf
+      ? ''
+      : `<button class="btn-sm btn-danger-sm-solid" onclick="deleteUser(${u.id}, '${escapeAttr(u.displayName)}')">刪除</button>`;
+    return `
     <tr>
       <td>${escapeHtml(u.username)}</td>
       <td>${escapeHtml(u.displayName)}</td>
       <td>${escapeHtml(u.roleLabel)}</td>
       <td>${escapeHtml(siteNames(u.siteIds))}</td>
       <td>${u.isActive ? '啟用' : '<span class="hint">停用</span>'}</td>
-      <td><button class="btn-sm" onclick="openEditUser(${u.id})">編輯</button></td>
-    </tr>
-  `).join('');
+      <td class="action-btns">
+        <button class="btn-sm" onclick="openEditUser(${u.id})">編輯</button>
+        ${deleteBtn}
+      </td>
+    </tr>`;
+  }).join('');
 }
+
+function escapeAttr(str) {
+  return String(str).replace(/'/g, "\\'").replace(/"/g, '&quot;');
+}
+
+window.deleteUser = async function (id, name) {
+  if (!confirm(`確定要永久刪除人員「${name}」？\n此操作無法復原。`)) return;
+  const res = await fetch(`/api/users/${id}`, { method: 'DELETE' });
+  const json = await res.json();
+  if (!res.ok) {
+    showToast(json.error || '刪除失敗', 'error');
+    return;
+  }
+  showToast('人員已刪除');
+  loadUsers();
+};
 
 window.openEditUser = function (id) {
   const user = users.find((u) => u.id === id);
@@ -151,3 +176,10 @@ document.getElementById('cancelEditUser').addEventListener('click', () => {
 });
 
 loadMeta().then(loadUsers);
+
+async function bootUsers() {
+  if (window.navReady) await window.navReady;
+  await loadMeta();
+  await loadUsers();
+}
+bootUsers();
