@@ -1,7 +1,7 @@
 import copy
 import json
 import sqlite3
-from typing import Any
+from typing import Any, Optional
 
 SALES_STAFF_FIELD_KEY = '__salesStaff__'
 
