@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>人員管理 - 得意佳</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <header class="header">
+    <div class="header-inner">
+      <h1><span class="brand">得意佳</span>客戶資料管理系統</h1>
+      <nav id="mainNav"></nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="card">
+      <h2>新增人員</h2>
+      <form id="addUserForm" class="form-grid">
+        <div class="form-group">
+          <label for="newUsername">帳號 <span class="required">*</span></label>
+          <input type="text" id="newUsername" required maxlength="40">
+        </div>
+        <div class="form-group">
+          <label for="newPassword">密碼 <span class="required">*</span></label>
+          <input type="password" id="newPassword" required minlength="6">
+        </div>
+        <div class="form-group">
+          <label for="newDisplayName">姓名 <span class="required">*</span></label>
+          <input type="text" id="newDisplayName" required maxlength="40">
+        </div>
+        <div class="form-group">
+          <label for="newRole">職務 <span class="required">*</span></label>
+          <select id="newRole" required></select>
+        </div>
+        <div class="form-group full-width">
+          <label>負責案場（主管、現場人員必填）</label>
+          <div id="newSiteChecks" class="checkbox-grid"></div>
+        </div>
+        <div class="form-group form-group-btn">
+          <label>&nbsp;</label>
+          <button type="submit" class="btn btn-primary">新增人員</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2>人員列表</h2>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>帳號</th>
+              <th>姓名</th>
+              <th>職務</th>
+              <th>負責案場</th>
+              <th>狀態</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="usersBody">
+            <tr><td colspan="6" class="empty-row">載入中…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <div id="editUserModal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>編輯人員</h3>
+        <button type="button" class="modal-close" id="closeEditUser">&times;</button>
+      </div>
+      <div class="modal-body">
+        <form id="editUserForm" class="form-grid">
+          <input type="hidden" id="editUserId">
+          <div class="form-group">
+            <label>帳號</label>
+            <input type="text" id="editUsername" disabled>
+          </div>
+          <div class="form-group">
+            <label for="editDisplayName">姓名</label>
+            <input type="text" id="editDisplayName" required>
+          </div>
+          <div class="form-group">
+            <label for="editRole">職務</label>
+            <select id="editRole" required></select>
+          </div>
+          <div class="form-group">
+            <label for="editPassword">新密碼（留空不變）</label>
+            <input type="password" id="editPassword" minlength="6">
+          </div>
+          <div class="form-group">
+            <label for="editIsActive">狀態</label>
+            <select id="editIsActive">
+              <option value="1">啟用</option>
+              <option value="0">停用</option>
+            </select>
+          </div>
+          <div class="form-group full-width">
+            <label>負責案場</label>
+            <div id="editSiteChecks" class="checkbox-grid"></div>
+          </div>
+          <div class="form-group full-width form-actions">
+            <button type="submit" class="btn btn-primary">儲存</button>
+            <button type="button" class="btn btn-outline" id="cancelEditUser">取消</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="/js/nav.js"></script>
+  <script src="/js/users.js"></script>
+</body>
+</html>

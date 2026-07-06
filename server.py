@@ -7,8 +7,14 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
-from flask import Flask, jsonify, request, send_from_directory, Response
+from flask import Flask, jsonify, request, send_from_directory, Response, session, redirect
 
+from auth import (
+    PROTECTED_PAGES, ROLES, get_allowed_site_ids, get_current_user,
+    get_user_by_id, get_user_by_username, hash_password, init_auth_tables, is_public_api,
+    save_user_sites, seed_initial_admin, user_can_access_site, user_has_permission,
+    verify_password,
+)
 from config.sites import SITES as DEFAULT_SITES
 
 BASE_DIR = Path(__file__).parent
@@ -20,6 +26,7 @@ FIELD_SECTIONS = _field_data['sections']
 SALES_STAFF = _field_data['salesStaff']
 
 app = Flask(__name__, static_folder='public', static_url_path='')
+app.secret_key = os.environ.get('SECRET_KEY', 'change-me-in-production-deyijia-2026')
 
 DATA_DIR = Path(os.environ.get('DATA_DIR', str(BASE_DIR / 'data')))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -58,6 +65,7 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_customers_visit_type ON customers(visit_type);
         CREATE INDEX IF NOT EXISTS idx_customers_visit_date ON customers(visit_date);
     ''')
+    init_auth_tables(conn)
     conn.commit()
 
     count = conn.execute('SELECT COUNT(*) FROM sites').fetchone()[0]
@@ -68,6 +76,7 @@ def init_db():
                 (s['id'], s['name'], s.get('group', 'residential')),
             )
         conn.commit()
+    seed_initial_admin(conn)
     conn.close()
 
 
@@ -546,6 +555,215 @@ def insert_customer_record(system, data):
     return new_id
 
 
+def auth_guard(permission=None):
+    conn = get_db()
+    user = get_current_user(conn)
+    if not user:
+        conn.close()
+        return None, None, jsonify({'error': '請先登入', 'code': 'AUTH_REQUIRED'}), 401
+    if permission and not user_has_permission(user, permission):
+        conn.close()
+        return None, None, jsonify({'error': '權限不足', 'code': 'FORBIDDEN'}), 403
+    return conn, user, None
+
+
+def ensure_site_access(user, site_id):
+    if site_id and not user_can_access_site(user, site_id):
+        return jsonify({'error': '無權存取此案場', 'code': 'FORBIDDEN'}), 403
+    return None
+
+
+@app.before_request
+def enforce_auth():
+    path = request.path
+    if path.startswith('/css/') or path.startswith('/js/'):
+        return None
+    if path in ('/login.html', '/favicon.ico'):
+        return None
+    if path == '/':
+        return None
+
+    if path in PROTECTED_PAGES:
+        conn = get_db()
+        user = get_current_user(conn)
+        conn.close()
+        if not user:
+            return redirect(f'/login.html?next={path}')
+        page_perms = {
+            '/search.html': 'view_customers',
+            '/import.html': 'import_customers',
+            '/sites.html': 'manage_sites',
+            '/users.html': 'manage_users',
+        }
+        need = page_perms.get(path)
+        if need and not user_has_permission(user, need):
+            return redirect('/')
+        return None
+
+    if path.startswith('/api/'):
+        if is_public_api(path, request.method):
+            return None
+        conn = get_db()
+        user = get_current_user(conn)
+        conn.close()
+        if not user:
+            return jsonify({'error': '請先登入', 'code': 'AUTH_REQUIRED'}), 401
+    return None
+
+
+@app.route('/login.html')
+def login_page():
+    return send_from_directory('public', 'login.html')
+
+
+@app.route('/users.html')
+def users_page():
+    return send_from_directory('public', 'users.html')
+
+
+@app.route('/api/auth/login', methods=['POST'])
+def auth_login():
+    body = request.get_json() or {}
+    username = (body.get('username') or '').strip()
+    password = body.get('password') or ''
+    if not username or not password:
+        return jsonify({'error': '請輸入帳號與密碼'}), 400
+
+    conn = get_db()
+    row = conn.execute(
+        'SELECT * FROM users WHERE username = ?', (username,),
+    ).fetchone()
+    if not row or not row['is_active']:
+        conn.close()
+        return jsonify({'error': '帳號或密碼錯誤'}), 401
+    if not verify_password(row['password_hash'], password):
+        conn.close()
+        return jsonify({'error': '帳號或密碼錯誤'}), 401
+
+    session['user_id'] = row['id']
+    user = get_user_by_username(conn, username)
+    conn.close()
+    return jsonify({'success': True, 'user': user})
+
+
+@app.route('/api/auth/logout', methods=['POST'])
+def auth_logout():
+    session.clear()
+    return jsonify({'success': True})
+
+
+@app.route('/api/auth/me')
+def auth_me():
+    conn = get_db()
+    user = get_current_user(conn)
+    conn.close()
+    if not user:
+        return jsonify({'authenticated': False})
+    return jsonify({'authenticated': True, 'user': user})
+
+
+@app.route('/api/auth/roles')
+def auth_roles():
+    conn, user, err = auth_guard('manage_users')
+    if err:
+        return err
+    conn.close()
+    return jsonify({
+        'roles': [{'id': k, 'label': v} for k, v in ROLES.items()],
+    })
+
+
+@app.route('/api/users')
+def list_users():
+    conn, user, err = auth_guard('manage_users')
+    if err:
+        return err
+    rows = conn.execute('SELECT * FROM users ORDER BY username').fetchall()
+    users = [get_user_by_id(conn, r['id']) for r in rows]
+    conn.close()
+    return jsonify(users)
+
+
+@app.route('/api/users', methods=['POST'])
+def create_user():
+    conn, actor, err = auth_guard('manage_users')
+    if err:
+        return err
+    body = request.get_json() or {}
+    username = (body.get('username') or '').strip()
+    password = body.get('password') or ''
+    display_name = (body.get('displayName') or '').strip()
+    role = (body.get('role') or '').strip()
+    site_ids = body.get('siteIds') or []
+
+    if not username or not password or not display_name or role not in ROLES:
+        conn.close()
+        return jsonify({'error': '請填寫完整資料並選擇有效職務'}), 400
+    if role in ('supervisor', 'field_staff') and not site_ids:
+        conn.close()
+        return jsonify({'error': '主管與現場人員至少需指派一個案場'}), 400
+
+    try:
+        cur = conn.execute(
+            'INSERT INTO users (username, password_hash, display_name, role) VALUES (?, ?, ?, ?)',
+            (username, hash_password(password), display_name, role),
+        )
+        user_id = cur.lastrowid
+        save_user_sites(conn, user_id, site_ids)
+        conn.commit()
+    except sqlite3.IntegrityError:
+        conn.close()
+        return jsonify({'error': '帳號已存在'}), 409
+    new_user = get_user_by_username(conn, username)
+    conn.close()
+    return jsonify({'success': True, 'user': new_user}), 201
+
+
+@app.route('/api/users/<int:user_id>', methods=['PUT'])
+def update_user(user_id):
+    conn, actor, err = auth_guard('manage_users')
+    if err:
+        return err
+    row = conn.execute('SELECT * FROM users WHERE id = ?', (user_id,)).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({'error': '找不到使用者'}), 404
+
+    body = request.get_json() or {}
+    display_name = (body.get('displayName') or row['display_name']).strip()
+    role = (body.get('role') or row['role']).strip()
+    is_active = body.get('isActive')
+    password = body.get('password') or ''
+    site_ids = body.get('siteIds')
+
+    if role not in ROLES:
+        conn.close()
+        return jsonify({'error': '無效的職務'}), 400
+
+    params = [display_name, role]
+    sql = 'UPDATE users SET display_name = ?, role = ?, updated_at = datetime(\'now\', \'localtime\')'
+    if is_active is not None:
+        sql += ', is_active = ?'
+        params.append(1 if is_active else 0)
+    if password:
+        sql += ', password_hash = ?'
+        params.append(hash_password(password))
+    sql += ' WHERE id = ?'
+    params.append(user_id)
+    conn.execute(sql, params)
+
+    if site_ids is not None:
+        if role in ('supervisor', 'field_staff') and not site_ids:
+            conn.close()
+            return jsonify({'error': '主管與現場人員至少需指派一個案場'}), 400
+        save_user_sites(conn, user_id, site_ids)
+
+    conn.commit()
+    updated = get_user_by_username(conn, row['username'])
+    conn.close()
+    return jsonify({'success': True, 'user': updated})
+
+
 @app.route('/')
 def index():
     return send_from_directory('public', 'index.html')
@@ -563,6 +781,9 @@ def import_page():
 
 @app.route('/api/import/template')
 def import_template():
+    _, user, err = auth_guard('import_customers')
+    if err:
+        return err
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(TEMPLATE_HEADERS)
@@ -580,6 +801,9 @@ def import_template():
 
 @app.route('/api/customers/import', methods=['POST'])
 def import_customers():
+    conn, user, err = auth_guard('import_customers')
+    if err:
+        return err
     default_site_id = request.form.get('defaultSiteId', '').strip() or None
 
     if 'file' not in request.files:
@@ -592,6 +816,12 @@ def import_customers():
     inferred_site_id, inferred_visit_type = infer_from_filename(file.filename)
     if not default_site_id and inferred_site_id:
         default_site_id = inferred_site_id
+
+    if default_site_id:
+        denied = ensure_site_access(user, default_site_id)
+        if denied:
+            conn.close()
+            return denied
 
     try:
         raw = file.read()
@@ -618,6 +848,10 @@ def import_customers():
             if err:
                 errors.append({'row': i, 'message': err})
                 continue
+            denied = ensure_site_access(user, record['system']['site_id'])
+            if denied:
+                errors.append({'row': i, 'message': '無權匯入此案場資料'})
+                continue
             try:
                 insert_customer_record(record['system'], record['data'])
                 imported += 1
@@ -633,18 +867,35 @@ def import_customers():
             'inferredVisitType': inferred_visit_type,
         })
     except csv.Error as e:
+        conn.close()
         return jsonify({'error': f'CSV 格式錯誤：{e}'}), 400
     except Exception as e:
+        conn.close()
         return jsonify({'error': f'匯入失敗：{e}'}), 500
+    finally:
+        conn.close()
 
 
 @app.route('/api/sites')
 def api_sites():
-    return jsonify(load_sites())
+    conn = get_db()
+    user = get_current_user(conn)
+    sites = load_sites()
+    if user:
+        if not user_has_permission(user, 'manage_users'):
+            allowed = get_allowed_site_ids(user)
+            if allowed is not None:
+                allowed_set = set(allowed)
+                sites = [s for s in sites if s['id'] in allowed_set]
+    conn.close()
+    return jsonify(sites)
 
 
 @app.route('/api/sites', methods=['POST'])
 def create_site():
+    conn, user, err = auth_guard('manage_sites')
+    if err:
+        return err
     body = request.get_json() or {}
     name = (body.get('name') or '').strip()
     group = (body.get('group') or 'residential').strip()
@@ -654,7 +905,6 @@ def create_site():
         group = 'residential'
 
     site_id = make_site_id(name)
-    conn = get_db()
     try:
         conn.execute(
             'INSERT INTO sites (id, name, group_type) VALUES (?, ?, ?)',
@@ -671,7 +921,9 @@ def create_site():
 
 @app.route('/api/sites/<site_id>', methods=['DELETE'])
 def delete_site(site_id):
-    conn = get_db()
+    conn, user, err = auth_guard('manage_sites')
+    if err:
+        return err
     row = conn.execute('SELECT id, name FROM sites WHERE id = ?', (site_id,)).fetchone()
     if not row:
         conn.close()
@@ -748,6 +1000,10 @@ def create_customer():
 
 @app.route('/api/customers')
 def list_customers():
+    conn, user, err = auth_guard('view_customers')
+    if err:
+        return err
+
     year = request.args.get('year', '')
     start_date = request.args.get('startDate', '')
     end_date = request.args.get('endDate', '')
@@ -764,6 +1020,13 @@ def list_customers():
     page = max(1, int(request.args.get('page', 1)))
     limit = min(200, max(1, int(request.args.get('limit', 50))))
 
+    allowed_sites = get_allowed_site_ids(user)
+    if site_id:
+        denied = ensure_site_access(user, site_id)
+        if denied:
+            conn.close()
+            return denied
+
     sql = 'SELECT * FROM customers WHERE 1=1'
     params = []
 
@@ -779,6 +1042,13 @@ def list_customers():
     if site_id:
         sql += ' AND site_id = ?'
         params.append(site_id)
+    elif allowed_sites is not None:
+        if not allowed_sites:
+            conn.close()
+            return jsonify({'total': 0, 'page': page, 'limit': limit, 'records': []})
+        placeholders = ','.join('?' * len(allowed_sites))
+        sql += f' AND site_id IN ({placeholders})'
+        params.extend(allowed_sites)
     if visit_type:
         sql += ' AND visit_type = ?'
         params.append(visit_type)
@@ -786,7 +1056,6 @@ def list_customers():
         sql += ' AND is_deal = ?'
         params.append(1 if is_deal in ('true', '1') else 0)
 
-    conn = get_db()
     all_rows = conn.execute(sql, params).fetchall()
 
     return_count_map = {}
@@ -838,47 +1107,79 @@ def list_customers():
 
 @app.route('/api/customers/<int:record_id>')
 def get_customer(record_id):
-    conn = get_db()
+    conn, user, err = auth_guard('view_customers')
+    if err:
+        return err
     row = conn.execute('SELECT * FROM customers WHERE id = ?', (record_id,)).fetchone()
-    conn.close()
     if not row:
+        conn.close()
         return jsonify({'error': '找不到資料'}), 404
+    denied = ensure_site_access(user, row['site_id'])
+    if denied:
+        conn.close()
+        return denied
     record = dict(row)
     record['data'] = json.loads(record['data'])
+    conn.close()
     return jsonify(record)
 
 
 @app.route('/api/customers/<int:record_id>', methods=['PUT'])
 def update_customer(record_id):
+    conn, user, err = auth_guard('edit_customers')
+    if err:
+        return err
     body = request.get_json() or {}
     data = body.get('data')
     if not data:
+        conn.close()
         return jsonify({'error': '缺少資料內容'}), 400
 
-    conn = get_db()
     row = conn.execute('SELECT * FROM customers WHERE id = ?', (record_id,)).fetchone()
-    conn.close()
     if not row:
+        conn.close()
         return jsonify({'error': '找不到資料'}), 404
 
     site_id = body.get('siteId') or row['site_id']
+    denied = ensure_site_access(user, row['site_id'])
+    if denied:
+        conn.close()
+        return denied
+    denied = ensure_site_access(user, site_id)
+    if denied:
+        conn.close()
+        return denied
+
     visit_type = body.get('visitType') or row['visit_type']
     is_deal = body.get('isDeal') if 'isDeal' in body else bool(row['is_deal'])
 
-    system, err = prepare_customer_system(
+    system, prep_err = prepare_customer_system(
         site_id, data, visit_type, is_deal, exclude_record_id=record_id,
     )
-    if err:
-        return jsonify({'error': err}), 400
+    if prep_err:
+        conn.close()
+        return jsonify({'error': prep_err}), 400
 
     if not update_customer_record(record_id, system, data):
+        conn.close()
         return jsonify({'error': '更新失敗'}), 500
+    conn.close()
     return jsonify({'success': True, 'id': record_id})
 
 
 @app.route('/api/customers/<int:record_id>', methods=['DELETE'])
 def delete_customer(record_id):
-    conn = get_db()
+    conn, user, err = auth_guard('delete_customers')
+    if err:
+        return err
+    row = conn.execute('SELECT site_id FROM customers WHERE id = ?', (record_id,)).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({'error': '找不到資料'}), 404
+    denied = ensure_site_access(user, row['site_id'])
+    if denied:
+        conn.close()
+        return denied
     cur = conn.execute('DELETE FROM customers WHERE id = ?', (record_id,))
     conn.commit()
     conn.close()
@@ -889,15 +1190,25 @@ def delete_customer(record_id):
 
 @app.route('/api/customers/all', methods=['DELETE'])
 def delete_all_customers():
+    conn, user, err = auth_guard('delete_all_customers')
+    if err:
+        return err
     body = request.get_json() or {}
     if body.get('confirm') != 'DELETE ALL':
+        conn.close()
         return jsonify({'error': '請輸入正確確認碼 DELETE ALL'}), 400
 
     site_id = (body.get('siteId') or '').strip()
-    conn = get_db()
     if site_id:
+        denied = ensure_site_access(user, site_id)
+        if denied:
+            conn.close()
+            return denied
         cur = conn.execute('DELETE FROM customers WHERE site_id = ?', (site_id,))
     else:
+        if user['role'] != 'executive':
+            conn.close()
+            return jsonify({'error': '僅最高主管可清空全部案場資料'}), 403
         cur = conn.execute('DELETE FROM customers')
     deleted = cur.rowcount
     conn.commit()
@@ -907,8 +1218,18 @@ def delete_all_customers():
 
 @app.route('/api/stats')
 def stats():
+    conn, user, err = auth_guard('view_customers')
+    if err:
+        return err
     year = request.args.get('year', '')
     site_id = request.args.get('siteId', '')
+    allowed_sites = get_allowed_site_ids(user)
+    if site_id:
+        denied = ensure_site_access(user, site_id)
+        if denied:
+            conn.close()
+            return denied
+
     sql = '''
         SELECT site_name, visit_type, is_deal, COUNT(*) as count
         FROM customers WHERE 1=1
@@ -920,9 +1241,15 @@ def stats():
     if site_id:
         sql += ' AND site_id = ?'
         params.append(site_id)
+    elif allowed_sites is not None:
+        if not allowed_sites:
+            conn.close()
+            return jsonify([])
+        placeholders = ','.join('?' * len(allowed_sites))
+        sql += f' AND site_id IN ({placeholders})'
+        params.extend(allowed_sites)
     sql += ' GROUP BY site_name, visit_type, is_deal ORDER BY site_name'
 
-    conn = get_db()
     rows = [dict(r) for r in conn.execute(sql, params).fetchall()]
     conn.close()
     return jsonify(rows)

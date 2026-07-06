@@ -7,7 +7,29 @@ let editingRecordId = null;
 let editingRecord = null;
 let detailRecordId = null;
 
-const STORAGE_KEY = 'customer_report_columns';
+function userCan(perm) {
+  return window.currentUser && (window.currentUser.permissions || []).includes(perm);
+}
+
+function applyPermissionUI() {
+  const dangerZone = document.querySelector('.danger-zone');
+  if (dangerZone) {
+    if (!userCan('delete_all_customers')) {
+      dangerZone.classList.add('hidden');
+    } else if (window.currentUser && window.currentUser.role !== 'executive') {
+      document.getElementById('deleteAllBtn')?.classList.add('hidden');
+    }
+  }
+  const exportBtn = document.getElementById('exportBtn');
+  if (exportBtn && !userCan('export_customers')) {
+    exportBtn.classList.add('hidden');
+  }
+  const detailDeleteBtn = document.getElementById('detailDeleteBtn');
+  if (detailDeleteBtn && !userCan('delete_customers')) {
+    detailDeleteBtn.classList.add('hidden');
+  }
+}
+
 
 const REPORT_COLUMNS = [
   { group: '基本', key: 'visit_date', label: '日期' },
@@ -269,10 +291,13 @@ function renderResults(data) {
       const val = getCellValue(r, c.key);
       return `<td>${formatCellHtml(c.key, val, r)}</td>`;
     }).join('');
+    const deleteBtn = userCan('delete_customers')
+      ? `<button class="btn-sm btn-danger-sm-solid" onclick="deleteRecord(${r.id})">刪除</button>`
+      : '';
     return `<tr>${cells}<td class="action-btns">
       <button class="btn-sm" onclick="showDetail(${r.id})">詳情</button>
       <button class="btn-sm" onclick="openEdit(${r.id})">編輯</button>
-      <button class="btn-sm btn-danger-sm-solid" onclick="deleteRecord(${r.id})">刪除</button>
+      ${deleteBtn}
     </td></tr>`;
   }).join('');
 
@@ -752,7 +777,12 @@ document.querySelectorAll('input[name="editVisitType"]').forEach((el) => {
 initYearSelect();
 renderColumnPicker();
 loadFieldConfig();
-loadSites().then(() => {
+
+async function bootSearch() {
+  if (window.navReady) await window.navReady;
+  await loadSites();
   updateSiteLabel();
+  applyPermissionUI();
   doSearch();
-});
+}
+bootSearch();
