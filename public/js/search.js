@@ -205,12 +205,34 @@ function escapeHtml(str) {
 function updateSiteLabel() {
   const siteId = document.getElementById('searchSite').value;
   const label = document.getElementById('currentSiteLabel');
+  const isFieldStaff = window.currentUser?.role === 'field_staff';
   if (!siteId) {
-    label.textContent = '目前顯示：全部案場';
+    label.textContent = isFieldStaff ? '目前顯示：全部負責案場' : '目前顯示：全部案場';
     return;
   }
   const site = sites.find((s) => s.id === siteId);
   label.textContent = `目前顯示：${site ? site.name : siteId}`;
+}
+
+function applyFieldStaffSiteRestrictions() {
+  const user = window.currentUser;
+  if (!user || user.role !== 'field_staff') return;
+
+  const searchSel = document.getElementById('searchSite');
+  const allOpt = searchSel.querySelector('option[value=""]');
+  if (allOpt) allOpt.textContent = '全部負責案場';
+
+  const editSite = document.getElementById('editSite');
+  if (editSite) editSite.disabled = true;
+
+  if (sites.length === 1) {
+    searchSel.value = sites[0].id;
+    searchSel.disabled = true;
+    updateSiteLabel();
+  } else if (sites.length === 0) {
+    searchSel.disabled = true;
+    document.getElementById('currentSiteLabel').textContent = '尚未指派案場，請聯絡管理員';
+  }
 }
 
 function initYearSelect() {
@@ -549,6 +571,9 @@ function populateEditSiteSelect(selectedSiteId) {
   sel.innerHTML = sites.map((s) =>
     `<option value="${s.id}" ${s.id === selectedSiteId ? 'selected' : ''}>${escapeHtml(s.name)}</option>`,
   ).join('');
+  if (window.currentUser?.role === 'field_staff') {
+    sel.disabled = true;
+  }
 }
 
 window.openEdit = async function (id) {
@@ -721,7 +746,9 @@ function clearSearch() {
     'searchRegion', 'searchVisitType', 'searchDeal', 'searchPhone', 'searchName', 'searchStatus'
   ].forEach((id) => { document.getElementById(id).value = ''; });
   ['excludeNew', 'excludeReturn', 'excludeDeal'].forEach((id) => { document.getElementById(id).checked = false; });
-  document.getElementById('searchSite').value = '';
+  if (!(window.currentUser?.role === 'field_staff' && sites.length === 1)) {
+    document.getElementById('searchSite').value = '';
+  }
   updateSiteLabel();
   currentPage = 1;
 }
@@ -781,6 +808,7 @@ loadFieldConfig();
 async function bootSearch() {
   if (window.navReady) await window.navReady;
   await loadSites();
+  applyFieldStaffSiteRestrictions();
   updateSiteLabel();
   applyPermissionUI();
   doSearch();

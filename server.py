@@ -12,7 +12,7 @@ from flask import Flask, jsonify, request, send_from_directory, Response, sessio
 from auth import (
     PROTECTED_PAGES, ROLES, get_allowed_site_ids, get_current_user,
     get_user_by_id, get_user_by_username, hash_password, init_auth_tables, is_public_api,
-    save_user_sites, seed_initial_admin, user_can_access_site, user_has_permission,
+    migrate_retired_roles, save_user_sites, seed_initial_admin, user_can_access_site, user_has_permission,
     verify_password,
 )
 from config.sites import SITES as DEFAULT_SITES
@@ -66,6 +66,7 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_customers_visit_date ON customers(visit_date);
     ''')
     init_auth_tables(conn)
+    migrate_retired_roles(conn)
     conn.commit()
 
     count = conn.execute('SELECT COUNT(*) FROM sites').fetchone()[0]
@@ -699,9 +700,9 @@ def create_user():
     if not username or not password or not display_name or role not in ROLES:
         conn.close()
         return jsonify({'error': '請填寫完整資料並選擇有效職務'}), 400
-    if role in ('supervisor', 'field_staff') and not site_ids:
+    if role == 'field_staff' and not site_ids:
         conn.close()
-        return jsonify({'error': '主管與現場人員至少需指派一個案場'}), 400
+        return jsonify({'error': '現場人員至少需指派一個案場'}), 400
 
     try:
         cur = conn.execute(
@@ -753,9 +754,9 @@ def update_user(user_id):
     conn.execute(sql, params)
 
     if site_ids is not None:
-        if role in ('supervisor', 'field_staff') and not site_ids:
+        if role == 'field_staff' and not site_ids:
             conn.close()
-            return jsonify({'error': '主管與現場人員至少需指派一個案場'}), 400
+            return jsonify({'error': '現場人員至少需指派一個案場'}), 400
         save_user_sites(conn, user_id, site_ids)
 
     conn.commit()
@@ -961,8 +962,15 @@ def lookup_customer():
     if not phone or not site_id:
         return jsonify({'error': '請提供電話號碼與案場'}), 400
 
-    normalized = normalize_phone(phone)
     conn = get_db()
+    user = get_current_user(conn)
+    if user:
+        denied = ensure_site_access(user, site_id)
+        if denied:
+            conn.close()
+            return denied
+
+    normalized = normalize_phone(phone)
     rows = conn.execute('''
         SELECT * FROM customers
         WHERE site_id = ? AND visit_type = '新客'
@@ -988,6 +996,15 @@ def create_customer():
     data = body.get('data')
     if not site_id or not visit_type or not data:
         return jsonify({'error': '缺少必要欄位'}), 400
+
+    conn = get_db()
+    user = get_current_user(conn)
+    if user:
+        denied = ensure_site_access(user, site_id)
+        if denied:
+            conn.close()
+            return denied
+    conn.close()
 
     is_deal = body.get('isDeal') if 'isDeal' in body else None
     system, err = prepare_customer_system(site_id, data, visit_type, is_deal)
@@ -1145,6 +1162,9 @@ def update_customer(record_id):
     if denied:
         conn.close()
         return denied
+    if user['role'] == 'field_staff' and site_id != row['site_id']:
+        conn.close()
+        return jsonify({'error': '現場人員無法變更資料所屬案場'}), 403
     denied = ensure_site_access(user, site_id)
     if denied:
         conn.close()

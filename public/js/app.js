@@ -259,6 +259,8 @@ async function submitForm(e) {
 }
 
 async function init() {
+  if (window.navReady) await window.navReady;
+
   const [sitesRes, fieldsRes] = await Promise.all([
     fetch('/api/sites'),
     fetch('/api/fields'),
@@ -272,6 +274,16 @@ async function init() {
     opt.textContent = s.name;
     siteSelect.appendChild(opt);
   });
+
+  if (window.currentUser?.role === 'field_staff') {
+    if (sites.length === 1) {
+      siteSelect.value = sites[0].id;
+      siteSelect.disabled = true;
+      currentSiteId = sites[0].id;
+    } else if (sites.length === 0) {
+      showToast('尚未指派案場，請聯絡管理員', 'error');
+    }
+  }
 
   siteSelect.addEventListener('change', () => {
     currentSiteId = siteSelect.value;

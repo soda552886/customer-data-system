@@ -8,10 +8,8 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 ROLES = {
     'executive': '最高主管（蘇總/副總/米伽姐）',
-    'supervisor': '主管',
     'field_staff': '現場專案/副專/女專',
     'sales': '業務',
-    'hr': '人事',
 }
 
 ROLE_PERMISSIONS = {
@@ -20,18 +18,11 @@ ROLE_PERMISSIONS = {
         'import_customers', 'export_customers', 'delete_all_customers',
         'manage_sites', 'manage_users', 'submit_form',
     },
-    'supervisor': {
-        'view_customers', 'edit_customers', 'delete_customers',
-        'export_customers', 'delete_all_customers', 'submit_form',
-    },
     'field_staff': {
         'view_customers', 'edit_customers', 'submit_form',
     },
     'sales': {
         'submit_form',
-    },
-    'hr': {
-        'manage_users',
     },
 }
 
@@ -91,6 +82,13 @@ def seed_initial_admin(conn: sqlite3.Connection):
         'INSERT INTO users (username, password_hash, display_name, role) VALUES (?, ?, ?, ?)',
         (username, hash_password(password), '系統管理員', 'executive'),
     )
+    conn.commit()
+
+
+def migrate_retired_roles(conn: sqlite3.Connection):
+    """將已移除的職務對應到現有職務。"""
+    conn.execute("UPDATE users SET role = 'field_staff' WHERE role = 'supervisor'")
+    conn.execute("UPDATE users SET role = 'executive' WHERE role = 'hr'")
     conn.commit()
 
 
@@ -162,11 +160,14 @@ def user_can_access_site(user, site_id: str) -> bool:
         if not site_id:
             return True
         return site_id in site_ids
-    if user['role'] == 'hr':
-        return False
-    if not site_id:
-        return user['role'] in ('executive', 'supervisor', 'field_staff')
-    return site_id in user.get('siteIds', [])
+    if user['role'] == 'field_staff':
+        site_ids = user.get('siteIds', [])
+        if not site_ids:
+            return False
+        if not site_id:
+            return True
+        return site_id in site_ids
+    return False
 
 
 def get_allowed_site_ids(user) -> Optional[list]:
@@ -178,8 +179,6 @@ def get_allowed_site_ids(user) -> Optional[list]:
     if user['role'] == 'sales':
         site_ids = user.get('siteIds', [])
         return None if not site_ids else list(site_ids)
-    if user['role'] == 'hr':
-        return []
     return list(user.get('siteIds', []))
 
 

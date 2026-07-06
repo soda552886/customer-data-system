@@ -9,10 +9,6 @@ const params = new URLSearchParams(window.location.search);
 const nextUrl = params.get('next') || '/search.html';
 
 function redirectAfterLogin(user) {
-  if (user.role === 'hr') {
-    window.location.href = '/users.html';
-    return;
-  }
   if (user.role === 'sales') {
     window.location.href = '/';
     return;
