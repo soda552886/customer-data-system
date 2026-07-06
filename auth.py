@@ -10,6 +10,7 @@ ROLES = {
     'executive': '最高主管（蘇總/副總/米伽姐）',
     'supervisor': '主管',
     'field_staff': '現場專案/副專/女專',
+    'sales': '業務',
     'hr': '人事',
 }
 
@@ -25,6 +26,9 @@ ROLE_PERMISSIONS = {
     },
     'field_staff': {
         'view_customers', 'edit_customers', 'submit_form',
+    },
+    'sales': {
+        'submit_form',
     },
     'hr': {
         'manage_users',
@@ -151,6 +155,13 @@ def user_can_access_site(user, site_id: str) -> bool:
         return False
     if user['role'] == 'executive':
         return True
+    if user['role'] == 'sales':
+        site_ids = user.get('siteIds', [])
+        if not site_ids:
+            return True
+        if not site_id:
+            return True
+        return site_id in site_ids
     if user['role'] == 'hr':
         return False
     if not site_id:
@@ -164,6 +175,9 @@ def get_allowed_site_ids(user) -> Optional[list]:
         return []
     if user['role'] == 'executive':
         return None
+    if user['role'] == 'sales':
+        site_ids = user.get('siteIds', [])
+        return None if not site_ids else list(site_ids)
     if user['role'] == 'hr':
         return []
     return list(user.get('siteIds', []))

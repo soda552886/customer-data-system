@@ -8,6 +8,18 @@ function showToast(msg, type = 'success') {
 const params = new URLSearchParams(window.location.search);
 const nextUrl = params.get('next') || '/search.html';
 
+function redirectAfterLogin(user) {
+  if (user.role === 'hr') {
+    window.location.href = '/users.html';
+    return;
+  }
+  if (user.role === 'sales') {
+    window.location.href = '/';
+    return;
+  }
+  window.location.href = nextUrl;
+}
+
 document.getElementById('loginForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const username = document.getElementById('username').value.trim();
@@ -27,11 +39,7 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
       return;
     }
     const user = json.user;
-    if (user.role === 'hr') {
-      window.location.href = '/users.html';
-      return;
-    }
-    window.location.href = nextUrl;
+    redirectAfterLogin(user);
   } catch {
     showToast('登入失敗，請稍後再試', 'error');
   } finally {
@@ -41,6 +49,6 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
 
 fetch('/api/auth/me').then((r) => r.json()).then((json) => {
   if (json.authenticated) {
-    window.location.href = json.user.role === 'hr' ? '/users.html' : nextUrl;
+    redirectAfterLogin(json.user);
   }
 });
