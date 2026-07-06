@@ -18,10 +18,10 @@ from auth import (
 from audit import init_audit_table, log_operation, row_to_log_dict
 from config.sites import SITES as DEFAULT_SITES
 from field_options import (
-    apply_site_field_options, build_site_field_config, build_site_report_order_config,
-    flatten_report_column_order, init_field_options_table, load_site_option_overrides,
-    load_site_report_column_order, normalize_report_column_order, normalize_save_payload,
-    save_site_option_overrides, save_site_report_column_order,
+    apply_site_field_options, build_site_field_config, build_site_report_export_config,
+    export_column_keys_for_site, init_field_options_table, load_site_option_overrides,
+    load_site_report_export_config, normalize_report_export_payload, normalize_save_payload,
+    save_site_option_overrides, save_site_report_export_config,
 )
 
 BASE_DIR = Path(__file__).parent
@@ -1101,10 +1101,10 @@ def get_site_field_options(site_id):
         return denied
     overrides = load_site_option_overrides(conn, site_id)
     config = build_site_field_config(FIELD_SECTIONS, site_id, SALES_STAFF, overrides)
-    order_saved = load_site_report_column_order(conn, site_id, REPORT_COLUMNS)
-    order_config = build_site_report_order_config(REPORT_COLUMNS, order_saved)
+    export_saved = load_site_report_export_config(conn, site_id, REPORT_COLUMNS)
+    export_config = build_site_report_export_config(REPORT_COLUMNS, export_saved)
     config['siteName'] = row['name']
-    config['reportColumnOrder'] = order_config
+    config['reportExport'] = export_config
     conn.close()
     return jsonify(config)
 
@@ -1136,8 +1136,8 @@ def update_site_field_options(site_id):
     conn.commit()
     overrides = load_site_option_overrides(conn, site_id)
     config = build_site_field_config(FIELD_SECTIONS, site_id, SALES_STAFF, overrides)
-    order_saved = load_site_report_column_order(conn, site_id, REPORT_COLUMNS)
-    config['reportColumnOrder'] = build_site_report_order_config(REPORT_COLUMNS, order_saved)
+    export_saved = load_site_report_export_config(conn, site_id, REPORT_COLUMNS)
+    config['reportExport'] = build_site_report_export_config(REPORT_COLUMNS, export_saved)
     conn.close()
     return jsonify({'success': True, **config})
 
@@ -1160,8 +1160,8 @@ def get_site_field_order(site_id):
     if denied:
         conn.close()
         return denied
-    saved = load_site_report_column_order(conn, site_id, REPORT_COLUMNS)
-    config = build_site_report_order_config(REPORT_COLUMNS, saved)
+    saved = load_site_report_export_config(conn, site_id, REPORT_COLUMNS)
+    config = build_site_report_export_config(REPORT_COLUMNS, saved)
     config['siteId'] = site_id
     config['siteName'] = row['name']
     conn.close()
@@ -1182,11 +1182,13 @@ def get_site_export_column_order(site_id):
     if denied:
         conn.close()
         return denied
-    saved = load_site_report_column_order(conn, site_id, REPORT_COLUMNS)
+    saved = load_site_report_export_config(conn, site_id, REPORT_COLUMNS)
+    export_config = build_site_report_export_config(REPORT_COLUMNS, saved)
     conn.close()
     return jsonify({
         'siteId': site_id,
-        'columnKeys': flatten_report_column_order(REPORT_COLUMNS, saved),
+        'isCustomized': export_config['isCustomized'],
+        'columnKeys': export_column_keys_for_site(REPORT_COLUMNS, saved),
     })
 
 
@@ -1204,20 +1206,20 @@ def update_site_field_order(site_id):
         conn.close()
         return denied
     body = request.get_json() or {}
-    groups_payload = body.get('groups') or body.get('sections') or body
-    normalized = normalize_report_column_order(REPORT_COLUMNS, groups_payload)
+    normalized = normalize_report_export_payload(REPORT_COLUMNS, body)
     if normalized:
-        save_site_report_column_order(conn, site_id, normalized)
+        save_site_report_export_config(conn, site_id, normalized)
     else:
         conn.execute('DELETE FROM site_field_order WHERE site_id = ?', (site_id,))
+    enabled_count = len(export_column_keys_for_site(REPORT_COLUMNS, normalized))
     log_operation(
         conn, user, 'report_column_order_update',
-        f'更新「{row["name"]}」報表匯出欄位順序',
+        f'更新「{row["name"]}」報表匯出設定（{enabled_count} 個欄位）',
         site_id=site_id, site_name=row['name'],
     )
     conn.commit()
-    saved = load_site_report_column_order(conn, site_id, REPORT_COLUMNS)
-    config = build_site_report_order_config(REPORT_COLUMNS, saved)
+    saved = load_site_report_export_config(conn, site_id, REPORT_COLUMNS)
+    config = build_site_report_export_config(REPORT_COLUMNS, saved)
     config['siteId'] = site_id
     config['siteName'] = row['name']
     conn.close()

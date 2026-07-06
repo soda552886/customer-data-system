@@ -174,102 +174,15 @@ def normalize_save_payload(
     return normalized
 
 
+def report_column_map(report_columns: list) -> dict:
+    return {col['key']: col for col in report_columns}
+
+
 def default_report_column_order(report_columns: list) -> dict:
     order = {}
     for col in report_columns:
         order.setdefault(col['group'], []).append(col['key'])
     return order
-
-
-def report_column_map(report_columns: list) -> dict:
-    return {col['key']: col for col in report_columns}
-
-
-def load_site_report_column_order(
-    conn: sqlite3.Connection, site_id: str, report_columns: list,
-) -> Optional[dict]:
-    row = conn.execute(
-        'SELECT order_json FROM site_field_order WHERE site_id = ?', (site_id,),
-    ).fetchone()
-    if not row:
-        return None
-    data = json.loads(row['order_json'])
-    if isinstance(data, dict) and 'columnKeys' in data:
-        return _flat_keys_to_groups(data['columnKeys'], report_columns)
-    return data if isinstance(data, dict) else None
-
-
-def _flat_keys_to_groups(keys: list, report_columns: list) -> dict:
-    col_map = report_column_map(report_columns)
-    groups = default_report_column_order(report_columns)
-    result = {g: [] for g in groups}
-    for key in keys:
-        col = col_map.get(key)
-        if col and key not in result.get(col['group'], []):
-            result[col['group']].append(key)
-    for group, default_keys in groups.items():
-        for key in default_keys:
-            if key not in result[group]:
-                result[group].append(key)
-    return result
-
-
-def save_site_report_column_order(conn: sqlite3.Connection, site_id: str, order: dict):
-    conn.execute('DELETE FROM site_field_order WHERE site_id = ?', (site_id,))
-    if order:
-        conn.execute(
-            'INSERT INTO site_field_order (site_id, order_json) VALUES (?, ?)',
-            (site_id, json.dumps(order, ensure_ascii=False)),
-        )
-
-
-def normalize_report_column_order(report_columns: list, payload: dict) -> dict:
-    defaults = default_report_column_order(report_columns)
-    col_map = report_column_map(report_columns)
-    normalized = {}
-    for group, default_keys in defaults.items():
-        submitted = (payload or {}).get(group) or []
-        if not isinstance(submitted, list):
-            continue
-        allowed = set(default_keys)
-        ordered = [k for k in submitted if k in allowed]
-        for key in default_keys:
-            if key not in ordered:
-                ordered.append(key)
-        if ordered != default_keys:
-            normalized[group] = ordered
-    return normalized
-
-
-def build_site_report_order_config(report_columns: list, saved: Optional[dict]) -> dict:
-    defaults = default_report_column_order(report_columns)
-    order = saved if saved else defaults
-    col_map = report_column_map(report_columns)
-    groups = []
-    seen_groups = []
-    for col in report_columns:
-        if col['group'] not in seen_groups:
-            seen_groups.append(col['group'])
-
-    for group_title in seen_groups:
-        keys = order.get(group_title, defaults.get(group_title, []))
-        columns = []
-        seen = set()
-        for key in keys:
-            if key in col_map and key not in seen:
-                columns.append(col_map[key])
-                seen.add(key)
-        for key in defaults.get(group_title, []):
-            if key not in seen and key in col_map:
-                columns.append(col_map[key])
-                seen.add(key)
-        if columns:
-            groups.append({'groupTitle': group_title, 'columns': columns})
-
-    return {
-        'groups': groups,
-        'isCustomized': saved is not None,
-    }
 
 
 def flatten_report_column_order(report_columns: list, saved: Optional[dict]) -> list:
@@ -285,9 +198,105 @@ def flatten_report_column_order(report_columns: list, saved: Optional[dict]) -> 
     return flat
 
 
-def sort_keys_for_export(report_columns: list, selected_keys: list, saved: Optional[dict]) -> list:
-    if not saved:
-        return list(selected_keys)
-    flat = flatten_report_column_order(report_columns, saved)
-    key_index = {k: i for i, k in enumerate(flat)}
-    return sorted(selected_keys, key=lambda k: key_index.get(k, 9999))
+def default_report_export_items(report_columns: list) -> list:
+    return [{'key': col['key'], 'enabled': True} for col in report_columns]
+
+
+def _merge_report_export_items(report_columns: list, items: list) -> list:
+    col_map = report_column_map(report_columns)
+    seen = set()
+    merged = []
+    for item in items or []:
+        key = item.get('key')
+        if not key or key not in col_map or key in seen:
+            continue
+        merged.append({
+            'key': key,
+            'enabled': bool(item.get('enabled', True)),
+        })
+        seen.add(key)
+    for col in report_columns:
+        if col['key'] not in seen:
+            merged.append({'key': col['key'], 'enabled': True})
+    return merged
+
+
+def _migrate_legacy_report_export(data, report_columns: list) -> Optional[list]:
+    if not isinstance(data, dict):
+        return None
+    if data.get('version') == 2 and isinstance(data.get('items'), list):
+        return _merge_report_export_items(report_columns, data['items'])
+    if 'columnKeys' in data and isinstance(data['columnKeys'], list):
+        items = [{'key': k, 'enabled': True} for k in data['columnKeys'] if k in report_column_map(report_columns)]
+        return _merge_report_export_items(report_columns, items)
+    if any(k in data for k in default_report_column_order(report_columns)):
+        flat = []
+        seen = set()
+        for key in flatten_report_column_order(report_columns, data):
+            if key not in seen:
+                flat.append(key)
+                seen.add(key)
+        items = [{'key': k, 'enabled': True} for k in flat]
+        return _merge_report_export_items(report_columns, items)
+    return None
+
+
+def load_site_report_export_config(
+    conn: sqlite3.Connection, site_id: str, report_columns: list,
+) -> Optional[list]:
+    row = conn.execute(
+        'SELECT order_json FROM site_field_order WHERE site_id = ?', (site_id,),
+    ).fetchone()
+    if not row:
+        return None
+    data = json.loads(row['order_json'])
+    return _migrate_legacy_report_export(data, report_columns)
+
+
+def save_site_report_export_config(conn: sqlite3.Connection, site_id: str, items: list):
+    conn.execute('DELETE FROM site_field_order WHERE site_id = ?', (site_id,))
+    if items:
+        payload = {'version': 2, 'items': items}
+        conn.execute(
+            'INSERT INTO site_field_order (site_id, order_json) VALUES (?, ?)',
+            (site_id, json.dumps(payload, ensure_ascii=False)),
+        )
+
+
+def normalize_report_export_payload(report_columns: list, payload: dict) -> Optional[list]:
+    raw_items = payload.get('items') if isinstance(payload, dict) else payload
+    if not isinstance(raw_items, list):
+        return None
+    merged = _merge_report_export_items(report_columns, raw_items)
+    defaults = default_report_export_items(report_columns)
+    if merged == defaults:
+        return None
+    return merged
+
+
+def build_site_report_export_config(report_columns: list, saved: Optional[list]) -> dict:
+    items = saved if saved is not None else default_report_export_items(report_columns)
+    col_map = report_column_map(report_columns)
+    columns = []
+    for item in items:
+        col = col_map.get(item['key'])
+        if not col:
+            continue
+        columns.append({
+            'key': col['key'],
+            'label': col['label'],
+            'group': col['group'],
+            'enabled': bool(item.get('enabled', True)),
+        })
+    enabled_count = sum(1 for c in columns if c['enabled'])
+    return {
+        'columns': columns,
+        'isCustomized': saved is not None,
+        'enabledCount': enabled_count,
+        'totalCount': len(columns),
+    }
+
+
+def export_column_keys_for_site(report_columns: list, saved: Optional[list]) -> list:
+    items = saved if saved is not None else default_report_export_items(report_columns)
+    return [item['key'] for item in items if item.get('enabled', True)]

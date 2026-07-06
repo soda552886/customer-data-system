@@ -649,5 +649,6 @@ body {
   padding: 0.55rem 0;
   border-bottom: 1px solid var(--border);
 }
-.field-order-item span:first-child { flex: 1; }
+.field-order-item > span:not(.field-order-actions) { flex: 1; }
+.field-order-check { flex: 0 0 auto; margin-right: 0.25rem; }
 .field-order-actions { display: flex; gap: 0.35rem; }

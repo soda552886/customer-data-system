@@ -2,7 +2,7 @@ const params = new URLSearchParams(window.location.search);
 const siteId = params.get('site') || '';
 
 let fieldItems = [];
-let orderGroups = [];
+let exportColumns = [];
 let siteName = '';
 
 function showToast(msg, type = 'success') {
@@ -77,42 +77,64 @@ function renderFieldCard(field) {
   `;
 }
 
+function updateExportCount() {
+  const label = document.getElementById('exportCountLabel');
+  if (!label) return;
+  const enabled = exportColumns.filter((c) => c.enabled).length;
+  label.textContent = `已勾選 ${enabled} / ${exportColumns.length} 個欄位`;
+}
+
 function renderOrder() {
   const container = document.getElementById('orderContainer');
-  if (!orderGroups.length) {
-    container.innerHTML = '<p class="empty-row">沒有可排序的報表欄位</p>';
+  if (!exportColumns.length) {
+    container.innerHTML = '<p class="empty-row">沒有可設定的報表欄位</p>';
     return;
   }
 
-  container.innerHTML = orderGroups.map((group, gIdx) => `
-    <section class="field-options-section">
-      <h3 class="field-options-summary">${escapeHtml(group.groupTitle)}欄位</h3>
-      <ul class="field-order-list" data-group-idx="${gIdx}">
-        ${group.columns.map((col, cIdx) => `
-          <li class="field-order-item" data-col-key="${escapeHtml(col.key)}">
-            <span>${escapeHtml(col.label)}</span>
-            <span class="field-order-actions">
-              <button type="button" class="btn-sm" data-move="up" data-g="${gIdx}" data-c="${cIdx}" ${cIdx === 0 ? 'disabled' : ''}>上移</button>
-              <button type="button" class="btn-sm" data-move="down" data-g="${gIdx}" data-c="${cIdx}" ${cIdx === group.columns.length - 1 ? 'disabled' : ''}>下移</button>
-            </span>
-          </li>
-        `).join('')}
-      </ul>
-    </section>
-  `).join('');
+  container.innerHTML = `
+    <ul class="field-order-list">
+      ${exportColumns.map((col, idx) => `
+        <li class="field-order-item" data-col-key="${escapeHtml(col.key)}">
+          <label class="checkbox-label field-order-check">
+            <input type="checkbox" data-export-key="${escapeHtml(col.key)}" ${col.enabled ? 'checked' : ''}>
+          </label>
+          <span>
+            ${escapeHtml(col.label)}
+            <span class="hint">（${escapeHtml(col.group)}）</span>
+          </span>
+          <span class="field-order-actions">
+            <button type="button" class="btn-sm" data-move="up" data-idx="${idx}" ${idx === 0 ? 'disabled' : ''}>上移</button>
+            <button type="button" class="btn-sm" data-move="down" data-idx="${idx}" ${idx === exportColumns.length - 1 ? 'disabled' : ''}>下移</button>
+          </span>
+        </li>
+      `).join('')}
+    </ul>
+  `;
 
   container.querySelectorAll('[data-move]').forEach((btn) => {
     btn.addEventListener('click', () => {
-      moveColumn(Number(btn.dataset.g), Number(btn.dataset.c), btn.dataset.move);
+      moveColumn(Number(btn.dataset.idx), btn.dataset.move);
     });
   });
+  container.querySelectorAll('[data-export-key]').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      const col = exportColumns.find((c) => c.key === cb.dataset.exportKey);
+      if (col) col.enabled = cb.checked;
+      updateExportCount();
+    });
+  });
+  updateExportCount();
 }
 
-function moveColumn(groupIdx, colIdx, direction) {
-  const cols = orderGroups[groupIdx].columns;
-  const target = direction === 'up' ? colIdx - 1 : colIdx + 1;
-  if (target < 0 || target >= cols.length) return;
-  [cols[colIdx], cols[target]] = [cols[target], cols[colIdx]];
+function moveColumn(idx, direction) {
+  const target = direction === 'up' ? idx - 1 : idx + 1;
+  if (target < 0 || target >= exportColumns.length) return;
+  [exportColumns[idx], exportColumns[target]] = [exportColumns[target], exportColumns[idx]];
+  renderOrder();
+}
+
+function toggleAllExportColumns(enabled) {
+  exportColumns.forEach((col) => { col.enabled = enabled; });
   renderOrder();
 }
 
@@ -142,12 +164,14 @@ function collectOptionsPayload() {
   return payload;
 }
 
-function collectOrderPayload() {
-  const payload = {};
-  orderGroups.forEach((group) => {
-    payload[group.groupTitle] = group.columns.map((c) => c.key);
-  });
-  return payload;
+function collectExportPayload() {
+  return {
+    items: exportColumns.map((col) => ({ key: col.key, enabled: !!col.enabled })),
+  };
+}
+
+function applyExportConfig(config) {
+  exportColumns = (config && config.columns) ? config.columns.map((col) => ({ ...col })) : [];
 }
 
 async function loadConfig() {
@@ -168,7 +192,7 @@ async function loadConfig() {
   const json = await res.json();
   siteName = json.siteName || siteId;
   fieldItems = json.fields || [];
-  orderGroups = (json.reportColumnOrder && json.reportColumnOrder.groups) || [];
+  applyExportConfig(json.reportExport);
   document.getElementById('pageTitle').textContent = `案場欄位設定：${siteName}`;
   renderFields();
   renderOrder();
@@ -189,7 +213,7 @@ async function saveOptions() {
       return;
     }
     fieldItems = json.fields || fieldItems;
-    if (json.reportColumnOrder) orderGroups = json.reportColumnOrder.groups || orderGroups;
+    if (json.reportExport) applyExportConfig(json.reportExport);
     renderFields();
     showToast('欄位選項已儲存');
   } catch {
@@ -201,21 +225,26 @@ async function saveOptions() {
 
 async function saveOrder() {
   const btn = document.getElementById('saveOrderBtn');
+  const enabledCount = exportColumns.filter((c) => c.enabled).length;
+  if (enabledCount === 0) {
+    showToast('請至少勾選一個要匯出的欄位', 'error');
+    return;
+  }
   btn.disabled = true;
   try {
     const res = await fetch(`/api/sites/${encodeURIComponent(siteId)}/field-order`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ groups: collectOrderPayload() }),
+      body: JSON.stringify(collectExportPayload()),
     });
     const json = await res.json();
     if (!res.ok) {
       showToast(json.error || '儲存失敗', 'error');
       return;
     }
-    orderGroups = json.groups || orderGroups;
+    applyExportConfig(json);
     renderOrder();
-    showToast('報表匯出順序已儲存');
+    showToast('報表匯出設定已儲存');
   } catch {
     showToast('儲存失敗', 'error');
   } finally {
@@ -248,18 +277,20 @@ document.getElementById('resetAllBtn').addEventListener('click', async () => {
   renderFields();
   await saveOptions();
 });
+document.getElementById('selectAllExportBtn').addEventListener('click', () => toggleAllExportColumns(true));
+document.getElementById('selectNoneExportBtn').addEventListener('click', () => toggleAllExportColumns(false));
 document.getElementById('resetOrderBtn').addEventListener('click', async () => {
-  if (!confirm('確定恢復欄位為系統預設順序？')) return;
+  if (!confirm('確定恢復為系統預設的匯出欄位與順序？')) return;
   const res = await fetch(`/api/sites/${encodeURIComponent(siteId)}/field-order`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ groups: {} }),
+    body: JSON.stringify({ items: [] }),
   });
   const json = await res.json();
   if (res.ok) {
-    orderGroups = json.groups || [];
+    applyExportConfig(json);
     renderOrder();
-    showToast('已恢復預設匯出順序');
+    showToast('已恢復預設匯出設定');
   } else {
     showToast(json.error || '恢復失敗', 'error');
   }

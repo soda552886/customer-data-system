@@ -41,11 +41,14 @@
 
     <section class="card tab-panel hidden" id="panelOrder">
       <p class="hint">
-        調整<strong>匯出 CSV 報表</strong>時的欄位順序，以配合工地報表格式。「查看資料」列表顯示順序不受影響。
+        勾選此案場匯出 CSV 時要包含的欄位，並用上移／下移調整順序（可跨群組自由排序，以配合工地報表格式）。「查看資料」列表顯示不受影響。
       </p>
       <div class="field-options-toolbar">
-        <button type="button" class="btn-sm" id="resetOrderBtn">恢復預設順序</button>
-        <button type="button" class="btn btn-primary" id="saveOrderBtn">儲存匯出順序</button>
+        <span class="hint" id="exportCountLabel"></span>
+        <button type="button" class="btn-sm" id="selectAllExportBtn">全部勾選</button>
+        <button type="button" class="btn-sm" id="selectNoneExportBtn">全部取消</button>
+        <button type="button" class="btn-sm" id="resetOrderBtn">恢復預設</button>
+        <button type="button" class="btn btn-primary" id="saveOrderBtn">儲存匯出設定</button>
       </div>
       <div id="orderContainer"><p class="empty-row">載入中…</p></div>
     </section>

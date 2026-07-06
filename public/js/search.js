@@ -7,6 +7,7 @@ let editingRecordId = null;
 let editingRecord = null;
 let detailRecordId = null;
 let siteExportColumnKeys = null;
+let siteExportIsCustomized = false;
 
 function userCan(perm) {
   return window.currentUser && (window.currentUser.permissions || []).includes(perm);
@@ -122,6 +123,10 @@ function getSelectedColumns() {
 }
 
 function getExportColumns() {
+  if (siteExportIsCustomized && siteExportColumnKeys && siteExportColumnKeys.length > 0) {
+    const colMap = new Map(REPORT_COLUMNS.map((c) => [c.key, c]));
+    return siteExportColumnKeys.map((k) => colMap.get(k)).filter(Boolean);
+  }
   const cols = getSelectedColumns();
   if (!siteExportColumnKeys || siteExportColumnKeys.length === 0) {
     return cols;
@@ -136,11 +141,13 @@ function getExportColumns() {
 
 async function loadSiteExportColumnOrder(siteId) {
   siteExportColumnKeys = null;
+  siteExportIsCustomized = false;
   if (!siteId) return;
   try {
     const res = await fetch(`/api/sites/${encodeURIComponent(siteId)}/export-column-order`);
     if (res.ok) {
       const json = await res.json();
+      siteExportIsCustomized = !!json.isCustomized;
       siteExportColumnKeys = json.columnKeys || null;
     }
   } catch { /* ignore */ }
