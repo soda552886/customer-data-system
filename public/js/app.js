@@ -28,6 +28,15 @@ function fieldVisible(field) {
   return true;
 }
 
+async function loadFieldsForSite(siteId) {
+  if (!siteId) {
+    fieldConfig = { sections: [], salesStaff: {} };
+    return;
+  }
+  const res = await fetch(`/api/fields?siteId=${encodeURIComponent(siteId)}`);
+  fieldConfig = await res.json();
+}
+
 function buildForm() {
   formSections.innerHTML = '';
 
@@ -125,6 +134,12 @@ function updateUI() {
   if (hasSite) {
     buildForm();
   }
+}
+
+async function onSiteChange() {
+  currentSiteId = siteSelect.value;
+  await loadFieldsForSite(currentSiteId);
+  updateUI();
 }
 
 function getVisitType() {
@@ -261,12 +276,10 @@ async function submitForm(e) {
 async function init() {
   if (window.navReady) await window.navReady;
 
-  const [sitesRes, fieldsRes] = await Promise.all([
+  const [sitesRes] = await Promise.all([
     fetch('/api/sites'),
-    fetch('/api/fields'),
   ]);
   sites = await sitesRes.json();
-  fieldConfig = await fieldsRes.json();
 
   sites.forEach((s) => {
     const opt = document.createElement('option');
@@ -285,10 +298,12 @@ async function init() {
     }
   }
 
-  siteSelect.addEventListener('change', () => {
-    currentSiteId = siteSelect.value;
+  if (currentSiteId) {
+    await loadFieldsForSite(currentSiteId);
     updateUI();
-  });
+  }
+
+  siteSelect.addEventListener('change', onSiteChange);
 
   document.querySelectorAll('input[name="visitType"]').forEach((radio) => {
     radio.addEventListener('change', () => {

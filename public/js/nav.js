@@ -2,6 +2,7 @@ const NAV_ITEMS = [
   { href: '/', label: '填寫表單', perm: 'submit_form', public: true },
   { href: '/search.html', label: '查看資料', perm: 'view_customers' },
   { href: '/import.html', label: '匯入資料', perm: 'import_customers' },
+  { href: '/field-options.html', label: '欄位選項', perm: 'manage_field_options' },
   { href: '/sites.html', label: '案場管理', perm: 'manage_sites' },
   { href: '/users.html', label: '人員管理', perm: 'manage_users' },
 ];

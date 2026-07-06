@@ -586,3 +586,33 @@ body {
 .form-group-btn { display: flex; flex-direction: column; }
 .btn-danger-sm { color: var(--danger); border-color: #f5c6cb; }
 .btn-danger-sm:hover { background: #fdecea; }
+
+.field-options-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  align-items: center;
+}
+.field-options-summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 1.05rem;
+  margin-bottom: 0.75rem;
+}
+.field-options-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 0.75rem;
+  background: #fafbfc;
+}
+.field-options-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+.field-options-count { margin-left: auto; }
+.field-options-grid { max-height: 220px; overflow-y: auto; }

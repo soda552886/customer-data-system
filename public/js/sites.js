@@ -29,7 +29,8 @@ async function loadSitesList() {
       const deleteSiteBtn = canDeleteSite
         ? `<button class="btn-sm btn-danger-sm" onclick="deleteSite('${s.id}', '${escapeAttr(s.name)}')">刪除案場</button>`
         : '';
-      const actions = [clearBtn, deleteSiteBtn].filter(Boolean).join(' ') || '<span class="hint">—</span>';
+      const fieldOptionsBtn = `<a href="/site-fields.html?site=${encodeURIComponent(s.id)}" class="btn-sm">欄位選項</a>`;
+      const actions = [fieldOptionsBtn, clearBtn, deleteSiteBtn].filter(Boolean).join(' ') || '<span class="hint">—</span>';
       return `<tr>
         <td><strong>${escapeHtml(s.name)}</strong></td>
         <td>${GROUP_LABELS[s.group] || s.group}</td>

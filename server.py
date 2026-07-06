@@ -16,6 +16,10 @@ from auth import (
     verify_password,
 )
 from config.sites import SITES as DEFAULT_SITES
+from field_options import (
+    apply_site_field_options, build_site_field_config, init_field_options_table,
+    load_site_option_overrides, normalize_save_payload, save_site_option_overrides,
+)
 
 BASE_DIR = Path(__file__).parent
 
@@ -66,6 +70,7 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_customers_visit_date ON customers(visit_date);
     ''')
     init_auth_tables(conn)
+    init_field_options_table(conn)
     migrate_retired_roles(conn)
     conn.commit()
 
@@ -595,6 +600,8 @@ def enforce_auth():
             '/import.html': 'import_customers',
             '/sites.html': 'manage_sites',
             '/users.html': 'manage_users',
+            '/site-fields.html': 'manage_field_options',
+            '/field-options.html': 'manage_field_options',
         }
         need = page_perms.get(path)
         if need and not user_has_permission(user, need):
@@ -950,9 +957,78 @@ def sites_page():
     return send_from_directory('public', 'sites.html')
 
 
+@app.route('/field-options.html')
+def field_options_index_page():
+    return send_from_directory('public', 'field-options.html')
+
+
+@app.route('/site-fields.html')
+def site_fields_page():
+    return send_from_directory('public', 'site-fields.html')
+
+
 @app.route('/api/fields')
 def api_fields():
-    return jsonify({'sections': FIELD_SECTIONS, 'salesStaff': SALES_STAFF})
+    site_id = (request.args.get('siteId') or '').strip()
+    sections = FIELD_SECTIONS
+    sales_staff = SALES_STAFF
+    if site_id:
+        conn = get_db()
+        row = conn.execute('SELECT id FROM sites WHERE id = ?', (site_id,)).fetchone()
+        if not row:
+            conn.close()
+            return jsonify({'error': '找不到此案場'}), 404
+        overrides = load_site_option_overrides(conn, site_id)
+        conn.close()
+        sections, sales_staff = apply_site_field_options(
+            FIELD_SECTIONS, site_id, SALES_STAFF, overrides,
+        )
+    return jsonify({'sections': sections, 'salesStaff': sales_staff})
+
+
+@app.route('/api/sites/<site_id>/field-options')
+def get_site_field_options(site_id):
+    conn, user, err = auth_guard('manage_field_options')
+    if err:
+        return err
+    row = conn.execute('SELECT id, name FROM sites WHERE id = ?', (site_id,)).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({'error': '找不到此案場'}), 404
+    denied = ensure_site_access(user, site_id)
+    if denied:
+        conn.close()
+        return denied
+    overrides = load_site_option_overrides(conn, site_id)
+    config = build_site_field_config(FIELD_SECTIONS, site_id, SALES_STAFF, overrides)
+    config['siteName'] = row['name']
+    conn.close()
+    return jsonify(config)
+
+
+@app.route('/api/sites/<site_id>/field-options', methods=['PUT'])
+def update_site_field_options(site_id):
+    conn, user, err = auth_guard('manage_field_options')
+    if err:
+        return err
+    row = conn.execute('SELECT id FROM sites WHERE id = ?', (site_id,)).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({'error': '找不到此案場'}), 404
+    denied = ensure_site_access(user, site_id)
+    if denied:
+        conn.close()
+        return denied
+    body = request.get_json() or {}
+    normalized = normalize_save_payload(
+        FIELD_SECTIONS, site_id, SALES_STAFF, body.get('options') or body,
+    )
+    save_site_option_overrides(conn, site_id, normalized)
+    conn.commit()
+    overrides = load_site_option_overrides(conn, site_id)
+    config = build_site_field_config(FIELD_SECTIONS, site_id, SALES_STAFF, overrides)
+    conn.close()
+    return jsonify({'success': True, **config})
 
 
 @app.route('/api/customers/lookup')

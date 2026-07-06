@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>欄位選項設定 - 得意佳</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <header class="header">
+    <div class="header-inner">
+      <h1><span class="brand">得意佳</span>客戶資料管理系統</h1>
+      <nav id="mainNav"></nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="card">
+      <div class="results-header">
+        <h2 id="pageTitle">欄位選項設定</h2>
+        <a href="/field-options.html" class="btn btn-outline">返回欄位選項</a>
+      </div>
+      <p class="hint">
+        勾選此案場填寫表單時要顯示的選項。未勾選的選項不會出現在下拉選單，可避免銷售人員誤選其他案場的選項。
+        若全部勾選則等同使用系統預設（全部選項）。
+      </p>
+      <div class="field-options-toolbar">
+        <button type="button" class="btn-sm" id="expandAllBtn">全部展開</button>
+        <button type="button" class="btn-sm" id="collapseAllBtn">全部收合</button>
+        <button type="button" class="btn-sm" id="resetAllBtn">恢復全部預設</button>
+        <button type="button" class="btn btn-primary" id="saveBtn">儲存設定</button>
+      </div>
+    </section>
+
+    <div id="fieldsContainer">
+      <section class="card"><p class="empty-row">載入中…</p></section>
+    </div>
+  </main>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="/js/nav.js"></script>
+  <script src="/js/site-fields.js"></script>
+</body>
+</html>

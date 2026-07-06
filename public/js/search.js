@@ -588,6 +588,7 @@ window.openEdit = async function (id) {
   editingRecord = record;
   document.getElementById('detailModal').classList.add('hidden');
 
+  await loadFieldConfigForSite(record.site_id);
   populateEditSiteSelect(record.site_id);
   document.querySelector(`input[name="editVisitType"][value="${record.visit_type}"]`)?.click();
   document.querySelector(`input[name="editIsDeal"][value="${record.is_deal ? '1' : '0'}"]`)?.click();
@@ -700,9 +701,16 @@ async function deleteAllCustomers() {
   await requestDeleteCustomers('');
 }
 
-async function loadFieldConfig() {
-  const res = await fetch('/api/fields');
+async function loadFieldConfigForSite(siteId) {
+  const url = siteId
+    ? `/api/fields?siteId=${encodeURIComponent(siteId)}`
+    : '/api/fields';
+  const res = await fetch(url);
   fieldConfig = await res.json();
+}
+
+async function loadFieldConfig() {
+  await loadFieldConfigForSite('');
 }
 
 async function exportCSV() {
@@ -788,7 +796,9 @@ document.getElementById('editModal').addEventListener('click', (e) => {
 document.getElementById('saveEditBtn').addEventListener('click', saveEdit);
 document.getElementById('deleteSiteDataBtn').addEventListener('click', deleteSiteCustomers);
 document.getElementById('deleteAllBtn').addEventListener('click', deleteAllCustomers);
-document.getElementById('editSite').addEventListener('change', () => {
+document.getElementById('editSite').addEventListener('change', async () => {
+  const siteId = document.getElementById('editSite').value;
+  await loadFieldConfigForSite(siteId);
   const data = editingRecord ? { ...editingRecord.data, ...collectEditFormData() } : collectEditFormData();
   buildEditForm();
   fillEditFormData(data);
