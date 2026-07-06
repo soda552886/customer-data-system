@@ -616,3 +616,38 @@ body {
 }
 .field-options-count { margin-left: auto; }
 .field-options-grid { max-height: 220px; overflow-y: auto; }
+
+.tab-bar {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+.tab-btn {
+  border: 1px solid var(--border);
+  background: #fff;
+  padding: 0.45rem 1rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.tab-btn.active {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+}
+.tab-panel.hidden { display: none; }
+
+.field-order-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.field-order-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.55rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.field-order-item span:first-child { flex: 1; }
+.field-order-actions { display: flex; gap: 0.35rem; }

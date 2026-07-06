@@ -16,10 +16,12 @@ ROLE_PERMISSIONS = {
     'executive': {
         'view_customers', 'edit_customers', 'delete_customers',
         'import_customers', 'export_customers', 'delete_all_customers',
-        'manage_sites', 'manage_users', 'manage_field_options', 'submit_form',
+        'manage_sites', 'manage_users', 'manage_field_options', 'view_audit_logs', 'submit_form',
     },
     'field_staff': {
-        'view_customers', 'edit_customers', 'manage_field_options', 'submit_form',
+        'view_customers', 'edit_customers', 'delete_customers',
+        'import_customers', 'export_customers',
+        'manage_field_options', 'view_audit_logs', 'submit_form',
     },
     'sales': {
         'submit_form',
@@ -28,7 +30,7 @@ ROLE_PERMISSIONS = {
 
 PROTECTED_PAGES = frozenset({
     '/search.html', '/import.html', '/sites.html', '/users.html',
-    '/site-fields.html', '/field-options.html',
+    '/site-fields.html', '/field-options.html', '/audit-log.html',
 })
 
 PUBLIC_API_PREFIXES = (

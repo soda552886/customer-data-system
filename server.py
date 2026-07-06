@@ -15,13 +15,20 @@ from auth import (
     migrate_retired_roles, save_user_sites, seed_initial_admin, user_can_access_site, user_has_permission,
     verify_password,
 )
+from audit import init_audit_table, log_operation, row_to_log_dict
 from config.sites import SITES as DEFAULT_SITES
 from field_options import (
-    apply_site_field_options, build_site_field_config, init_field_options_table,
-    load_site_option_overrides, normalize_save_payload, save_site_option_overrides,
+    apply_site_field_options, build_site_field_config, build_site_report_order_config,
+    flatten_report_column_order, init_field_options_table, load_site_option_overrides,
+    load_site_report_column_order, normalize_report_column_order, normalize_save_payload,
+    save_site_option_overrides, save_site_report_column_order,
 )
 
 BASE_DIR = Path(__file__).parent
+
+_report_cols_path = BASE_DIR / 'config' / 'report_columns.json'
+with open(_report_cols_path, encoding='utf-8') as _rc:
+    REPORT_COLUMNS = json.load(_rc)['columns']
 
 _fields_path = BASE_DIR / 'config' / 'fields_data.json'
 with open(_fields_path, encoding='utf-8') as _f:
@@ -71,6 +78,7 @@ def init_db():
     ''')
     init_auth_tables(conn)
     init_field_options_table(conn)
+    init_audit_table(conn)
     migrate_retired_roles(conn)
     conn.commit()
 
@@ -579,6 +587,14 @@ def ensure_site_access(user, site_id):
     return None
 
 
+def fields_payload_for_site(conn, site_id: str) -> dict:
+    overrides = load_site_option_overrides(conn, site_id)
+    sections, sales_staff = apply_site_field_options(
+        FIELD_SECTIONS, site_id, SALES_STAFF, overrides,
+    )
+    return {'sections': sections, 'salesStaff': sales_staff}
+
+
 @app.before_request
 def enforce_auth():
     path = request.path
@@ -602,6 +618,7 @@ def enforce_auth():
             '/users.html': 'manage_users',
             '/site-fields.html': 'manage_field_options',
             '/field-options.html': 'manage_field_options',
+            '/audit-log.html': 'view_audit_logs',
         }
         need = page_perms.get(path)
         if need and not user_has_permission(user, need):
@@ -650,12 +667,20 @@ def auth_login():
 
     session['user_id'] = row['id']
     user = get_user_by_username(conn, username)
+    log_operation(conn, user, 'login', f'{user["displayName"]} 登入系統')
+    conn.commit()
     conn.close()
     return jsonify({'success': True, 'user': user})
 
 
 @app.route('/api/auth/logout', methods=['POST'])
 def auth_logout():
+    conn = get_db()
+    user = get_current_user(conn)
+    if user:
+        log_operation(conn, user, 'logout', f'{user["displayName"]} 登出系統')
+        conn.commit()
+    conn.close()
     session.clear()
     return jsonify({'success': True})
 
@@ -718,6 +743,12 @@ def create_user():
         )
         user_id = cur.lastrowid
         save_user_sites(conn, user_id, site_ids)
+        log_operation(
+            conn, actor, 'user_create',
+            f'新增人員 {display_name}（{username}）',
+            entity_type='user', entity_id=user_id,
+            detail={'role': role, 'siteIds': site_ids},
+        )
         conn.commit()
     except sqlite3.IntegrityError:
         conn.close()
@@ -766,6 +797,12 @@ def update_user(user_id):
             return jsonify({'error': '現場人員至少需指派一個案場'}), 400
         save_user_sites(conn, user_id, site_ids)
 
+    log_operation(
+        conn, actor, 'user_update',
+        f'更新人員 {display_name}（{row["username"]}）',
+        entity_type='user', entity_id=user_id,
+        detail={'role': role, 'isActive': is_active},
+    )
     conn.commit()
     updated = get_user_by_username(conn, row['username'])
     conn.close()
@@ -866,6 +903,21 @@ def import_customers():
             except Exception as e:
                 errors.append({'row': i, 'message': str(e)})
 
+        site_name = None
+        if default_site_id:
+            site_row = conn.execute(
+                'SELECT name FROM sites WHERE id = ?', (default_site_id,),
+            ).fetchone()
+            site_name = site_row['name'] if site_row else default_site_id
+        log_operation(
+            conn, user, 'customer_import',
+            f'匯入客戶資料：成功 {imported} 筆，失敗 {len(errors)} 筆'
+            + (f'（{site_name}）' if site_name else ''),
+            site_id=default_site_id, site_name=site_name,
+            detail={'imported': imported, 'failed': len(errors), 'filename': file.filename},
+        )
+        conn.commit()
+
         return jsonify({
             'success': True,
             'imported': imported,
@@ -918,6 +970,12 @@ def create_site():
             'INSERT INTO sites (id, name, group_type) VALUES (?, ?, ?)',
             (site_id, name, group),
         )
+        log_operation(
+            conn, user, 'site_create',
+            f'新增案場 {name}',
+            entity_type='site', entity_id=site_id,
+            site_id=site_id, site_name=name,
+        )
         conn.commit()
     except sqlite3.IntegrityError:
         conn.close()
@@ -947,6 +1005,12 @@ def delete_site(site_id):
         }), 400
 
     conn.execute('DELETE FROM sites WHERE id = ?', (site_id,))
+    log_operation(
+        conn, user, 'site_delete',
+        f'刪除案場 {row["name"]}',
+        entity_type='site', entity_id=site_id,
+        site_id=site_id, site_name=row['name'],
+    )
     conn.commit()
     conn.close()
     return jsonify({'success': True})
@@ -967,23 +1031,24 @@ def site_fields_page():
     return send_from_directory('public', 'site-fields.html')
 
 
+@app.route('/audit-log.html')
+def audit_log_page():
+    return send_from_directory('public', 'audit-log.html')
+
+
 @app.route('/api/fields')
 def api_fields():
     site_id = (request.args.get('siteId') or '').strip()
-    sections = FIELD_SECTIONS
-    sales_staff = SALES_STAFF
-    if site_id:
-        conn = get_db()
-        row = conn.execute('SELECT id FROM sites WHERE id = ?', (site_id,)).fetchone()
-        if not row:
-            conn.close()
-            return jsonify({'error': '找不到此案場'}), 404
-        overrides = load_site_option_overrides(conn, site_id)
+    if not site_id:
+        return jsonify({'sections': FIELD_SECTIONS, 'salesStaff': SALES_STAFF})
+    conn = get_db()
+    row = conn.execute('SELECT id FROM sites WHERE id = ?', (site_id,)).fetchone()
+    if not row:
         conn.close()
-        sections, sales_staff = apply_site_field_options(
-            FIELD_SECTIONS, site_id, SALES_STAFF, overrides,
-        )
-    return jsonify({'sections': sections, 'salesStaff': sales_staff})
+        return jsonify({'error': '找不到此案場'}), 404
+    payload = fields_payload_for_site(conn, site_id)
+    conn.close()
+    return jsonify(payload)
 
 
 @app.route('/api/sites/<site_id>/field-options')
@@ -1001,7 +1066,10 @@ def get_site_field_options(site_id):
         return denied
     overrides = load_site_option_overrides(conn, site_id)
     config = build_site_field_config(FIELD_SECTIONS, site_id, SALES_STAFF, overrides)
+    order_saved = load_site_report_column_order(conn, site_id, REPORT_COLUMNS)
+    order_config = build_site_report_order_config(REPORT_COLUMNS, order_saved)
     config['siteName'] = row['name']
+    config['reportColumnOrder'] = order_config
     conn.close()
     return jsonify(config)
 
@@ -1011,7 +1079,7 @@ def update_site_field_options(site_id):
     conn, user, err = auth_guard('manage_field_options')
     if err:
         return err
-    row = conn.execute('SELECT id FROM sites WHERE id = ?', (site_id,)).fetchone()
+    row = conn.execute('SELECT id, name FROM sites WHERE id = ?', (site_id,)).fetchone()
     if not row:
         conn.close()
         return jsonify({'error': '找不到此案場'}), 404
@@ -1024,11 +1092,145 @@ def update_site_field_options(site_id):
         FIELD_SECTIONS, site_id, SALES_STAFF, body.get('options') or body,
     )
     save_site_option_overrides(conn, site_id, normalized)
+    log_operation(
+        conn, user, 'field_options_update',
+        f'更新「{row["name"]}」欄位選項',
+        site_id=site_id, site_name=row['name'],
+        detail={'customizedFields': list(normalized.keys())},
+    )
     conn.commit()
     overrides = load_site_option_overrides(conn, site_id)
     config = build_site_field_config(FIELD_SECTIONS, site_id, SALES_STAFF, overrides)
+    order_saved = load_site_report_column_order(conn, site_id, REPORT_COLUMNS)
+    config['reportColumnOrder'] = build_site_report_order_config(REPORT_COLUMNS, order_saved)
     conn.close()
     return jsonify({'success': True, **config})
+
+
+@app.route('/api/report-columns')
+def api_report_columns():
+    return jsonify({'columns': REPORT_COLUMNS})
+
+
+@app.route('/api/sites/<site_id>/field-order')
+def get_site_field_order(site_id):
+    conn, user, err = auth_guard('manage_field_options')
+    if err:
+        return err
+    row = conn.execute('SELECT id, name FROM sites WHERE id = ?', (site_id,)).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({'error': '找不到此案場'}), 404
+    denied = ensure_site_access(user, site_id)
+    if denied:
+        conn.close()
+        return denied
+    saved = load_site_report_column_order(conn, site_id, REPORT_COLUMNS)
+    config = build_site_report_order_config(REPORT_COLUMNS, saved)
+    config['siteId'] = site_id
+    config['siteName'] = row['name']
+    conn.close()
+    return jsonify(config)
+
+
+@app.route('/api/sites/<site_id>/export-column-order')
+def get_site_export_column_order(site_id):
+    """供查看資料頁匯出報表時取得欄位順序（不需管理權限，需可查看該案場）。"""
+    conn, user, err = auth_guard('view_customers')
+    if err:
+        return err
+    row = conn.execute('SELECT id, name FROM sites WHERE id = ?', (site_id,)).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({'error': '找不到此案場'}), 404
+    denied = ensure_site_access(user, site_id)
+    if denied:
+        conn.close()
+        return denied
+    saved = load_site_report_column_order(conn, site_id, REPORT_COLUMNS)
+    conn.close()
+    return jsonify({
+        'siteId': site_id,
+        'columnKeys': flatten_report_column_order(REPORT_COLUMNS, saved),
+    })
+
+
+@app.route('/api/sites/<site_id>/field-order', methods=['PUT'])
+def update_site_field_order(site_id):
+    conn, user, err = auth_guard('manage_field_options')
+    if err:
+        return err
+    row = conn.execute('SELECT id, name FROM sites WHERE id = ?', (site_id,)).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({'error': '找不到此案場'}), 404
+    denied = ensure_site_access(user, site_id)
+    if denied:
+        conn.close()
+        return denied
+    body = request.get_json() or {}
+    groups_payload = body.get('groups') or body.get('sections') or body
+    normalized = normalize_report_column_order(REPORT_COLUMNS, groups_payload)
+    if normalized:
+        save_site_report_column_order(conn, site_id, normalized)
+    else:
+        conn.execute('DELETE FROM site_field_order WHERE site_id = ?', (site_id,))
+    log_operation(
+        conn, user, 'report_column_order_update',
+        f'更新「{row["name"]}」報表匯出欄位順序',
+        site_id=site_id, site_name=row['name'],
+    )
+    conn.commit()
+    saved = load_site_report_column_order(conn, site_id, REPORT_COLUMNS)
+    config = build_site_report_order_config(REPORT_COLUMNS, saved)
+    config['siteId'] = site_id
+    config['siteName'] = row['name']
+    conn.close()
+    return jsonify({'success': True, **config})
+
+
+@app.route('/api/audit-logs')
+def list_audit_logs():
+    conn, user, err = auth_guard('view_audit_logs')
+    if err:
+        return err
+    page = max(1, int(request.args.get('page', 1)))
+    limit = min(200, max(1, int(request.args.get('limit', 50))))
+    site_id = (request.args.get('siteId') or '').strip()
+    action = (request.args.get('action') or '').strip()
+
+    if site_id:
+        denied = ensure_site_access(user, site_id)
+        if denied:
+            conn.close()
+            return denied
+
+    sql = 'SELECT * FROM operation_logs WHERE 1=1'
+    params = []
+    allowed_sites = get_allowed_site_ids(user)
+
+    if site_id:
+        sql += ' AND site_id = ?'
+        params.append(site_id)
+    elif allowed_sites is not None:
+        if not allowed_sites:
+            conn.close()
+            return jsonify({'total': 0, 'page': page, 'limit': limit, 'records': []})
+        placeholders = ','.join('?' * len(allowed_sites))
+        sql += f' AND (site_id IN ({placeholders}) OR site_id IS NULL)'
+        params.extend(allowed_sites)
+
+    if action:
+        sql += ' AND action = ?'
+        params.append(action)
+
+    count_sql = sql.replace('SELECT *', 'SELECT COUNT(*)', 1)
+    total = conn.execute(count_sql, params).fetchone()[0]
+    sql += ' ORDER BY id DESC LIMIT ? OFFSET ?'
+    params.extend([limit, (page - 1) * limit])
+    rows = [row_to_log_dict(r) for r in conn.execute(sql, params).fetchall()]
+    conn.close()
+    return jsonify({'total': total, 'page': page, 'limit': limit, 'records': rows})
 
 
 @app.route('/api/customers/lookup')
@@ -1080,14 +1282,25 @@ def create_customer():
         if denied:
             conn.close()
             return denied
-    conn.close()
 
     is_deal = body.get('isDeal') if 'isDeal' in body else None
     system, err = prepare_customer_system(site_id, data, visit_type, is_deal)
     if err:
+        conn.close()
         return jsonify({'error': err}), 400
 
     new_id = insert_customer_record(system, data)
+    customer_name = str(data.get('customerName', '')).strip() or '（未填姓名）'
+    if user:
+        log_operation(
+            conn, user, 'customer_create',
+            f'新增客戶 {customer_name}（{system["site_name"]}）',
+            entity_type='customer', entity_id=new_id,
+            site_id=site_id, site_name=system['site_name'],
+            detail={'visitType': visit_type},
+        )
+        conn.commit()
+    conn.close()
     return jsonify({'success': True, 'id': new_id})
 
 
@@ -1259,6 +1472,14 @@ def update_customer(record_id):
     if not update_customer_record(record_id, system, data):
         conn.close()
         return jsonify({'error': '更新失敗'}), 500
+    customer_name = str(data.get('customerName', '')).strip() or '（未填姓名）'
+    log_operation(
+        conn, user, 'customer_update',
+        f'編輯客戶 {customer_name}（{system["site_name"]}）',
+        entity_type='customer', entity_id=record_id,
+        site_id=site_id, site_name=system['site_name'],
+    )
+    conn.commit()
     conn.close()
     return jsonify({'success': True, 'id': record_id})
 
@@ -1268,7 +1489,7 @@ def delete_customer(record_id):
     conn, user, err = auth_guard('delete_customers')
     if err:
         return err
-    row = conn.execute('SELECT site_id FROM customers WHERE id = ?', (record_id,)).fetchone()
+    row = conn.execute('SELECT * FROM customers WHERE id = ?', (record_id,)).fetchone()
     if not row:
         conn.close()
         return jsonify({'error': '找不到資料'}), 404
@@ -1276,7 +1497,15 @@ def delete_customer(record_id):
     if denied:
         conn.close()
         return denied
+    data = json.loads(row['data'])
+    customer_name = str(data.get('customerName', '')).strip() or '（未填姓名）'
     cur = conn.execute('DELETE FROM customers WHERE id = ?', (record_id,))
+    log_operation(
+        conn, user, 'customer_delete',
+        f'刪除客戶 {customer_name}（{row["site_name"]}）',
+        entity_type='customer', entity_id=record_id,
+        site_id=row['site_id'], site_name=row['site_name'],
+    )
     conn.commit()
     conn.close()
     if cur.rowcount == 0:
@@ -1295,11 +1524,14 @@ def delete_all_customers():
         return jsonify({'error': '請輸入正確確認碼 DELETE ALL'}), 400
 
     site_id = (body.get('siteId') or '').strip()
+    site_name = None
     if site_id:
         denied = ensure_site_access(user, site_id)
         if denied:
             conn.close()
             return denied
+        site_row = conn.execute('SELECT name FROM sites WHERE id = ?', (site_id,)).fetchone()
+        site_name = site_row['name'] if site_row else site_id
         cur = conn.execute('DELETE FROM customers WHERE site_id = ?', (site_id,))
     else:
         if user['role'] != 'executive':
@@ -1307,6 +1539,12 @@ def delete_all_customers():
             return jsonify({'error': '僅最高主管可清空全部案場資料'}), 403
         cur = conn.execute('DELETE FROM customers')
     deleted = cur.rowcount
+    log_operation(
+        conn, user, 'customer_clear_site',
+        f'清空{site_name or "全部案場"}客戶資料：刪除 {deleted} 筆',
+        site_id=site_id or None, site_name=site_name,
+        detail={'deleted': deleted},
+    )
     conn.commit()
     conn.close()
     return jsonify({'success': True, 'deleted': deleted})

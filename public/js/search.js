@@ -6,6 +6,7 @@ let fieldConfig = { sections: [], salesStaff: {} };
 let editingRecordId = null;
 let editingRecord = null;
 let detailRecordId = null;
+let siteExportColumnKeys = null;
 
 function userCan(perm) {
   return window.currentUser && (window.currentUser.permissions || []).includes(perm);
@@ -23,6 +24,10 @@ function applyPermissionUI() {
   const exportBtn = document.getElementById('exportBtn');
   if (exportBtn && !userCan('export_customers')) {
     exportBtn.classList.add('hidden');
+  }
+  const detailEditBtn = document.getElementById('detailEditBtn');
+  if (detailEditBtn && !userCan('edit_customers')) {
+    detailEditBtn.classList.add('hidden');
   }
   const detailDeleteBtn = document.getElementById('detailDeleteBtn');
   if (detailDeleteBtn && !userCan('delete_customers')) {
@@ -114,6 +119,31 @@ function getSelectedColumnKeys() {
 function getSelectedColumns() {
   const keys = getSelectedColumnKeys();
   return REPORT_COLUMNS.filter((c) => keys.includes(c.key));
+}
+
+function getExportColumns() {
+  const cols = getSelectedColumns();
+  if (!siteExportColumnKeys || siteExportColumnKeys.length === 0) {
+    return cols;
+  }
+  const keyIndex = new Map(siteExportColumnKeys.map((k, i) => [k, i]));
+  return [...cols].sort((a, b) => {
+    const ai = keyIndex.has(a.key) ? keyIndex.get(a.key) : 9999;
+    const bi = keyIndex.has(b.key) ? keyIndex.get(b.key) : 9999;
+    return ai - bi;
+  });
+}
+
+async function loadSiteExportColumnOrder(siteId) {
+  siteExportColumnKeys = null;
+  if (!siteId) return;
+  try {
+    const res = await fetch(`/api/sites/${encodeURIComponent(siteId)}/export-column-order`);
+    if (res.ok) {
+      const json = await res.json();
+      siteExportColumnKeys = json.columnKeys || null;
+    }
+  } catch { /* ignore */ }
 }
 
 function renderColumnPicker() {
@@ -260,8 +290,9 @@ async function loadSites() {
     const delOpt = opt.cloneNode(true);
     deleteSel.appendChild(delOpt);
   });
-  sel.addEventListener('change', () => {
+  sel.addEventListener('change', async () => {
     updateSiteLabel();
+    await loadSiteExportColumnOrder(sel.value);
     currentPage = 1;
     doSearch();
   });
@@ -313,12 +344,15 @@ function renderResults(data) {
       const val = getCellValue(r, c.key);
       return `<td>${formatCellHtml(c.key, val, r)}</td>`;
     }).join('');
+    const editBtn = userCan('edit_customers')
+      ? `<button class="btn-sm" onclick="openEdit(${r.id})">編輯</button>`
+      : '';
     const deleteBtn = userCan('delete_customers')
       ? `<button class="btn-sm btn-danger-sm-solid" onclick="deleteRecord(${r.id})">刪除</button>`
       : '';
     return `<tr>${cells}<td class="action-btns">
       <button class="btn-sm" onclick="showDetail(${r.id})">詳情</button>
-      <button class="btn-sm" onclick="openEdit(${r.id})">編輯</button>
+      ${editBtn}
       ${deleteBtn}
     </td></tr>`;
   }).join('');
@@ -714,7 +748,7 @@ async function loadFieldConfig() {
 }
 
 async function exportCSV() {
-  const cols = getSelectedColumns();
+  const cols = getExportColumns();
   if (cols.length === 0) {
     alert('請至少選擇一個報表欄位');
     return;
@@ -819,6 +853,8 @@ async function bootSearch() {
   if (window.navReady) await window.navReady;
   await loadSites();
   applyFieldStaffSiteRestrictions();
+  const siteId = document.getElementById('searchSite').value;
+  await loadSiteExportColumnOrder(siteId);
   updateSiteLabel();
   applyPermissionUI();
   doSearch();

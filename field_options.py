@@ -17,6 +17,12 @@ def init_field_options_table(conn: sqlite3.Connection):
             FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE CASCADE
         );
         CREATE INDEX IF NOT EXISTS idx_site_field_options_site ON site_field_options(site_id);
+        CREATE TABLE IF NOT EXISTS site_field_order (
+            site_id TEXT PRIMARY KEY,
+            order_json TEXT NOT NULL,
+            updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+            FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE CASCADE
+        );
     ''')
 
 
@@ -166,3 +172,122 @@ def normalize_save_payload(
         if picked and set(picked) != allowed:
             normalized[field_key] = picked
     return normalized
+
+
+def default_report_column_order(report_columns: list) -> dict:
+    order = {}
+    for col in report_columns:
+        order.setdefault(col['group'], []).append(col['key'])
+    return order
+
+
+def report_column_map(report_columns: list) -> dict:
+    return {col['key']: col for col in report_columns}
+
+
+def load_site_report_column_order(
+    conn: sqlite3.Connection, site_id: str, report_columns: list,
+) -> Optional[dict]:
+    row = conn.execute(
+        'SELECT order_json FROM site_field_order WHERE site_id = ?', (site_id,),
+    ).fetchone()
+    if not row:
+        return None
+    data = json.loads(row['order_json'])
+    if isinstance(data, dict) and 'columnKeys' in data:
+        return _flat_keys_to_groups(data['columnKeys'], report_columns)
+    return data if isinstance(data, dict) else None
+
+
+def _flat_keys_to_groups(keys: list, report_columns: list) -> dict:
+    col_map = report_column_map(report_columns)
+    groups = default_report_column_order(report_columns)
+    result = {g: [] for g in groups}
+    for key in keys:
+        col = col_map.get(key)
+        if col and key not in result.get(col['group'], []):
+            result[col['group']].append(key)
+    for group, default_keys in groups.items():
+        for key in default_keys:
+            if key not in result[group]:
+                result[group].append(key)
+    return result
+
+
+def save_site_report_column_order(conn: sqlite3.Connection, site_id: str, order: dict):
+    conn.execute('DELETE FROM site_field_order WHERE site_id = ?', (site_id,))
+    if order:
+        conn.execute(
+            'INSERT INTO site_field_order (site_id, order_json) VALUES (?, ?)',
+            (site_id, json.dumps(order, ensure_ascii=False)),
+        )
+
+
+def normalize_report_column_order(report_columns: list, payload: dict) -> dict:
+    defaults = default_report_column_order(report_columns)
+    col_map = report_column_map(report_columns)
+    normalized = {}
+    for group, default_keys in defaults.items():
+        submitted = (payload or {}).get(group) or []
+        if not isinstance(submitted, list):
+            continue
+        allowed = set(default_keys)
+        ordered = [k for k in submitted if k in allowed]
+        for key in default_keys:
+            if key not in ordered:
+                ordered.append(key)
+        if ordered != default_keys:
+            normalized[group] = ordered
+    return normalized
+
+
+def build_site_report_order_config(report_columns: list, saved: Optional[dict]) -> dict:
+    defaults = default_report_column_order(report_columns)
+    order = saved if saved else defaults
+    col_map = report_column_map(report_columns)
+    groups = []
+    seen_groups = []
+    for col in report_columns:
+        if col['group'] not in seen_groups:
+            seen_groups.append(col['group'])
+
+    for group_title in seen_groups:
+        keys = order.get(group_title, defaults.get(group_title, []))
+        columns = []
+        seen = set()
+        for key in keys:
+            if key in col_map and key not in seen:
+                columns.append(col_map[key])
+                seen.add(key)
+        for key in defaults.get(group_title, []):
+            if key not in seen and key in col_map:
+                columns.append(col_map[key])
+                seen.add(key)
+        if columns:
+            groups.append({'groupTitle': group_title, 'columns': columns})
+
+    return {
+        'groups': groups,
+        'isCustomized': saved is not None,
+    }
+
+
+def flatten_report_column_order(report_columns: list, saved: Optional[dict]) -> list:
+    defaults = default_report_column_order(report_columns)
+    order = saved if saved else defaults
+    seen_groups = []
+    for col in report_columns:
+        if col['group'] not in seen_groups:
+            seen_groups.append(col['group'])
+    flat = []
+    for group in seen_groups:
+        flat.extend(order.get(group, defaults.get(group, [])))
+    return flat
+
+
+def sort_keys_for_export(report_columns: list, selected_keys: list, saved: Optional[dict]) -> list:
+    if not saved:
+        return list(selected_keys)
+    flat = flatten_report_column_order(report_columns, saved)
+    key_index = {k: i for i, k in enumerate(flat)}
+    return sorted(selected_keys, key=lambda k: key_index.get(k, 9999))

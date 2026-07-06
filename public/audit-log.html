@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>操作紀錄 - 得意佳</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <header class="header">
+    <div class="header-inner">
+      <h1><span class="brand">得意佳</span>客戶資料管理系統</h1>
+      <nav id="mainNav"></nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="card">
+      <h2>操作紀錄</h2>
+      <p class="hint">記錄登入、新增、編輯、刪除、匯入等操作。現場人員僅能查看所屬案場的紀錄。</p>
+      <div class="search-grid">
+        <div class="form-group">
+          <label for="logSite">案場</label>
+          <select id="logSite">
+            <option value="">全部可見案場</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="logAction">操作類型</label>
+          <select id="logAction">
+            <option value="">全部</option>
+            <option value="login">登入</option>
+            <option value="logout">登出</option>
+            <option value="customer_create">新增客戶</option>
+            <option value="customer_update">編輯客戶</option>
+            <option value="customer_delete">刪除客戶</option>
+            <option value="customer_import">匯入客戶</option>
+            <option value="customer_clear_site">清空案場資料</option>
+            <option value="field_options_update">更新欄位選項</option>
+            <option value="report_column_order_update">更新報表欄位順序</option>
+            <option value="user_create">新增人員</option>
+            <option value="user_update">更新人員</option>
+            <option value="site_create">新增案場</option>
+            <option value="site_delete">刪除案場</option>
+          </select>
+        </div>
+        <div class="form-group form-group-btn">
+          <label>&nbsp;</label>
+          <button type="button" class="btn btn-primary" id="searchLogBtn">查詢</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="results-header">
+        <h2>紀錄列表 <span id="logCount" class="badge">0 筆</span></h2>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>時間</th>
+              <th>操作人員</th>
+              <th>類型</th>
+              <th>案場</th>
+              <th>摘要</th>
+            </tr>
+          </thead>
+          <tbody id="logBody">
+            <tr><td colspan="5" class="empty-row">載入中…</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div id="logPagination" class="pagination hidden"></div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="/js/nav.js"></script>
+  <script src="/js/audit-log.js"></script>
+</body>
+</html>
