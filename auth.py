@@ -20,7 +20,7 @@ ROLE_PERMISSIONS = {
     },
     'field_staff': {
         'view_customers', 'edit_customers', 'delete_customers',
-        'import_customers', 'export_customers',
+        'import_customers', 'export_customers', 'delete_all_customers',
         'manage_field_options', 'view_audit_logs', 'submit_form',
     },
     'sales': {

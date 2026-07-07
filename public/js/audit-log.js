@@ -7,6 +7,24 @@ function escapeHtml(str) {
     .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+function formatLogTime(raw) {
+  if (!raw) return '—';
+  // DB stores a naive timestamp; treat it as UTC then render in Taipei time.
+  const iso = String(raw).trim().replace(' ', 'T');
+  const d = new Date(`${iso}Z`);
+  if (Number.isNaN(d.getTime())) return String(raw).slice(0, 19);
+  return new Intl.DateTimeFormat('zh-TW', {
+    timeZone: 'Asia/Taipei',
+    hour12: false,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).format(d).replace(/\//g, '-');
+}
+
 async function loadSites() {
   const res = await fetch('/api/sites');
   sites = await res.json();
@@ -41,7 +59,7 @@ async function loadLogs() {
 
   tbody.innerHTML = data.records.map((r) => `
     <tr>
-      <td>${escapeHtml((r.createdAt || '').slice(0, 19))}</td>
+      <td>${escapeHtml(formatLogTime(r.createdAt))}</td>
       <td>${escapeHtml(r.displayName || r.username || '—')}</td>
       <td>${escapeHtml(r.actionLabel || r.action)}</td>
       <td>${escapeHtml(r.siteName || '—')}</td>
