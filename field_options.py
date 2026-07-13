@@ -52,7 +52,7 @@ def iter_configurable_fields(sections: list, site_id: str, sales_staff: dict) ->
                 continue
 
             if field.get('dynamicStaff'):
-                if staff_added or not staff_defaults:
+                if staff_added:
                     continue
                 staff_added = True
                 items.append({
@@ -96,11 +96,56 @@ def save_site_option_overrides(conn: sqlite3.Connection, site_id: str, config: d
         )
 
 
-def enabled_options(default_options: list, overrides: dict, field_key: str) -> list:
+def _normalize_override_list(raw) -> list:
+    if isinstance(raw, dict):
+        raw = raw.get('enabled') or raw.get('options') or []
+    if not isinstance(raw, list):
+        return []
+    out = []
+    seen = set()
+    for opt in raw:
+        s = str(opt).strip()
+        if not s or s in seen:
+            continue
+        out.append(s)
+        seen.add(s)
+    return out
+
+
+def resolve_field_options(default_options: list, overrides: dict, field_key: str) -> tuple[list, list, bool]:
+    """Return (allOptions, enabledOptions, isCustomized).
+
+    Overrides may include custom values beyond system defaults.
+    """
+    defaults = list(default_options or [])
     if field_key not in overrides:
-        return list(default_options)
-    allowed = set(overrides[field_key])
-    return [opt for opt in default_options if opt in allowed]
+        return defaults, list(defaults), False
+
+    enabled = _normalize_override_list(overrides.get(field_key))
+    default_set = set(defaults)
+    all_options = list(defaults)
+    for opt in enabled:
+        if opt not in default_set and opt not in all_options:
+            all_options.append(opt)
+
+    enabled_ordered = []
+    seen = set()
+    for opt in defaults:
+        if opt in set(enabled) and opt not in seen:
+            enabled_ordered.append(opt)
+            seen.add(opt)
+    for opt in enabled:
+        if opt not in seen:
+            enabled_ordered.append(opt)
+            seen.add(opt)
+
+    is_customized = enabled_ordered != defaults
+    return all_options, enabled_ordered, is_customized
+
+
+def enabled_options(default_options: list, overrides: dict, field_key: str) -> list:
+    _, enabled, _ = resolve_field_options(default_options, overrides, field_key)
+    return enabled
 
 
 def build_site_field_config(
@@ -113,11 +158,13 @@ def build_site_field_config(
     for item in iter_configurable_fields(sections, site_id, sales_staff):
         key = item['key']
         defaults = item['defaultOptions']
+        all_options, enabled, is_customized = resolve_field_options(defaults, overrides, key)
         fields.append({
             **item,
-            'allOptions': defaults,
-            'enabledOptions': enabled_options(defaults, overrides, key),
-            'isCustomized': key in overrides,
+            'defaultOptions': defaults,
+            'allOptions': all_options,
+            'enabledOptions': enabled,
+            'isCustomized': is_customized,
         })
     return {'siteId': site_id, 'fields': fields}
 
@@ -131,12 +178,10 @@ def apply_site_field_options(
     sections_out = copy.deepcopy(sections)
     sales_staff_out = copy.deepcopy(sales_staff)
 
-    staff_enabled = enabled_options(
-        sales_staff.get(site_id, []),
-        overrides,
-        SALES_STAFF_FIELD_KEY,
-    )
     if SALES_STAFF_FIELD_KEY in overrides:
+        _, staff_enabled, _ = resolve_field_options(
+            sales_staff.get(site_id, []), overrides, SALES_STAFF_FIELD_KEY,
+        )
         sales_staff_out[site_id] = staff_enabled
 
     for section in sections_out:
@@ -147,7 +192,8 @@ def apply_site_field_options(
                 continue
             key = field['key']
             if key in overrides:
-                field['options'] = enabled_options(field.get('options', []), overrides, key)
+                _, enabled, _ = resolve_field_options(field.get('options', []), overrides, key)
+                field['options'] = enabled
 
     return sections_out, sales_staff_out
 
@@ -158,7 +204,7 @@ def normalize_save_payload(
     sales_staff: dict,
     payload: dict,
 ) -> dict:
-    """Keep only valid field keys and option values."""
+    """Keep valid field keys; allow custom option strings beyond defaults."""
     configurable = {
         item['key']: item['defaultOptions']
         for item in iter_configurable_fields(sections, site_id, sales_staff)
@@ -167,9 +213,11 @@ def normalize_save_payload(
     for field_key, selected in (payload or {}).items():
         if field_key not in configurable:
             continue
-        allowed = set(configurable[field_key])
-        picked = [opt for opt in (selected or []) if opt in allowed]
-        if picked and set(picked) != allowed:
+        defaults = list(configurable[field_key] or [])
+        picked = _normalize_override_list(selected)
+        if not picked:
+            continue
+        if picked != defaults:
             normalized[field_key] = picked
     return normalized
 

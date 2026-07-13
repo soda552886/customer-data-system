@@ -616,6 +616,21 @@ body {
 }
 .field-options-count { margin-left: auto; }
 .field-options-grid { max-height: 220px; overflow-y: auto; }
+.field-options-grid .option-custom {
+  background: #f3f6fa;
+  border-radius: 4px;
+  padding-right: 0.35rem;
+}
+.btn-xs {
+  border: none;
+  background: transparent;
+  color: #888;
+  cursor: pointer;
+  padding: 0 0.2rem;
+  font-size: 0.85rem;
+  line-height: 1;
+}
+.btn-xs:hover { color: #c0392b; }
 
 .tab-bar {
   display: flex;

@@ -51,30 +51,81 @@ function renderFields() {
   container.querySelectorAll('[data-select-none]').forEach((btn) => {
     btn.addEventListener('click', () => toggleFieldOptions(btn.dataset.selectNone, false));
   });
+  container.querySelectorAll('[data-add-option]').forEach((btn) => {
+    btn.addEventListener('click', () => addCustomOption(btn.dataset.addOption));
+  });
+  container.querySelectorAll('[data-remove-option]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      removeCustomOption(btn.dataset.fieldKey, btn.dataset.removeOption);
+    });
+  });
+}
+
+function isCustomOption(field, opt) {
+  const defaults = field.defaultOptions || [];
+  return !defaults.includes(opt);
 }
 
 function renderFieldCard(field) {
+  if (!field.defaultOptions) field.defaultOptions = [...(field.allOptions || [])];
   const enabled = new Set(field.enabledOptions || []);
   const total = field.allOptions.length;
   const count = enabled.size;
-  const checks = field.allOptions.map((opt) => `
-    <label class="checkbox-label">
+  const checks = field.allOptions.map((opt) => {
+    const custom = isCustomOption(field, opt);
+    return `
+    <label class="checkbox-label${custom ? ' option-custom' : ''}">
       <input type="checkbox" data-field-key="${escapeHtml(field.key)}" value="${escapeHtml(opt)}" ${enabled.has(opt) ? 'checked' : ''}>
-      ${escapeHtml(opt)}
+      ${escapeHtml(opt)}${custom ? ' <span class="hint">自訂</span>' : ''}
+      ${custom ? `<button type="button" class="btn-xs link-btn" data-field-key="${escapeHtml(field.key)}" data-remove-option="${escapeHtml(opt)}" title="移除自訂選項">✕</button>` : ''}
     </label>
-  `).join('');
+  `;
+  }).join('');
 
   return `
     <div class="field-options-card" data-field-key="${escapeHtml(field.key)}">
       <div class="field-options-card-head">
         <strong>${escapeHtml(field.label)}</strong>
         <span class="hint field-options-count" data-count-for="${escapeHtml(field.key)}">${count} / ${total} 項</span>
+        <button type="button" class="btn-sm" data-add-option="${escapeHtml(field.key)}">新增選項</button>
         <button type="button" class="btn-sm" data-select-all="${escapeHtml(field.key)}">全選</button>
         <button type="button" class="btn-sm" data-select-none="${escapeHtml(field.key)}">全不選</button>
       </div>
-      <div class="checkbox-grid field-options-grid">${checks}</div>
+      <div class="checkbox-grid field-options-grid">${checks || '<p class="hint">尚無選項，請按「新增選項」</p>'}</div>
     </div>
   `;
+}
+
+function addCustomOption(fieldKey) {
+  const field = fieldItems.find((f) => f.key === fieldKey);
+  if (!field) return;
+  const raw = window.prompt(`為「${field.label}」新增選項：`);
+  if (raw === null) return;
+  const value = raw.trim();
+  if (!value) {
+    showToast('請輸入選項名稱', 'error');
+    return;
+  }
+  if (!field.defaultOptions) field.defaultOptions = [];
+  if (!field.allOptions) field.allOptions = [...field.defaultOptions];
+  if (!field.enabledOptions) field.enabledOptions = [...field.allOptions];
+  if (field.allOptions.includes(value)) {
+    showToast('此選項已存在', 'error');
+    return;
+  }
+  field.allOptions.push(value);
+  field.enabledOptions.push(value);
+  renderFields();
+  showToast(`已新增「${value}」，請記得按「儲存選項」`);
+}
+
+function removeCustomOption(fieldKey, optionValue) {
+  const field = fieldItems.find((f) => f.key === fieldKey);
+  if (!field) return;
+  if (!isCustomOption(field, optionValue)) return;
+  field.allOptions = (field.allOptions || []).filter((o) => o !== optionValue);
+  field.enabledOptions = (field.enabledOptions || []).filter((o) => o !== optionValue);
+  renderFields();
 }
 
 function updateExportCount() {
@@ -157,7 +208,14 @@ function collectOptionsPayload() {
   fieldItems.forEach((field) => {
     const boxes = document.querySelectorAll(`#fieldsContainer input[data-field-key="${CSS.escape(field.key)}"]`);
     const selected = Array.from(boxes).filter((cb) => cb.checked).map((cb) => cb.value);
-    if (selected.length && selected.length < field.allOptions.length) {
+    const defaults = field.defaultOptions || [];
+    if (!selected.length) return;
+    const sameAsDefaults = (
+      selected.length === defaults.length
+      && selected.every((s) => defaults.includes(s))
+      && defaults.every((d) => selected.includes(d))
+    );
+    if (!sameAsDefaults) {
       payload[field.key] = selected;
     }
   });
@@ -270,9 +328,12 @@ document.getElementById('collapseAllBtn').addEventListener('click', () => {
   document.querySelectorAll('#fieldsContainer .field-options-section details').forEach((el) => { el.open = false; });
 });
 document.getElementById('resetAllBtn').addEventListener('click', async () => {
-  if (!confirm('確定恢復全部欄位為系統預設選項？')) return;
+  if (!confirm('確定恢復全部欄位為系統預設選項？（自訂選項也會清除）')) return;
   fieldItems.forEach((field) => {
-    field.enabledOptions = [...field.allOptions];
+    const defaults = field.defaultOptions || field.allOptions || [];
+    field.defaultOptions = [...defaults];
+    field.allOptions = [...defaults];
+    field.enabledOptions = [...defaults];
   });
   renderFields();
   await saveOptions();
