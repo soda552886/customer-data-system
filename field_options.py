@@ -97,19 +97,10 @@ def save_site_option_overrides(conn: sqlite3.Connection, site_id: str, config: d
 
 
 def enabled_options(default_options: list, overrides: dict, field_key: str) -> list:
-    """Return enabled options for a field.
-
-    Empty or non-matching overrides fall back to defaults so required
-    dropdowns (e.g. 區域) never become unusable on the form.
-    """
-    defaults = list(default_options or [])
     if field_key not in overrides:
-        return defaults
-    allowed = set(overrides.get(field_key) or [])
-    if not allowed:
-        return defaults
-    enabled = [opt for opt in defaults if opt in allowed]
-    return enabled if enabled else defaults
+        return list(default_options)
+    allowed = set(overrides[field_key])
+    return [opt for opt in default_options if opt in allowed]
 
 
 def build_site_field_config(
@@ -122,19 +113,11 @@ def build_site_field_config(
     for item in iter_configurable_fields(sections, site_id, sales_staff):
         key = item['key']
         defaults = item['defaultOptions']
-        enabled = enabled_options(defaults, overrides, key)
-        # Treat empty/invalid override as not customized
-        is_customized = (
-            key in overrides
-            and bool(overrides.get(key))
-            and enabled != defaults
-            and set(enabled) != set(defaults)
-        )
         fields.append({
             **item,
             'allOptions': defaults,
-            'enabledOptions': enabled,
-            'isCustomized': is_customized,
+            'enabledOptions': enabled_options(defaults, overrides, key),
+            'isCustomized': key in overrides,
         })
     return {'siteId': site_id, 'fields': fields}
 
@@ -148,12 +131,13 @@ def apply_site_field_options(
     sections_out = copy.deepcopy(sections)
     sales_staff_out = copy.deepcopy(sales_staff)
 
+    staff_enabled = enabled_options(
+        sales_staff.get(site_id, []),
+        overrides,
+        SALES_STAFF_FIELD_KEY,
+    )
     if SALES_STAFF_FIELD_KEY in overrides:
-        staff_defaults = list(sales_staff.get(site_id, []))
-        staff_enabled = enabled_options(staff_defaults, overrides, SALES_STAFF_FIELD_KEY)
-        # Only apply when at least one salesperson remains
-        if staff_enabled:
-            sales_staff_out[site_id] = staff_enabled
+        sales_staff_out[site_id] = staff_enabled
 
     for section in sections_out:
         for field in section.get('fields', []):
@@ -162,13 +146,8 @@ def apply_site_field_options(
             if field.get('dynamicStaff'):
                 continue
             key = field['key']
-            if key not in overrides:
-                continue
-            defaults = list(field.get('options') or [])
-            enabled = enabled_options(defaults, overrides, key)
-            # Never blank out a dropdown — empty would block form submit
-            if enabled:
-                field['options'] = enabled
+            if key in overrides:
+                field['options'] = enabled_options(field.get('options', []), overrides, key)
 
     return sections_out, sales_staff_out
 
