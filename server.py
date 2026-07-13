@@ -255,6 +255,7 @@ LABEL_TO_KEY = {
     '已購/成交因素': 'purchasedReason', '已購因素': 'purchasedReason',
     '洽談內容': 'discussion', '客戶來源': 'customerSource', '客戶誠意度': 'sincerity',
     '銷售人員1': 'salesperson1', '銷售人員2': 'salesperson2',
+    '接待人員': 'salesperson1', '接待人員1': 'salesperson1', '接待人員2': 'salesperson2',
     '備註': 'remark', '客戶狀態': 'customerStatus',
     '退戶日期': 'cancelDate', '退戶原因': 'cancelReason',
     '時間戳記': '_timestamp',
@@ -333,21 +334,21 @@ def has_existing_customer(site_id, phone, exclude_record_id=None):
 
 def infer_visit_type(system, data, exclude_record_id=None):
     vt = str(system.get('visit_type') or '').strip()
+    # CSV／檔名／表單已明確指定時，直接採用，避免「新客」被誤判成「回訪」
+    if vt in ('新客', '回訪'):
+        return vt
+
     has_return_signals = any([
         data.get('returnVisitDate'),
         data.get('firstVisitDate'),
         data.get('prevVisitDate'),
         data.get('visitCount'),
     ])
-    if vt not in ('新客', '回訪'):
-        if has_return_signals or has_existing_customer(
-            system['site_id'], data.get('phone'), exclude_record_id,
-        ):
-            return '回訪'
-        return '新客'
-    if vt == '新客' and has_return_signals:
+    if has_return_signals or has_existing_customer(
+        system.get('site_id'), data.get('phone'), exclude_record_id,
+    ):
         return '回訪'
-    return vt
+    return '新客'
 
 
 def prepare_customer_system(site_id, data, visit_type=None, is_deal=None, exclude_record_id=None):

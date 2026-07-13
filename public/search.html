@@ -112,14 +112,22 @@
           <button type="button" id="resetCols" class="btn-sm">恢復預設</button>
         </div>
       </div>
-      <p class="hint">勾選要顯示在列表與匯出報表中的欄位</p>
+      <p class="hint" id="columnPickerHint">勾選要顯示在列表與匯出報表中的欄位</p>
       <div id="columnPicker" class="column-picker"></div>
     </section>
 
     <section class="card">
       <div class="results-header">
         <h2>資料列表 <span id="resultCount" class="badge">0 筆</span></h2>
-        <button type="button" id="exportBtn" class="btn btn-secondary">匯出報表 (CSV)</button>
+        <div class="export-actions">
+          <div class="date-preset-row" title="匯出前可先選日期範圍">
+            <button type="button" class="btn-sm" data-date-preset="day">日內</button>
+            <button type="button" class="btn-sm" data-date-preset="week">周內</button>
+            <button type="button" class="btn-sm" data-date-preset="month">月內</button>
+            <button type="button" class="btn-sm" data-date-preset="all">全部</button>
+          </div>
+          <button type="button" id="exportBtn" class="btn btn-secondary">匯出報表 (CSV)</button>
+        </div>
       </div>
       <div class="table-wrap">
         <table class="data-table" id="resultsTable">

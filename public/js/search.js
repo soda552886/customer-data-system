@@ -14,25 +14,28 @@ function userCan(perm) {
 }
 
 function applyPermissionUI() {
+  const user = window.currentUser;
   const dangerZone = document.querySelector('.danger-zone');
   if (dangerZone) {
-    if (!userCan('delete_all_customers')) {
-      dangerZone.classList.add('hidden');
-    } else if (window.currentUser && window.currentUser.role !== 'executive') {
-      document.getElementById('deleteAllBtn')?.classList.add('hidden');
+    const canBulkDelete = userCan('delete_all_customers');
+    dangerZone.classList.toggle('hidden', !canBulkDelete);
+    const deleteAllBtn = document.getElementById('deleteAllBtn');
+    if (deleteAllBtn) {
+      deleteAllBtn.classList.toggle('hidden', !(canBulkDelete && user && user.role === 'executive'));
     }
   }
   const exportBtn = document.getElementById('exportBtn');
-  if (exportBtn && !userCan('export_customers')) {
-    exportBtn.classList.add('hidden');
+  if (exportBtn) {
+    // toggle 而非只 add，避免登入狀態尚未就緒時被永久隱藏
+    exportBtn.classList.toggle('hidden', !userCan('export_customers'));
   }
   const detailEditBtn = document.getElementById('detailEditBtn');
-  if (detailEditBtn && !userCan('edit_customers')) {
-    detailEditBtn.classList.add('hidden');
+  if (detailEditBtn) {
+    detailEditBtn.classList.toggle('hidden', !userCan('edit_customers'));
   }
   const detailDeleteBtn = document.getElementById('detailDeleteBtn');
-  if (detailDeleteBtn && !userCan('delete_customers')) {
-    detailDeleteBtn.classList.add('hidden');
+  if (detailDeleteBtn) {
+    detailDeleteBtn.classList.toggle('hidden', !userCan('delete_customers'));
   }
 }
 
@@ -142,7 +145,10 @@ function getExportColumns() {
 async function loadSiteExportColumnOrder(siteId) {
   siteExportColumnKeys = null;
   siteExportIsCustomized = false;
-  if (!siteId) return;
+  if (!siteId) {
+    updateColumnPickerHint();
+    return;
+  }
   try {
     const res = await fetch(`/api/sites/${encodeURIComponent(siteId)}/export-column-order`);
     if (res.ok) {
@@ -151,6 +157,26 @@ async function loadSiteExportColumnOrder(siteId) {
       siteExportColumnKeys = json.columnKeys || null;
     }
   } catch { /* ignore */ }
+  updateColumnPickerHint();
+  syncColumnPickerToSiteExport();
+}
+
+function updateColumnPickerHint() {
+  const hint = document.getElementById('columnPickerHint');
+  if (!hint) return;
+  if (siteExportIsCustomized) {
+    hint.textContent = '此案場已設定專屬匯出欄位與順序，匯出 CSV 會依案場設定；下方勾選主要影響列表顯示。';
+  } else {
+    hint.textContent = '勾選要顯示在列表與匯出報表中的欄位';
+  }
+}
+
+function syncColumnPickerToSiteExport() {
+  if (!siteExportIsCustomized || !siteExportColumnKeys) return;
+  const set = new Set(siteExportColumnKeys);
+  document.querySelectorAll('#columnPicker input').forEach((cb) => {
+    cb.checked = set.has(cb.value);
+  });
 }
 
 function renderColumnPicker() {
@@ -178,6 +204,8 @@ function renderColumnPicker() {
       if (lastResults.length > 0) renderResults({ records: lastResults, total: lastTotal, page: currentPage, limit: 50 });
     });
   });
+  syncColumnPickerToSiteExport();
+  updateColumnPickerHint();
 }
 
 function setAllColumns(checked) {
@@ -582,7 +610,7 @@ function fillEditFormData(data) {
   fieldConfig.sections.forEach((section) => {
     section.fields.filter((f) => fieldVisibleForEdit(f, siteId, visitType)).forEach((field) => {
       const val = data[field.key];
-      if (val === undefined || val === null) return;
+      if (val === undefined || val === null || val === '') return;
 
       if (field.type === 'multiselect' && Array.isArray(val)) {
         val.forEach((v) => {
@@ -591,7 +619,17 @@ function fillEditFormData(data) {
         });
       } else {
         const el = document.getElementById(`edit_${field.key}`);
-        if (el) el.value = val;
+        if (!el) return;
+        if (el.tagName === 'SELECT') {
+          const exists = Array.from(el.options).some((o) => o.value === String(val));
+          if (!exists) {
+            const opt = document.createElement('option');
+            opt.value = String(val);
+            opt.textContent = field.dynamicStaff ? `${val}（原銷售／已離職）` : String(val);
+            el.appendChild(opt);
+          }
+        }
+        el.value = val;
       }
     });
   });

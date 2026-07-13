@@ -200,7 +200,7 @@ function fillFormData(data) {
   fieldConfig.sections.forEach((section) => {
     section.fields.filter(fieldVisible).forEach((field) => {
       const val = data[field.key];
-      if (val === undefined || val === null) return;
+      if (val === undefined || val === null || val === '') return;
 
       if (field.type === 'multiselect' && Array.isArray(val)) {
         val.forEach((v) => {
@@ -209,10 +209,23 @@ function fillFormData(data) {
         });
       } else {
         const el = document.getElementById(field.key);
-        if (el) el.value = val;
+        if (!el) return;
+        ensureSelectHasOption(el, val, field.dynamicStaff ? '（原銷售／已離職）' : '');
+        el.value = val;
       }
     });
   });
+}
+
+/** Ensure a <select> can display a value not in current options (e.g. former salesperson). */
+function ensureSelectHasOption(el, value, suffix = '') {
+  if (!el || el.tagName !== 'SELECT' || value === undefined || value === null || value === '') return;
+  const exists = Array.from(el.options).some((o) => o.value === String(value));
+  if (exists) return;
+  const opt = document.createElement('option');
+  opt.value = String(value);
+  opt.textContent = suffix ? `${value}${suffix}` : String(value);
+  el.appendChild(opt);
 }
 
 async function lookupCustomer() {
