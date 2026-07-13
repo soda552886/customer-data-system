@@ -3,6 +3,7 @@ const siteId = params.get('site') || '';
 
 let fieldItems = [];
 let exportColumns = [];
+let visibilityFields = [];
 let siteName = '';
 
 function showToast(msg, type = 'success') {
@@ -232,6 +233,63 @@ function applyExportConfig(config) {
   exportColumns = (config && config.columns) ? config.columns.map((col) => ({ ...col })) : [];
 }
 
+function applyVisibilityConfig(config) {
+  visibilityFields = (config && config.fields)
+    ? config.fields.map((f) => ({ ...f }))
+    : [];
+}
+
+function updateVisibilityCount() {
+  const label = document.getElementById('visibilityCountLabel');
+  if (!label) return;
+  const shown = visibilityFields.filter((f) => f.visible).length;
+  label.textContent = `顯示 ${shown} / ${visibilityFields.length} 個欄位`;
+}
+
+function renderVisibility() {
+  const container = document.getElementById('visibilityContainer');
+  if (!visibilityFields.length) {
+    container.innerHTML = '<p class="empty-row">沒有可設定的表單欄位</p>';
+    return;
+  }
+  const grouped = groupBySection(visibilityFields);
+  container.innerHTML = Array.from(grouped.entries()).map(([sectionTitle, fields]) => `
+    <section class="field-options-section">
+      <h3 class="field-options-summary">${escapeHtml(sectionTitle)}</h3>
+      <ul class="field-visibility-list">
+        ${fields.map((field) => `
+          <li class="field-visibility-item">
+            <label class="checkbox-label">
+              <input type="checkbox"
+                data-visibility-key="${escapeHtml(field.key)}"
+                ${field.visible ? 'checked' : ''}
+                ${field.locked ? 'disabled' : ''}>
+              ${escapeHtml(field.label)}
+              ${field.required ? '<span class="hint">必填</span>' : ''}
+              ${field.locked ? '<span class="hint">（不可隱藏）</span>' : ''}
+            </label>
+          </li>
+        `).join('')}
+      </ul>
+    </section>
+  `).join('');
+
+  container.querySelectorAll('[data-visibility-key]').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      const field = visibilityFields.find((f) => f.key === cb.dataset.visibilityKey);
+      if (field && !field.locked) {
+        field.visible = cb.checked;
+        updateVisibilityCount();
+      }
+    });
+  });
+  updateVisibilityCount();
+}
+
+function collectHiddenFieldsPayload() {
+  return visibilityFields.filter((f) => !f.visible && !f.locked).map((f) => f.key);
+}
+
 async function loadConfig() {
   if (!siteId) {
     document.getElementById('fieldsContainer').innerHTML =
@@ -251,8 +309,10 @@ async function loadConfig() {
   siteName = json.siteName || siteId;
   fieldItems = json.fields || [];
   applyExportConfig(json.reportExport);
+  applyVisibilityConfig(json.fieldVisibility);
   document.getElementById('pageTitle').textContent = `案場欄位設定：${siteName}`;
   renderFields();
+  renderVisibility();
   renderOrder();
 }
 
@@ -272,8 +332,34 @@ async function saveOptions() {
     }
     fieldItems = json.fields || fieldItems;
     if (json.reportExport) applyExportConfig(json.reportExport);
+    if (json.fieldVisibility) applyVisibilityConfig(json.fieldVisibility);
     renderFields();
+    renderVisibility();
     showToast('欄位選項已儲存');
+  } catch {
+    showToast('儲存失敗', 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function saveVisibility() {
+  const btn = document.getElementById('saveVisibilityBtn');
+  btn.disabled = true;
+  try {
+    const res = await fetch(`/api/sites/${encodeURIComponent(siteId)}/field-options`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ hiddenFields: collectHiddenFieldsPayload() }),
+    });
+    const json = await res.json();
+    if (!res.ok) {
+      showToast(json.error || '儲存失敗', 'error');
+      return;
+    }
+    if (json.fieldVisibility) applyVisibilityConfig(json.fieldVisibility);
+    renderVisibility();
+    showToast('欄位顯示設定已儲存');
   } catch {
     showToast('儲存失敗', 'error');
   } finally {
@@ -315,11 +401,17 @@ document.querySelectorAll('.tab-btn').forEach((btn) => {
     document.querySelectorAll('.tab-btn').forEach((b) => b.classList.remove('active'));
     document.querySelectorAll('.tab-panel').forEach((p) => p.classList.add('hidden'));
     btn.classList.add('active');
-    document.getElementById(btn.dataset.tab === 'options' ? 'panelOptions' : 'panelOrder').classList.remove('hidden');
+    const map = {
+      options: 'panelOptions',
+      visibility: 'panelVisibility',
+      order: 'panelOrder',
+    };
+    document.getElementById(map[btn.dataset.tab] || 'panelOptions').classList.remove('hidden');
   });
 });
 
 document.getElementById('saveOptionsBtn').addEventListener('click', saveOptions);
+document.getElementById('saveVisibilityBtn').addEventListener('click', saveVisibility);
 document.getElementById('saveOrderBtn').addEventListener('click', saveOrder);
 document.getElementById('expandAllBtn').addEventListener('click', () => {
   document.querySelectorAll('#fieldsContainer .field-options-section details').forEach((el) => { el.open = true; });
@@ -337,6 +429,16 @@ document.getElementById('resetAllBtn').addEventListener('click', async () => {
   });
   renderFields();
   await saveOptions();
+});
+document.getElementById('showAllFieldsBtn').addEventListener('click', () => {
+  visibilityFields.forEach((f) => { f.visible = true; });
+  renderVisibility();
+});
+document.getElementById('resetVisibilityBtn').addEventListener('click', async () => {
+  if (!confirm('確定恢復為全部欄位都顯示？')) return;
+  visibilityFields.forEach((f) => { f.visible = true; });
+  renderVisibility();
+  await saveVisibility();
 });
 document.getElementById('selectAllExportBtn').addEventListener('click', () => toggleAllExportColumns(true));
 document.getElementById('selectNoneExportBtn').addEventListener('click', () => toggleAllExportColumns(false));

@@ -19,10 +19,12 @@ from auth import (
 from audit import init_audit_table, log_operation, row_to_log_dict
 from config.sites import SITES as DEFAULT_SITES
 from field_options import (
-    apply_site_field_options, build_site_field_config, build_site_report_export_config,
-    export_column_keys_for_site, init_field_options_table, load_site_option_overrides,
-    load_site_report_export_config, normalize_report_export_payload, normalize_save_payload,
-    save_site_option_overrides, save_site_report_export_config,
+    apply_site_field_options, apply_site_hidden_fields, build_site_field_config,
+    build_site_field_visibility, build_site_report_export_config,
+    export_column_keys_for_site, init_field_options_table, load_site_hidden_fields,
+    load_site_option_overrides, load_site_report_export_config,
+    normalize_hidden_fields_payload, normalize_report_export_payload, normalize_save_payload,
+    save_site_hidden_fields, save_site_option_overrides, save_site_report_export_config,
 )
 
 BASE_DIR = Path(__file__).parent
@@ -605,6 +607,8 @@ def fields_payload_for_site(conn, site_id: str) -> dict:
     sections, sales_staff = apply_site_field_options(
         FIELD_SECTIONS, site_id, SALES_STAFF, overrides,
     )
+    hidden = load_site_hidden_fields(conn, site_id)
+    sections = apply_site_hidden_fields(sections, hidden)
     return {'sections': sections, 'salesStaff': sales_staff}
 
 
@@ -1118,6 +1122,8 @@ def get_site_field_options(site_id):
         return denied
     overrides = load_site_option_overrides(conn, site_id)
     config = build_site_field_config(FIELD_SECTIONS, site_id, SALES_STAFF, overrides)
+    hidden = load_site_hidden_fields(conn, site_id)
+    config['fieldVisibility'] = build_site_field_visibility(FIELD_SECTIONS, site_id, hidden)
     export_saved = load_site_report_export_config(conn, site_id, REPORT_COLUMNS)
     export_config = build_site_report_export_config(REPORT_COLUMNS, export_saved)
     config['siteName'] = row['name']
@@ -1140,21 +1146,52 @@ def update_site_field_options(site_id):
         conn.close()
         return denied
     body = request.get_json() or {}
-    normalized = normalize_save_payload(
-        FIELD_SECTIONS, site_id, SALES_STAFF, body.get('options') or body,
-    )
-    save_site_option_overrides(conn, site_id, normalized)
-    log_operation(
-        conn, user, 'field_options_update',
-        f'更新「{row["name"]}」欄位選項',
-        site_id=site_id, site_name=row['name'],
-        detail={'customizedFields': list(normalized.keys())},
-    )
+
+    if 'options' in body:
+        normalized = normalize_save_payload(
+            FIELD_SECTIONS, site_id, SALES_STAFF, body.get('options') or {},
+        )
+        save_site_option_overrides(conn, site_id, normalized)
+        log_operation(
+            conn, user, 'field_options_update',
+            f'更新「{row["name"]}」欄位選項',
+            site_id=site_id, site_name=row['name'],
+            detail={'customizedFields': list(normalized.keys())},
+        )
+
+    if 'hiddenFields' in body:
+        hidden = normalize_hidden_fields_payload(
+            FIELD_SECTIONS, site_id, body.get('hiddenFields'),
+        )
+        save_site_hidden_fields(conn, site_id, hidden)
+        log_operation(
+            conn, user, 'field_options_update',
+            f'更新「{row["name"]}」欄位顯示設定（隱藏 {len(hidden)} 項）',
+            site_id=site_id, site_name=row['name'],
+            detail={'hiddenFields': hidden},
+        )
+
+    # Backward compatible: old clients send options map at top level
+    if 'options' not in body and 'hiddenFields' not in body:
+        normalized = normalize_save_payload(
+            FIELD_SECTIONS, site_id, SALES_STAFF, body,
+        )
+        save_site_option_overrides(conn, site_id, normalized)
+        log_operation(
+            conn, user, 'field_options_update',
+            f'更新「{row["name"]}」欄位選項',
+            site_id=site_id, site_name=row['name'],
+            detail={'customizedFields': list(normalized.keys())},
+        )
+
     conn.commit()
     overrides = load_site_option_overrides(conn, site_id)
     config = build_site_field_config(FIELD_SECTIONS, site_id, SALES_STAFF, overrides)
+    hidden = load_site_hidden_fields(conn, site_id)
+    config['fieldVisibility'] = build_site_field_visibility(FIELD_SECTIONS, site_id, hidden)
     export_saved = load_site_report_export_config(conn, site_id, REPORT_COLUMNS)
     config['reportExport'] = build_site_report_export_config(REPORT_COLUMNS, export_saved)
+    config['siteName'] = row['name']
     conn.close()
     return jsonify({'success': True, **config})
 
@@ -1249,7 +1286,7 @@ def list_audit_logs():
     if err:
         return err
     page = max(1, int(request.args.get('page', 1)))
-    limit = min(200, max(1, int(request.args.get('limit', 50))))
+    limit = min(10000, max(1, int(request.args.get('limit', 50))))
     site_id = (request.args.get('siteId') or '').strip()
     action = (request.args.get('action') or '').strip()
 
@@ -1379,7 +1416,7 @@ def list_customers():
     exclude_deal = request.args.get('excludeDeal', '') in ('1', 'true')
     status_filter = request.args.get('customerStatus', '').strip()
     page = max(1, int(request.args.get('page', 1)))
-    limit = min(200, max(1, int(request.args.get('limit', 50))))
+    limit = min(10000, max(1, int(request.args.get('limit', 50))))
 
     allowed_sites = get_allowed_site_ids(user)
     if site_id:

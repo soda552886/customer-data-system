@@ -5,6 +5,12 @@ from typing import Any, Optional
 
 SALES_STAFF_FIELD_KEY = '__salesStaff__'
 
+# 填表時不可隱藏的核心欄位
+ALWAYS_VISIBLE_FIELD_KEYS = frozenset({
+    'customerName',
+    'phone',
+})
+
 
 def init_field_options_table(conn: sqlite3.Connection):
     conn.executescript('''
@@ -23,6 +29,13 @@ def init_field_options_table(conn: sqlite3.Connection):
             updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
             FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE CASCADE
         );
+        CREATE TABLE IF NOT EXISTS site_hidden_fields (
+            site_id TEXT NOT NULL,
+            field_key TEXT NOT NULL,
+            PRIMARY KEY (site_id, field_key),
+            FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_site_hidden_fields_site ON site_hidden_fields(site_id);
     ''')
 
 
@@ -220,6 +233,99 @@ def normalize_save_payload(
         if picked != defaults:
             normalized[field_key] = picked
     return normalized
+
+
+def iter_visibility_fields(sections: list, site_id: str) -> list:
+    """All form fields applicable to a site (for show/hide settings)."""
+    items = []
+    seen = set()
+    for section in sections:
+        for field in section.get('fields', []):
+            key = field.get('key')
+            if not key or key in seen:
+                continue
+            if not field_applies_to_site(field, site_id):
+                continue
+            seen.add(key)
+            items.append({
+                'key': key,
+                'label': field.get('label') or key,
+                'sectionTitle': section.get('title', ''),
+                'type': field.get('type', 'text'),
+                'required': bool(field.get('required')),
+                'locked': key in ALWAYS_VISIBLE_FIELD_KEYS,
+            })
+    return items
+
+
+def load_site_hidden_fields(conn: sqlite3.Connection, site_id: str) -> list:
+    rows = conn.execute(
+        'SELECT field_key FROM site_hidden_fields WHERE site_id = ?',
+        (site_id,),
+    ).fetchall()
+    return [row['field_key'] for row in rows]
+
+
+def save_site_hidden_fields(conn: sqlite3.Connection, site_id: str, hidden_keys: list):
+    conn.execute('DELETE FROM site_hidden_fields WHERE site_id = ?', (site_id,))
+    for key in hidden_keys or []:
+        if not key or key in ALWAYS_VISIBLE_FIELD_KEYS:
+            continue
+        conn.execute(
+            'INSERT OR IGNORE INTO site_hidden_fields (site_id, field_key) VALUES (?, ?)',
+            (site_id, key),
+        )
+
+
+def normalize_hidden_fields_payload(sections: list, site_id: str, payload) -> list:
+    allowed = {item['key'] for item in iter_visibility_fields(sections, site_id)}
+    raw = payload if isinstance(payload, list) else []
+    hidden = []
+    seen = set()
+    for key in raw:
+        k = str(key or '').strip()
+        if not k or k in seen or k not in allowed or k in ALWAYS_VISIBLE_FIELD_KEYS:
+            continue
+        hidden.append(k)
+        seen.add(k)
+    return hidden
+
+
+def build_site_field_visibility(
+    sections: list, site_id: str, hidden_keys: Optional[list],
+) -> dict:
+    hidden_set = set(hidden_keys or [])
+    fields = []
+    for item in iter_visibility_fields(sections, site_id):
+        visible = item['key'] not in hidden_set
+        if item['locked']:
+            visible = True
+        fields.append({
+            **item,
+            'visible': visible,
+        })
+    effective_hidden = [f['key'] for f in fields if not f['visible']]
+    return {
+        'fields': fields,
+        'hiddenKeys': effective_hidden,
+        'isCustomized': bool(effective_hidden),
+    }
+
+
+def apply_site_hidden_fields(sections: list, hidden_keys: Optional[list]) -> list:
+    hidden_set = {
+        k for k in (hidden_keys or [])
+        if k and k not in ALWAYS_VISIBLE_FIELD_KEYS
+    }
+    if not hidden_set:
+        return sections
+    sections_out = copy.deepcopy(sections)
+    for section in sections_out:
+        section['fields'] = [
+            f for f in section.get('fields', [])
+            if f.get('key') not in hidden_set
+        ]
+    return [s for s in sections_out if s.get('fields')]
 
 
 def report_column_map(report_columns: list) -> dict:

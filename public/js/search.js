@@ -807,12 +807,57 @@ function clearSearch() {
   if (!(window.currentUser?.role === 'field_staff' && sites.length === 1)) {
     document.getElementById('searchSite').value = '';
   }
+  document.querySelectorAll('[data-date-preset]').forEach((btn) => btn.classList.remove('active'));
   updateSiteLabel();
   currentPage = 1;
+  doSearch();
+}
+
+function formatDateInput(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function applyDatePreset(preset) {
+  const yearEl = document.getElementById('searchYear');
+  const startEl = document.getElementById('searchStartDate');
+  const endEl = document.getElementById('searchEndDate');
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  document.querySelectorAll('[data-date-preset]').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.datePreset === preset);
+  });
+
+  if (preset === 'all') {
+    yearEl.value = '';
+    startEl.value = '';
+    endEl.value = '';
+    return;
+  }
+
+  yearEl.value = '';
+  const end = formatDateInput(today);
+  const start = new Date(today);
+  if (preset === 'day') {
+    // 日內：今天
+  } else if (preset === 'week') {
+    start.setDate(start.getDate() - 6);
+  } else if (preset === 'month') {
+    start.setDate(1);
+  }
+  startEl.value = formatDateInput(start);
+  endEl.value = end;
 }
 
 document.getElementById('searchBtn').addEventListener('click', () => { currentPage = 1; doSearch(); });
-document.getElementById('clearSearchBtn').addEventListener('click', () => { clearSearch(); doSearch(); });
+document.getElementById('clearSearchBtn').addEventListener('click', clearSearch);
+document.querySelectorAll('[data-date-preset]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    applyDatePreset(btn.dataset.datePreset);
+    currentPage = 1;
+    doSearch();
+  });
+});
 document.getElementById('dealPresetBtn').addEventListener('click', () => {
   document.getElementById('searchDeal').value = '1';
   currentPage = 1;

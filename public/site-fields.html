@@ -22,6 +22,7 @@
       </div>
       <div class="tab-bar">
         <button type="button" class="tab-btn active" data-tab="options">下拉選項</button>
+        <button type="button" class="tab-btn" data-tab="visibility">欄位顯示</button>
         <button type="button" class="tab-btn" data-tab="order">報表匯出順序</button>
       </div>
     </section>
@@ -38,6 +39,20 @@
         <button type="button" class="btn btn-primary" id="saveOptionsBtn">儲存選項</button>
       </div>
       <div id="fieldsContainer"><p class="empty-row">載入中…</p></div>
+    </section>
+
+    <section class="card tab-panel hidden" id="panelVisibility">
+      <p class="hint">
+        勾選「顯示」的欄位會出現在此案場的填寫表單；取消勾選即可隱藏（銷售不必填寫）。
+        客戶姓名、主要電話為必填核心欄位，無法隱藏。
+      </p>
+      <div class="field-options-toolbar">
+        <span class="hint" id="visibilityCountLabel"></span>
+        <button type="button" class="btn-sm" id="showAllFieldsBtn">全部顯示</button>
+        <button type="button" class="btn-sm" id="resetVisibilityBtn">恢復預設（全部顯示）</button>
+        <button type="button" class="btn btn-primary" id="saveVisibilityBtn">儲存顯示設定</button>
+      </div>
+      <div id="visibilityContainer"><p class="empty-row">載入中…</p></div>
     </section>
 
     <section class="card tab-panel hidden" id="panelOrder">
