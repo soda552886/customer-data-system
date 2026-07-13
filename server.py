@@ -6,6 +6,7 @@ import re
 import sqlite3
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import quote
 
 from flask import Flask, jsonify, request, send_from_directory, Response, session, redirect
 
@@ -284,7 +285,7 @@ def map_header_to_key(header):
     return None
 
 TEMPLATE_HEADERS = [
-    '案場', '客戶類型', '是否成交', '日期', '客戶姓名', '主要電話', '區域',
+    '案場', '客戶類型', '是否成交', '日期', '客戶姓名', '主要聯繫電話', '區域',
     '年齡', '職業', '總價預算', '媒體1', '媒體2', '洽談內容', '銷售人員1', '備註',
 ]
 
@@ -879,11 +880,18 @@ def import_template():
         '首學杭州', '新客', '否', '2026-07-01', '王小明', '0912345678', '大安區',
         '31-40歲', '上班族', '2000萬以下', 'FB', '介紹', '客戶對產品有興趣，需回去討論', '簡婉如', '',
     ])
-    bom = '\ufeff'
+    # ASCII fallback + RFC 5987 UTF-8 filename，避免中文檔名導致下載失敗
+    utf8_name = quote('得意佳_客戶資料匯入範本.csv')
     return Response(
-        bom + output.getvalue(),
+        '\ufeff' + output.getvalue(),
         mimetype='text/csv; charset=utf-8',
-        headers={'Content-Disposition': 'attachment; filename=得意佳_客戶資料匯入範本.csv'},
+        headers={
+            'Content-Disposition': (
+                "attachment; filename=\"deyijia_import_template.csv\"; "
+                f"filename*=UTF-8''{utf8_name}"
+            ),
+            'Cache-Control': 'no-store',
+        },
     )
 
 
