@@ -154,14 +154,19 @@ function toggleFieldOptions(fieldKey, checked) {
 
 function collectOptionsPayload() {
   const payload = {};
+  const emptyLabels = [];
   fieldItems.forEach((field) => {
     const boxes = document.querySelectorAll(`#fieldsContainer input[data-field-key="${CSS.escape(field.key)}"]`);
     const selected = Array.from(boxes).filter((cb) => cb.checked).map((cb) => cb.value);
-    if (selected.length && selected.length < field.allOptions.length) {
+    if (selected.length === 0) {
+      emptyLabels.push(field.label);
+      return;
+    }
+    if (selected.length < field.allOptions.length) {
       payload[field.key] = selected;
     }
   });
-  return payload;
+  return { payload, emptyLabels };
 }
 
 function collectExportPayload() {
@@ -200,12 +205,20 @@ async function loadConfig() {
 
 async function saveOptions() {
   const btn = document.getElementById('saveOptionsBtn');
+  const { payload, emptyLabels } = collectOptionsPayload();
+  if (emptyLabels.length) {
+    showToast(
+      `「${emptyLabels.join('、')}」尚未勾選任何選項。請至少勾選一項，或按「全選」後再儲存（全不選會恢復系統預設）。`,
+      'error',
+    );
+    return;
+  }
   btn.disabled = true;
   try {
     const res = await fetch(`/api/sites/${encodeURIComponent(siteId)}/field-options`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ options: collectOptionsPayload() }),
+      body: JSON.stringify({ options: payload }),
     });
     const json = await res.json();
     if (!res.ok) {
