@@ -11,6 +11,43 @@ ALWAYS_VISIBLE_FIELD_KEYS = frozenset({
     'phone',
 })
 
+# 區域選項：依第一字繁體筆劃由小到大
+_REGION_FIRST_CHAR_STROKES = {
+    '八': 2,
+    '三': 3, '土': 3, '大': 3, '士': 3,
+    '中': 4, '五': 4, '內': 4, '文': 4,
+    '北': 5, '永': 5, '台': 5, '外': 5,
+    '西': 6, '竹': 6,
+    '其': 7,
+    '松': 8, '板': 8, '林': 8, '東': 8, '苗': 8,
+    '信': 9, '南': 9, '後': 9,
+    '泰': 10, '桃': 10, '造': 10,
+    '淡': 11,
+    '新': 13, '萬': 13,
+    '樹': 16, '頭': 16,
+    '蘆': 19,
+}
+
+
+def sort_region_options(options: list) -> list:
+    """Sort region labels by traditional stroke count of the first character."""
+    if not options:
+        return []
+    seen = set()
+    unique = []
+    for opt in options:
+        s = str(opt).strip()
+        if not s or s in seen:
+            continue
+        unique.append(s)
+        seen.add(s)
+
+    def sort_key(label: str):
+        ch = label[0]
+        return (_REGION_FIRST_CHAR_STROKES.get(ch, 999), ch, label)
+
+    return sorted(unique, key=sort_key)
+
 
 def init_field_options_table(conn: sqlite3.Connection):
     conn.executescript('''
@@ -172,6 +209,9 @@ def build_site_field_config(
         key = item['key']
         defaults = item['defaultOptions']
         all_options, enabled, is_customized = resolve_field_options(defaults, overrides, key)
+        if key == 'region':
+            all_options = sort_region_options(all_options)
+            enabled = sort_region_options(enabled)
         fields.append({
             **item,
             'defaultOptions': defaults,
@@ -207,6 +247,8 @@ def apply_site_field_options(
             if key in overrides:
                 _, enabled, _ = resolve_field_options(field.get('options', []), overrides, key)
                 field['options'] = enabled
+            if key == 'region':
+                field['options'] = sort_region_options(field.get('options') or [])
 
     return sections_out, sales_staff_out
 
