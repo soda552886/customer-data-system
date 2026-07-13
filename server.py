@@ -1350,6 +1350,13 @@ def lookup_customer():
     for row in rows:
         data = json.loads(row['data'])
         if normalized in normalize_phone(data.get('phone', '')):
+            # Ensure first-visit date is available for form autofill
+            if not data.get('visitDate') and row['visit_date']:
+                data['visitDate'] = row['visit_date']
+            if not data.get('firstVisitDate'):
+                data['firstVisitDate'] = (
+                    data.get('visitDate') or row['first_visit_date'] or row['visit_date']
+                )
             record = dict(row)
             record['data'] = data
             return jsonify({'found': True, 'record': record})

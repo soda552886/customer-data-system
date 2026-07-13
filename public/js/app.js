@@ -14,6 +14,27 @@ function todayStr() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+/** Normalize various date strings to YYYY-MM-DD for <input type="date">. */
+function toDateInputValue(raw) {
+  if (!raw) return '';
+  const s = String(raw).trim().split(/\s+/)[0];
+  let m = s.match(/^(\d{4})[./-](\d{1,2})[./-](\d{1,2})$/);
+  if (m) {
+    return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+  }
+  m = s.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/);
+  if (m) {
+    return `${m[3]}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}`;
+  }
+  m = s.match(/^(\d{2,3})[./-](\d{1,2})[./-](\d{1,2})$/);
+  if (m) {
+    let year = Number(m[1]);
+    if (year < 1911) year += 1911;
+    return `${year}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+  }
+  return s;
+}
+
 function showToast(msg, type = 'success') {
   const toast = document.getElementById('toast');
   toast.textContent = msg;
@@ -210,12 +231,18 @@ async function lookupCustomer() {
     resultEl.classList.remove('hidden');
 
     if (json.found) {
-      const d = json.record.data;
+      const record = json.record || {};
+      const d = record.data || {};
       fillFormData(d);
-      if (d.visitDate) {
-        const firstEl = document.getElementById('firstVisitDate');
-        if (firstEl) firstEl.value = d.visitDate;
-      }
+
+      // 初訪日期：優先 data 內欄位，其次系統欄 visit_date / first_visit_date
+      const firstVisitRaw = (
+        d.firstVisitDate || d.visitDate || record.first_visit_date || record.visit_date || ''
+      );
+      const firstVisit = toDateInputValue(firstVisitRaw);
+      const firstEl = document.getElementById('firstVisitDate');
+      if (firstEl && firstVisit) firstEl.value = firstVisit;
+
       if (d.customerName) {
         const nameEl = document.getElementById('customerName');
         if (nameEl) nameEl.value = d.customerName;
@@ -227,7 +254,7 @@ async function lookupCustomer() {
       if (returnEl) returnEl.value = todayStr();
 
       resultEl.className = 'lookup-result success';
-      resultEl.textContent = `已找到初訪資料：${d.customerName || ''}（${d.visitDate || ''}），已自動帶入客況`;
+      resultEl.textContent = `已找到初訪資料：${d.customerName || ''}（${firstVisit || firstVisitRaw || '日期未建檔'}），已自動帶入客況`;
     } else {
       resultEl.className = 'lookup-result error';
       resultEl.textContent = '找不到此電話的初訪紀錄，請確認案場與電話是否正確';
