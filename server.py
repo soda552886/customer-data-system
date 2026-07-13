@@ -232,7 +232,9 @@ LABEL_TO_KEY = {
     '參觀日期': 'visitDate', '首次參觀日期': 'firstVisitDate',
     '回訪日期': 'returnVisitDate', '前次來訪日期': 'prevVisitDate',
     '回訪次數': 'visitCount', '回籠次數': 'returnCount',
-    '客戶姓名': 'customerName', '主要電話': 'phone', '次要電話': 'phoneSecondary',
+    '客戶姓名': 'customerName', '主要電話': 'phone', '主要聯繫電話': 'phone',
+    '電話': 'phone', '聯絡電話': 'phone', '手機': 'phone', '連絡電話': 'phone',
+    '次要電話': 'phoneSecondary', '次要聯繫電話': 'phoneSecondary',
     '居住地址': 'address', '街道路名或社區': 'streetCommunity', '區域': 'region',
     '年齡': 'age', '職業': 'occupation', '購屋用途': 'purchasePurpose',
     '購屋動機': 'purchaseMotive', '購屋需求': 'purchaseNeed',
@@ -265,10 +267,20 @@ ALL_FIELD_KEYS = set(LABEL_TO_KEY.values()) | MULTISELECT_KEYS | {
 
 def map_header_to_key(header):
     h = str(header).strip().lstrip('\ufeff')
+    # Google 表單常見後綴／必填標記
+    h = re.sub(r'[\s\*＊]+$', '', h)
+    h = re.sub(r'[（(]必填[)）]$', '', h).strip()
     if h in LABEL_TO_KEY:
         return LABEL_TO_KEY[h]
     if h in ALL_FIELD_KEYS:
         return h
+    # 模糊比對常見電話／姓名欄
+    if '次要' in h and '電話' in h:
+        return 'phoneSecondary'
+    if '電話' in h or h.lower() in ('phone', 'mobile', 'tel'):
+        return 'phone'
+    if '姓名' in h or '客戶名' in h:
+        return 'customerName'
     return None
 
 TEMPLATE_HEADERS = [
