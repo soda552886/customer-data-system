@@ -29,7 +29,7 @@ ROLE_PERMISSIONS = {
 }
 
 PROTECTED_PAGES = frozenset({
-    '/search.html', '/import.html', '/sites.html', '/users.html',
+    '/search.html', '/sites.html', '/users.html',
     '/site-fields.html', '/field-options.html', '/audit-log.html',
 })
 
@@ -39,9 +39,11 @@ PUBLIC_API_PREFIXES = (
 PUBLIC_API_EXACT = frozenset({
     '/api/sites',
     '/api/fields',
+    '/api/import/template',
 })
 PUBLIC_API_POST_ONLY = frozenset({
     '/api/customers',
+    '/api/customers/import',
 })
 
 

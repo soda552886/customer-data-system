@@ -509,24 +509,33 @@ function buildEditForm() {
       group.appendChild(label);
 
       if (field.type === 'select') {
-        const input = document.createElement('select');
-        input.id = `edit_${field.key}`;
-        input.name = field.key;
-        const empty = document.createElement('option');
-        empty.value = '';
-        empty.textContent = '請選擇';
-        input.appendChild(empty);
         let options = field.options || [];
         if (field.dynamicStaff) {
           options = fieldConfig.salesStaff[siteId] || [];
         }
-        options.forEach((opt) => {
-          const o = document.createElement('option');
-          o.value = opt;
-          o.textContent = opt;
-          input.appendChild(o);
-        });
-        group.appendChild(input);
+        if (!options.length) {
+          const input = document.createElement('input');
+          input.type = 'text';
+          input.id = `edit_${field.key}`;
+          input.name = field.key;
+          input.placeholder = field.dynamicStaff ? '請輸入銷售人員姓名' : `請輸入${field.label}`;
+          group.appendChild(input);
+        } else {
+          const input = document.createElement('select');
+          input.id = `edit_${field.key}`;
+          input.name = field.key;
+          const empty = document.createElement('option');
+          empty.value = '';
+          empty.textContent = '請選擇';
+          input.appendChild(empty);
+          options.forEach((opt) => {
+            const o = document.createElement('option');
+            o.value = opt;
+            o.textContent = opt;
+            input.appendChild(o);
+          });
+          group.appendChild(input);
+        }
       } else if (field.type === 'multiselect') {
         const wrap = document.createElement('div');
         wrap.className = 'checkbox-grid';

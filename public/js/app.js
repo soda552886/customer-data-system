@@ -61,25 +61,34 @@ function buildForm() {
 
       let input;
       if (field.type === 'select') {
-        input = document.createElement('select');
-        input.id = field.key;
-        input.name = field.key;
-        if (field.required) input.required = true;
-        const empty = document.createElement('option');
-        empty.value = '';
-        empty.textContent = '請選擇';
-        input.appendChild(empty);
-
         let options = field.options || [];
         if (field.dynamicStaff) {
           options = fieldConfig.salesStaff[currentSiteId] || [];
         }
-        options.forEach((opt) => {
-          const o = document.createElement('option');
-          o.value = opt;
-          o.textContent = opt;
-          input.appendChild(o);
-        });
+        // 案場尚無下拉選項時改為文字輸入，避免必填下拉無法選擇而無法送出
+        if (!options.length) {
+          input = document.createElement('input');
+          input.type = 'text';
+          input.id = field.key;
+          input.name = field.key;
+          input.placeholder = field.dynamicStaff ? '請輸入銷售人員姓名' : `請輸入${field.label}`;
+          if (field.required) input.required = true;
+        } else {
+          input = document.createElement('select');
+          input.id = field.key;
+          input.name = field.key;
+          if (field.required) input.required = true;
+          const empty = document.createElement('option');
+          empty.value = '';
+          empty.textContent = '請選擇';
+          input.appendChild(empty);
+          options.forEach((opt) => {
+            const o = document.createElement('option');
+            o.value = opt;
+            o.textContent = opt;
+            input.appendChild(o);
+          });
+        }
       } else if (field.type === 'multiselect') {
         const wrap = document.createElement('div');
         wrap.className = 'checkbox-grid';

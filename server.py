@@ -613,7 +613,6 @@ def enforce_auth():
             return redirect(f'/login.html?next={path}')
         page_perms = {
             '/search.html': 'view_customers',
-            '/import.html': 'import_customers',
             '/sites.html': 'manage_sites',
             '/users.html': 'manage_users',
             '/site-fields.html': 'manage_field_options',
@@ -861,9 +860,6 @@ def import_page():
 
 @app.route('/api/import/template')
 def import_template():
-    _, user, err = auth_guard('import_customers')
-    if err:
-        return err
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(TEMPLATE_HEADERS)
@@ -881,23 +877,24 @@ def import_template():
 
 @app.route('/api/customers/import', methods=['POST'])
 def import_customers():
-    conn, user, err = auth_guard('import_customers')
-    if err:
-        return err
+    conn = get_db()
+    user = get_current_user(conn)
     default_site_id = request.form.get('defaultSiteId', '').strip() or None
 
     if 'file' not in request.files:
+        conn.close()
         return jsonify({'error': '請上傳 CSV 檔案'}), 400
 
     file = request.files['file']
     if not file.filename:
+        conn.close()
         return jsonify({'error': '請選擇檔案'}), 400
 
     inferred_site_id, inferred_visit_type = infer_from_filename(file.filename)
     if not default_site_id and inferred_site_id:
         default_site_id = inferred_site_id
 
-    if default_site_id:
+    if default_site_id and user:
         denied = ensure_site_access(user, default_site_id)
         if denied:
             conn.close()
@@ -928,10 +925,11 @@ def import_customers():
             if err:
                 errors.append({'row': i, 'message': err})
                 continue
-            denied = ensure_site_access(user, record['system']['site_id'])
-            if denied:
-                errors.append({'row': i, 'message': '無權匯入此案場資料'})
-                continue
+            if user:
+                denied = ensure_site_access(user, record['system']['site_id'])
+                if denied:
+                    errors.append({'row': i, 'message': '無權匯入此案場資料'})
+                    continue
             try:
                 insert_customer_record(record['system'], record['data'])
                 imported += 1
@@ -944,14 +942,15 @@ def import_customers():
                 'SELECT name FROM sites WHERE id = ?', (default_site_id,),
             ).fetchone()
             site_name = site_row['name'] if site_row else default_site_id
-        log_operation(
-            conn, user, 'customer_import',
-            f'匯入客戶資料：成功 {imported} 筆，失敗 {len(errors)} 筆'
-            + (f'（{site_name}）' if site_name else ''),
-            site_id=default_site_id, site_name=site_name,
-            detail={'imported': imported, 'failed': len(errors), 'filename': file.filename},
-        )
-        conn.commit()
+        if user:
+            log_operation(
+                conn, user, 'customer_import',
+                f'匯入客戶資料：成功 {imported} 筆，失敗 {len(errors)} 筆'
+                + (f'（{site_name}）' if site_name else ''),
+                site_id=default_site_id, site_name=site_name,
+                detail={'imported': imported, 'failed': len(errors), 'filename': file.filename},
+            )
+            conn.commit()
 
         return jsonify({
             'success': True,
@@ -962,10 +961,8 @@ def import_customers():
             'inferredVisitType': inferred_visit_type,
         })
     except csv.Error as e:
-        conn.close()
         return jsonify({'error': f'CSV 格式錯誤：{e}'}), 400
     except Exception as e:
-        conn.close()
         return jsonify({'error': f'匯入失敗：{e}'}), 500
     finally:
         conn.close()
@@ -976,12 +973,12 @@ def api_sites():
     conn = get_db()
     user = get_current_user(conn)
     sites = load_sites()
-    if user:
-        if not user_has_permission(user, 'manage_users'):
-            allowed = get_allowed_site_ids(user)
-            if allowed is not None:
-                allowed_set = set(allowed)
-                sites = [s for s in sites if s['id'] in allowed_set]
+    # 業務與未登入一樣可看全部案場（填表用）；現場專案才依指派案場過濾
+    if user and user['role'] == 'field_staff':
+        allowed = get_allowed_site_ids(user)
+        if allowed is not None:
+            allowed_set = set(allowed)
+            sites = [s for s in sites if s['id'] in allowed_set]
     conn.close()
     return jsonify(sites)
 
@@ -1314,7 +1311,8 @@ def create_customer():
 
     conn = get_db()
     user = get_current_user(conn)
-    if user:
+    # 填表為公開功能：未登入與業務皆可送出；現場專案仍受案場指派限制
+    if user and user['role'] == 'field_staff':
         denied = ensure_site_access(user, site_id)
         if denied:
             conn.close()
