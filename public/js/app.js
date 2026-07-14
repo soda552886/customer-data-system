@@ -153,6 +153,14 @@ function buildForm() {
     sectionEl.appendChild(grid);
     formSections.appendChild(sectionEl);
   });
+
+  // 新客：電話離開焦點時檢查是否曾建檔
+  const phoneInput = document.getElementById('phone');
+  if (phoneInput) {
+    phoneInput.addEventListener('blur', () => {
+      checkPhoneForNewCustomer(phoneInput.value.trim());
+    });
+  }
 }
 
 function updateUI() {
@@ -160,6 +168,7 @@ function updateUI() {
   customerForm.classList.toggle('hidden', !hasSite);
   emptyState.classList.toggle('hidden', hasSite);
   lookupPanel.classList.toggle('hidden', !hasSite || currentVisitType !== '回訪');
+  if (currentVisitType !== '新客') hidePhoneHistoryPanel();
 
   if (hasSite) {
     buildForm();
@@ -228,6 +237,106 @@ function ensureSelectHasOption(el, value, suffix = '') {
   el.appendChild(opt);
 }
 
+function summarizeRecord(rec) {
+  const staff = [rec.salesperson1, rec.salesperson2].filter(Boolean).join('、') || '未填銷售';
+  const date = toDateInputValue(rec.visitDate || rec.visit_date || '') || '日期未建檔';
+  const name = rec.customerName || '（未填姓名）';
+  return { date, staff, name, type: rec.visitType || '' };
+}
+
+function applyLookupRecord(record, phone) {
+  const d = (record && record.data) || {};
+  fillFormData(d);
+
+  const firstVisitRaw = (
+    d.firstVisitDate || d.visitDate || record.first_visit_date || record.visit_date || ''
+  );
+  const firstVisit = toDateInputValue(firstVisitRaw);
+  const firstEl = document.getElementById('firstVisitDate');
+  if (firstEl && firstVisit) firstEl.value = firstVisit;
+
+  if (d.customerName) {
+    const nameEl = document.getElementById('customerName');
+    if (nameEl) nameEl.value = d.customerName;
+  }
+  const phoneEl = document.getElementById('phone');
+  if (phoneEl) phoneEl.value = d.phone || phone;
+
+  if (currentVisitType === '回訪') {
+    const returnEl = document.getElementById('returnVisitDate');
+    if (returnEl) returnEl.value = todayStr();
+  }
+}
+
+function renderHistoryList(records, phone, { selectable = false } = {}) {
+  return `<ul class="lookup-history-list">${records.map((rec, idx) => {
+    const s = summarizeRecord(rec);
+    const btn = selectable
+      ? `<button type="button" class="btn-sm" data-apply-record="${idx}">帶入此筆</button>`
+      : '';
+    return `<li class="lookup-history-item">
+      <strong>${escapeHtml(s.date)}</strong>
+      <span>${escapeHtml(s.type)}</span>
+      <span>${escapeHtml(s.name)}</span>
+      <span>銷售：${escapeHtml(s.staff)}</span>
+      ${btn}
+    </li>`;
+  }).join('')}</ul>`;
+}
+
+function escapeHtml(str) {
+  return String(str || '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+async function fetchPhoneHistory(phone, siteId) {
+  if (!phone || !siteId) return null;
+  const res = await fetch(
+    `/api/customers/lookup?phone=${encodeURIComponent(phone)}&siteId=${encodeURIComponent(siteId)}`,
+  );
+  if (!res.ok) return null;
+  return res.json();
+}
+
+function hidePhoneHistoryPanel() {
+  const panel = document.getElementById('phoneHistoryPanel');
+  if (panel) panel.classList.add('hidden');
+}
+
+function showPhoneHistoryWarning(json) {
+  const panel = document.getElementById('phoneHistoryPanel');
+  const box = document.getElementById('phoneHistoryResult');
+  if (!panel || !box) return;
+  if (!json || !json.found || !json.records?.length) {
+    panel.classList.add('hidden');
+    return;
+  }
+  const records = json.records;
+  box.className = 'lookup-result warning';
+  box.innerHTML = `
+    <strong>此電話在本案場已有 ${records.length} 筆客資</strong>
+    <p class="hint" style="margin:0.35rem 0 0;">可能曾由其他銷售接待。若客戶未表示來過，仍建議先確認是否應改填「回訪」。</p>
+    ${renderHistoryList(records)}
+  `;
+  panel.classList.remove('hidden');
+}
+
+async function checkPhoneForNewCustomer(phone) {
+  if (currentVisitType !== '新客' || !currentSiteId || !phone) {
+    hidePhoneHistoryPanel();
+    return null;
+  }
+  try {
+    const json = await fetchPhoneHistory(phone, currentSiteId);
+    showPhoneHistoryWarning(json);
+    return json;
+  } catch {
+    hidePhoneHistoryPanel();
+    return null;
+  }
+}
+
 async function lookupCustomer() {
   const phone = document.getElementById('lookupPhone').value.trim();
   const resultEl = document.getElementById('lookupResult');
@@ -239,38 +348,34 @@ async function lookupCustomer() {
   }
 
   try {
-    const res = await fetch(`/api/customers/lookup?phone=${encodeURIComponent(phone)}&siteId=${currentSiteId}`);
-    const json = await res.json();
+    const json = await fetchPhoneHistory(phone, currentSiteId);
     resultEl.classList.remove('hidden');
 
-    if (json.found) {
-      const record = json.record || {};
-      const d = record.data || {};
-      fillFormData(d);
+    if (json && json.found && json.records?.length) {
+      const records = json.records;
+      window._lookupRecords = records;
+      applyLookupRecord(json.record || records[0], phone);
 
-      // 初訪日期：優先 data 內欄位，其次系統欄 visit_date / first_visit_date
-      const firstVisitRaw = (
-        d.firstVisitDate || d.visitDate || record.first_visit_date || record.visit_date || ''
-      );
-      const firstVisit = toDateInputValue(firstVisitRaw);
-      const firstEl = document.getElementById('firstVisitDate');
-      if (firstEl && firstVisit) firstEl.value = firstVisit;
-
-      if (d.customerName) {
-        const nameEl = document.getElementById('customerName');
-        if (nameEl) nameEl.value = d.customerName;
-      }
-      const phoneEl = document.getElementById('phone');
-      if (phoneEl) phoneEl.value = d.phone || phone;
-
-      const returnEl = document.getElementById('returnVisitDate');
-      if (returnEl) returnEl.value = todayStr();
-
+      const primary = summarizeRecord(json.record || records[0]);
       resultEl.className = 'lookup-result success';
-      resultEl.textContent = `已找到初訪資料：${d.customerName || ''}（${firstVisit || firstVisitRaw || '日期未建檔'}），已自動帶入客況`;
+      resultEl.innerHTML = `
+        <strong>找到 ${records.length} 筆來訪紀錄</strong>
+        <p style="margin:0.35rem 0 0;">已預設帶入最早${primary.type === '新客' ? '初訪' : ''}資料：${escapeHtml(primary.name)}（${escapeHtml(primary.date)}，銷售：${escapeHtml(primary.staff)}）</p>
+        ${records.length > 1 ? `<p class="hint" style="margin:0.35rem 0 0;">以下列出全部紀錄（含不同銷售），可點「帶入此筆」切換：</p>${renderHistoryList(records, phone, { selectable: true })}` : ''}
+      `;
+
+      resultEl.querySelectorAll('[data-apply-record]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const rec = records[Number(btn.dataset.applyRecord)];
+          if (!rec) return;
+          applyLookupRecord(rec, phone);
+          showToast(`已帶入：${summarizeRecord(rec).date}／${summarizeRecord(rec).staff}`);
+        });
+      });
     } else {
+      window._lookupRecords = [];
       resultEl.className = 'lookup-result error';
-      resultEl.textContent = '找不到此電話的初訪紀錄，請確認案場與電話是否正確';
+      resultEl.textContent = '找不到此電話的來訪紀錄，請確認案場與電話是否正確';
     }
   } catch {
     resultEl.className = 'lookup-result error';
@@ -296,6 +401,26 @@ async function submitForm(e) {
     data.returnVisitDate = todayStr();
   }
 
+  // 新客儲存前檢查：同一案場是否已有此電話客資
+  if (currentVisitType === '新客') {
+    const history = await checkPhoneForNewCustomer(data.phone);
+    if (history && history.found && history.records?.length) {
+      const lines = history.records.map((rec) => {
+        const s = summarizeRecord(rec);
+        return `・${s.date} ${s.type} 銷售：${s.staff}（${s.name}）`;
+      }).join('\n');
+      const ok = confirm(
+        `此電話在「${site?.name || '本案場'}」已有 ${history.records.length} 筆客資：\n\n${lines}\n\n`
+        + '可能是其他銷售曾接待過。確定仍要以「新客」儲存？\n'
+        + '（若客戶其實來過，建議改選「回訪」）',
+      );
+      if (!ok) {
+        showToast('已取消儲存，請確認客戶類型', 'error');
+        return;
+      }
+    }
+  }
+
   try {
     const res = await fetch('/api/customers', {
       method: 'POST',
@@ -314,6 +439,7 @@ async function submitForm(e) {
       customerForm.reset();
       buildForm();
       document.getElementById('lookupResult')?.classList.add('hidden');
+      hidePhoneHistoryPanel();
     } else {
       showToast(json.error || '儲存失敗', 'error');
     }
@@ -372,6 +498,7 @@ async function init() {
     customerForm.reset();
     buildForm();
     document.getElementById('lookupResult')?.classList.add('hidden');
+    hidePhoneHistoryPanel();
   });
 }
 

@@ -1341,28 +1341,52 @@ def lookup_customer():
             return denied
 
     normalized = normalize_phone(phone)
+    if not normalized:
+        conn.close()
+        return jsonify({'found': False, 'count': 0, 'records': []})
+
     rows = conn.execute('''
         SELECT * FROM customers
-        WHERE site_id = ? AND visit_type = '新客'
-        ORDER BY visit_date DESC, id DESC
+        WHERE site_id = ?
+        ORDER BY visit_date ASC, id ASC
     ''', (site_id,)).fetchall()
     conn.close()
 
+    matches = []
     for row in rows:
         data = json.loads(row['data'])
-        if normalized in normalize_phone(data.get('phone', '')):
-            # Ensure first-visit date is available for form autofill
-            if not data.get('visitDate') and row['visit_date']:
-                data['visitDate'] = row['visit_date']
-            if not data.get('firstVisitDate'):
-                data['firstVisitDate'] = (
-                    data.get('visitDate') or row['first_visit_date'] or row['visit_date']
-                )
-            record = dict(row)
-            record['data'] = data
-            return jsonify({'found': True, 'record': record})
+        if normalized not in normalize_phone(data.get('phone', '')):
+            continue
+        if not data.get('visitDate') and row['visit_date']:
+            data['visitDate'] = row['visit_date']
+        if not data.get('firstVisitDate'):
+            data['firstVisitDate'] = (
+                data.get('visitDate') or row['first_visit_date'] or row['visit_date']
+            )
+        matches.append({
+            'id': row['id'],
+            'visitType': row['visit_type'],
+            'visitDate': row['visit_date'],
+            'siteName': row['site_name'],
+            'customerName': data.get('customerName') or '',
+            'salesperson1': data.get('salesperson1') or '',
+            'salesperson2': data.get('salesperson2') or '',
+            'data': data,
+            'first_visit_date': row['first_visit_date'],
+            'visit_date': row['visit_date'],
+        })
 
-    return jsonify({'found': False})
+    if not matches:
+        return jsonify({'found': False, 'count': 0, 'records': []})
+
+    # 預設帶入最早一筆「新客」；若無新客則用最早一筆
+    primary = next((m for m in matches if m['visitType'] == '新客'), matches[0])
+    return jsonify({
+        'found': True,
+        'count': len(matches),
+        'record': primary,
+        'records': matches,
+    })
 
 
 @app.route('/api/customers', methods=['POST'])

@@ -42,12 +42,16 @@
 
       <div id="lookupPanel" class="lookup-panel hidden">
         <h3>回訪客戶檢索</h3>
-        <p class="hint">輸入電話號碼，系統將自動帶出初訪客況</p>
+        <p class="hint">輸入電話號碼，系統將帶出該電話於本案場的所有來訪紀錄（含不同銷售）</p>
         <div class="lookup-row">
           <input type="tel" id="lookupPhone" placeholder="輸入電話號碼搜尋">
-          <button type="button" id="lookupBtn" class="btn btn-secondary">檢索初訪資料</button>
+          <button type="button" id="lookupBtn" class="btn btn-secondary">檢索來訪資料</button>
         </div>
         <div id="lookupResult" class="lookup-result hidden"></div>
+      </div>
+      <div id="phoneHistoryPanel" class="lookup-panel phone-history-panel hidden">
+        <h3>電話客資提示</h3>
+        <div id="phoneHistoryResult" class="lookup-result warning"></div>
       </div>
     </section>
 

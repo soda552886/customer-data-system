@@ -224,6 +224,27 @@ body {
 }
 .lookup-result.success { background: #e8f5e9; color: var(--success); border: 1px solid #a5d6a7; }
 .lookup-result.error { background: #fdecea; color: var(--danger); border: 1px solid #f5c6cb; }
+.lookup-result.warning { background: #fff8e1; color: #8a6d1d; border: 1px solid #ffe082; }
+.lookup-history-list {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.lookup-history-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.6rem;
+  background: rgba(255,255,255,0.7);
+  border-radius: 6px;
+  border: 1px solid rgba(0,0,0,0.06);
+}
+.lookup-history-item .btn-sm { margin-left: auto; }
+.phone-history-panel { margin-top: 1rem; }
 
 .empty-state {
   text-align: center;
