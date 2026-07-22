@@ -1447,6 +1447,7 @@ def list_customers():
     exclude_return = request.args.get('excludeReturn', '') in ('1', 'true')
     exclude_deal = request.args.get('excludeDeal', '') in ('1', 'true')
     status_filter = request.args.get('customerStatus', '').strip()
+    sort_order = (request.args.get('sortOrder', 'desc') or 'desc').lower()
     page = max(1, int(request.args.get('page', 1)))
     limit = min(10000, max(1, int(request.args.get('limit', 50))))
 
@@ -1526,6 +1527,12 @@ def list_customers():
             data['visitCount'] = f"第{record['return_visit_total']}次"
         record['data'] = data
         filtered.append(record)
+
+    newest_first = sort_order != 'asc'
+    filtered.sort(
+        key=lambda r: (r.get('visit_date') or '', r.get('id') or 0),
+        reverse=newest_first,
+    )
 
     total = len(filtered)
     start = (page - 1) * limit

@@ -131,6 +131,13 @@ body {
 }
 
 .form-group textarea { min-height: 100px; resize: vertical; }
+.form-group textarea.readonly-autofill {
+  min-height: 70px;
+  background: #f5f7fa;
+  color: #334155;
+  cursor: default;
+  resize: none;
+}
 
 .radio-group { display: flex; gap: 1.5rem; padding: 0.5rem 0; }
 
@@ -711,6 +718,21 @@ body {
   gap: 0.75rem;
   padding: 0.55rem 0;
   border-bottom: 1px solid var(--border);
+  cursor: grab;
+}
+.field-order-item.dragging {
+  opacity: 0.45;
+  background: #f5f7fa;
+}
+.field-order-item.drag-over {
+  border-top: 2px solid var(--primary);
+}
+.field-order-item .drag-handle {
+  color: #9aa3af;
+  font-size: 0.85rem;
+  letter-spacing: -0.15em;
+  user-select: none;
+  cursor: grab;
 }
 .field-order-item > span:not(.field-order-actions) { flex: 1; }
 .field-order-check { flex: 0 0 auto; margin-right: 0.25rem; }

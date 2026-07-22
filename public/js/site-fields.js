@@ -146,7 +146,8 @@ function renderOrder() {
   container.innerHTML = `
     <ul class="field-order-list">
       ${exportColumns.map((col, idx) => `
-        <li class="field-order-item" data-col-key="${escapeHtml(col.key)}">
+        <li class="field-order-item" draggable="true" data-col-key="${escapeHtml(col.key)}" data-idx="${idx}">
+          <span class="drag-handle" title="拖曳排序" aria-hidden="true">⋮⋮</span>
           <label class="checkbox-label field-order-check">
             <input type="checkbox" data-export-key="${escapeHtml(col.key)}" ${col.enabled ? 'checked' : ''}>
           </label>
@@ -175,7 +176,43 @@ function renderOrder() {
       updateExportCount();
     });
   });
+  bindExportDragDrop(container);
   updateExportCount();
+}
+
+function bindExportDragDrop(container) {
+  let dragIdx = null;
+  container.querySelectorAll('.field-order-item').forEach((item) => {
+    item.addEventListener('dragstart', (e) => {
+      dragIdx = Number(item.dataset.idx);
+      item.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', String(dragIdx));
+    });
+    item.addEventListener('dragend', () => {
+      item.classList.remove('dragging');
+      container.querySelectorAll('.field-order-item').forEach((el) => el.classList.remove('drag-over'));
+      dragIdx = null;
+    });
+    item.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      item.classList.add('drag-over');
+    });
+    item.addEventListener('dragleave', () => {
+      item.classList.remove('drag-over');
+    });
+    item.addEventListener('drop', (e) => {
+      e.preventDefault();
+      item.classList.remove('drag-over');
+      const from = dragIdx != null ? dragIdx : Number(e.dataTransfer.getData('text/plain'));
+      const to = Number(item.dataset.idx);
+      if (!Number.isFinite(from) || !Number.isFinite(to) || from === to) return;
+      const [moved] = exportColumns.splice(from, 1);
+      exportColumns.splice(to, 0, moved);
+      renderOrder();
+    });
+  });
 }
 
 function moveColumn(idx, direction) {

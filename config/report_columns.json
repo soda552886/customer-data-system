@@ -38,6 +38,7 @@
     { "group": "產品", "key": "parkingNeed", "label": "車位需求" },
     { "group": "產品", "key": "productResidential", "label": "產品需求-住宅" },
     { "group": "產品", "key": "productOffice", "label": "產品需求-事務所" },
+    { "group": "產品", "key": "focusUnit", "label": "主攻戶別" },
     { "group": "產品", "key": "introUnit", "label": "介紹戶別樓層" },
     { "group": "洽談", "key": "visitorCount", "label": "當日來人" },
     { "group": "洽談", "key": "visitorRelation", "label": "來人關係" },

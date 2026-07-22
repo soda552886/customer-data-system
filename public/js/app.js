@@ -134,6 +134,10 @@ function buildForm() {
         input.name = field.key;
         if (field.placeholder) input.placeholder = field.placeholder;
         if (field.required) input.required = true;
+        if (field.readOnly) {
+          input.readOnly = true;
+          input.classList.add('readonly-autofill');
+        }
       } else {
         input = document.createElement('input');
         input.type = field.type;
@@ -161,6 +165,59 @@ function buildForm() {
       checkPhoneForNewCustomer(phoneInput.value.trim());
     });
   }
+
+  bindProductFocusUnitSync();
+}
+
+function getCheckedValues(fieldKey) {
+  return Array.from(document.querySelectorAll(`#${fieldKey} input:checked`)).map((cb) => cb.value);
+}
+
+function setMultiselectValues(fieldKey, values) {
+  const set = new Set(values || []);
+  document.querySelectorAll(`#${fieldKey} input`).forEach((cb) => {
+    cb.checked = set.has(cb.value);
+  });
+}
+
+function updateFocusUnitFromProducts() {
+  const focusEl = document.getElementById('focusUnit');
+  if (!focusEl) return;
+  const residential = getCheckedValues('productResidential');
+  const office = getCheckedValues('productOffice');
+  const line1 = residential.length ? residential.join('、') : '';
+  const line2 = office.length ? office.join('、') : '';
+  focusEl.value = [line1, line2].join('\n');
+}
+
+function bindProductFocusUnitSync() {
+  const residentialWrap = document.getElementById('productResidential');
+  const officeWrap = document.getElementById('productOffice');
+  if (!residentialWrap && !officeWrap) return;
+
+  const onChange = (source) => {
+    // 事務所／住宅則一：選了實際戶別時，另一邊改為「不考慮」
+    if (source === 'residential') {
+      const selected = getCheckedValues('productResidential').filter((v) => v !== '不考慮住宅');
+      if (selected.length && officeWrap) {
+        setMultiselectValues('productOffice', ['不考慮事務所']);
+      }
+    } else if (source === 'office') {
+      const selected = getCheckedValues('productOffice').filter((v) => v !== '不考慮事務所');
+      if (selected.length && residentialWrap) {
+        setMultiselectValues('productResidential', ['不考慮住宅']);
+      }
+    }
+    updateFocusUnitFromProducts();
+  };
+
+  residentialWrap?.querySelectorAll('input').forEach((cb) => {
+    cb.addEventListener('change', () => onChange('residential'));
+  });
+  officeWrap?.querySelectorAll('input').forEach((cb) => {
+    cb.addEventListener('change', () => onChange('office'));
+  });
+  updateFocusUnitFromProducts();
 }
 
 function updateUI() {
@@ -190,6 +247,7 @@ function getIsDeal() {
 }
 
 function collectFormData() {
+  updateFocusUnitFromProducts();
   const data = {};
   fieldConfig.sections.forEach((section) => {
     section.fields.filter(fieldVisible).forEach((field) => {
@@ -211,8 +269,15 @@ function fillFormData(data) {
       const val = data[field.key];
       if (val === undefined || val === null || val === '') return;
 
-      if (field.type === 'multiselect' && Array.isArray(val)) {
-        val.forEach((v) => {
+      if (field.type === 'multiselect') {
+        let values = [];
+        if (Array.isArray(val)) {
+          values = val;
+        } else if (typeof val === 'string') {
+          // 舊資料若為文字，盡量拆成選項勾選
+          values = val.split(/[\n、,，;；]+/).map((s) => s.trim()).filter(Boolean);
+        }
+        values.forEach((v) => {
           const cb = document.querySelector(`#${field.key} input[value="${CSS.escape(v)}"]`);
           if (cb) cb.checked = true;
         });
@@ -224,6 +289,7 @@ function fillFormData(data) {
       }
     });
   });
+  updateFocusUnitFromProducts();
 }
 
 /** Ensure a <select> can display a value not in current options (e.g. former salesperson). */
@@ -392,6 +458,16 @@ async function submitForm(e) {
   if (!data.customerName || !data.phone) {
     showToast('請填寫客戶姓名與電話', 'error');
     return;
+  }
+
+  // 世界都心：產品需求住宅／事務所至少各勾一項（可選「不考慮」）
+  if (document.getElementById('productResidential') || document.getElementById('productOffice')) {
+    const res = data.productResidential || [];
+    const off = data.productOffice || [];
+    if (!res.length || !off.length) {
+      showToast('請勾選產品需求－住宅與事務所（不考慮也請勾選）', 'error');
+      return;
+    }
   }
 
   if (currentVisitType === '新客' && !data.visitDate) {

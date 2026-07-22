@@ -79,6 +79,7 @@ const REPORT_COLUMNS = [
   { group: '產品', key: 'parkingNeed', label: '車位需求' },
   { group: '產品', key: 'productResidential', label: '產品需求-住宅' },
   { group: '產品', key: 'productOffice', label: '產品需求-事務所' },
+  { group: '產品', key: 'focusUnit', label: '主攻戶別' },
   { group: '產品', key: 'introUnit', label: '介紹戶別樓層' },
   { group: '洽談', key: 'visitorCount', label: '當日來人' },
   { group: '洽談', key: 'visitorRelation', label: '來人關係' },
@@ -102,12 +103,19 @@ const DEFAULT_COLUMNS = [
   'media1', 'media2', 'sincerity', 'salesperson1', 'discussion',
 ];
 
+const STORAGE_KEY = 'customer_report_columns';
 const FIELD_LABELS = Object.fromEntries(REPORT_COLUMNS.map((c) => [c.key, c.label]));
 
 function getSavedColumns() {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) return JSON.parse(saved);
+    if (saved) {
+      const keys = JSON.parse(saved);
+      if (Array.isArray(keys) && keys.length > 0) {
+        const valid = keys.filter((k) => REPORT_COLUMNS.some((c) => c.key === k));
+        if (valid.length > 0) return valid;
+      }
+    }
   } catch { /* ignore */ }
   return [...DEFAULT_COLUMNS];
 }
@@ -158,25 +166,16 @@ async function loadSiteExportColumnOrder(siteId) {
     }
   } catch { /* ignore */ }
   updateColumnPickerHint();
-  syncColumnPickerToSiteExport();
 }
 
 function updateColumnPickerHint() {
   const hint = document.getElementById('columnPickerHint');
   if (!hint) return;
   if (siteExportIsCustomized) {
-    hint.textContent = '此案場已設定專屬匯出欄位與順序，匯出 CSV 會依案場設定；下方勾選主要影響列表顯示。';
+    hint.textContent = '此案場已設定專屬匯出欄位與順序，匯出 CSV 會依案場設定；下方勾選只影響本頁列表顯示，不會被案場匯出設定蓋掉。';
   } else {
-    hint.textContent = '勾選要顯示在列表與匯出報表中的欄位';
+    hint.textContent = '勾選要顯示在列表中的欄位（選擇會記住在本機瀏覽器）';
   }
-}
-
-function syncColumnPickerToSiteExport() {
-  if (!siteExportIsCustomized || !siteExportColumnKeys) return;
-  const set = new Set(siteExportColumnKeys);
-  document.querySelectorAll('#columnPicker input').forEach((cb) => {
-    cb.checked = set.has(cb.value);
-  });
 }
 
 function renderColumnPicker() {
@@ -204,7 +203,6 @@ function renderColumnPicker() {
       if (lastResults.length > 0) renderResults({ records: lastResults, total: lastTotal, page: currentPage, limit: 50 });
     });
   });
-  syncColumnPickerToSiteExport();
   updateColumnPickerHint();
 }
 
@@ -342,6 +340,8 @@ function getSearchParams(extraLimit) {
     const val = document.getElementById(id).value.trim();
     if (val) params.set(keys[i], val);
   });
+  const sortEl = document.getElementById('searchSortOrder');
+  params.set('sortOrder', sortEl?.value === 'asc' ? 'asc' : 'desc');
   params.set('page', currentPage);
   params.set('limit', String(extraLimit || 50));
   if (document.getElementById('excludeNew').checked) params.set('excludeNew', '1');
@@ -585,6 +585,10 @@ function buildEditForm() {
         input.id = `edit_${field.key}`;
         input.name = field.key;
         if (field.placeholder) input.placeholder = field.placeholder;
+        if (field.readOnly) {
+          input.readOnly = true;
+          input.classList.add('readonly-autofill');
+        }
         group.appendChild(input);
       } else {
         const input = document.createElement('input');
@@ -601,6 +605,55 @@ function buildEditForm() {
     sectionEl.appendChild(grid);
     container.appendChild(sectionEl);
   });
+
+  bindEditProductFocusUnitSync();
+}
+
+function getEditCheckedValues(fieldKey) {
+  return Array.from(document.querySelectorAll(`#edit_${fieldKey} input:checked`)).map((cb) => cb.value);
+}
+
+function setEditMultiselectValues(fieldKey, values) {
+  const set = new Set(values || []);
+  document.querySelectorAll(`#edit_${fieldKey} input`).forEach((cb) => {
+    cb.checked = set.has(cb.value);
+  });
+}
+
+function updateEditFocusUnitFromProducts() {
+  const focusEl = document.getElementById('edit_focusUnit');
+  if (!focusEl) return;
+  const residential = getEditCheckedValues('productResidential');
+  const office = getEditCheckedValues('productOffice');
+  focusEl.value = [
+    residential.length ? residential.join('、') : '',
+    office.length ? office.join('、') : '',
+  ].join('\n');
+}
+
+function bindEditProductFocusUnitSync() {
+  const residentialWrap = document.getElementById('edit_productResidential');
+  const officeWrap = document.getElementById('edit_productOffice');
+  if (!residentialWrap && !officeWrap) return;
+
+  const onChange = (source) => {
+    if (source === 'residential') {
+      const selected = getEditCheckedValues('productResidential').filter((v) => v !== '不考慮住宅');
+      if (selected.length && officeWrap) setEditMultiselectValues('productOffice', ['不考慮事務所']);
+    } else if (source === 'office') {
+      const selected = getEditCheckedValues('productOffice').filter((v) => v !== '不考慮事務所');
+      if (selected.length && residentialWrap) setEditMultiselectValues('productResidential', ['不考慮住宅']);
+    }
+    updateEditFocusUnitFromProducts();
+  };
+
+  residentialWrap?.querySelectorAll('input').forEach((cb) => {
+    cb.addEventListener('change', () => onChange('residential'));
+  });
+  officeWrap?.querySelectorAll('input').forEach((cb) => {
+    cb.addEventListener('change', () => onChange('office'));
+  });
+  updateEditFocusUnitFromProducts();
 }
 
 function fillEditFormData(data) {
@@ -612,8 +665,13 @@ function fillEditFormData(data) {
       const val = data[field.key];
       if (val === undefined || val === null || val === '') return;
 
-      if (field.type === 'multiselect' && Array.isArray(val)) {
-        val.forEach((v) => {
+      if (field.type === 'multiselect') {
+        let values = [];
+        if (Array.isArray(val)) values = val;
+        else if (typeof val === 'string') {
+          values = val.split(/[\n、,，;；]+/).map((s) => s.trim()).filter(Boolean);
+        }
+        values.forEach((v) => {
           const cb = document.querySelector(`#edit_${field.key} input[value="${CSS.escape(v)}"]`);
           if (cb) cb.checked = true;
         });
@@ -633,9 +691,11 @@ function fillEditFormData(data) {
       }
     });
   });
+  updateEditFocusUnitFromProducts();
 }
 
 function collectEditFormData() {
+  updateEditFocusUnitFromProducts();
   const siteId = document.getElementById('editSite').value;
   const visitType = getEditVisitType();
   const data = {};
@@ -889,6 +949,10 @@ function applyDatePreset(preset) {
 
 document.getElementById('searchBtn').addEventListener('click', () => { currentPage = 1; doSearch(); });
 document.getElementById('clearSearchBtn').addEventListener('click', clearSearch);
+document.getElementById('searchSortOrder')?.addEventListener('change', () => {
+  currentPage = 1;
+  doSearch();
+});
 document.querySelectorAll('[data-date-preset]').forEach((btn) => {
   btn.addEventListener('click', () => {
     applyDatePreset(btn.dataset.datePreset);
