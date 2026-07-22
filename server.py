@@ -163,20 +163,25 @@ def normalize_date_value(val):
         return None
     s = str(val).strip().split()[0]
 
+    def as_roc_or_ad(year: int) -> int:
+        # 民國年常見範圍（避免把錯誤數字加成 2135 這類年份）
+        if 1 <= year <= 200:
+            return year + 1911
+        return year
+
     # YYYY-MM-DD / YYYY/M/D（若年 < 1911 視為民國，如 0114）
     m = re.match(r'^(\d{4})[./-](\d{1,2})[./-](\d{1,2})$', s)
     if m:
         year, month, day = int(m.group(1)), int(m.group(2)), int(m.group(3))
-        if year < 1911:
-            year += 1911
-        return f'{year}-{month:02d}-{day:02d}'
+        year = as_roc_or_ad(year) if year < 1911 else year
+        if 1 <= month <= 12 and 1 <= day <= 31:
+            return f'{year}-{month:02d}-{day:02d}'
 
     # 民國 Y/M/D（2～3 碼年）
     m = re.match(r'^(\d{2,3})[./-](\d{1,2})[./-](\d{1,2})$', s)
     if m:
         year, month, day = int(m.group(1)), int(m.group(2)), int(m.group(3))
-        if year < 1911:
-            year += 1911
+        year = as_roc_or_ad(year)
         if 1 <= month <= 12 and 1 <= day <= 31:
             return f'{year}-{month:02d}-{day:02d}'
 
@@ -184,8 +189,7 @@ def normalize_date_value(val):
     m = re.match(r'^(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})$', s)
     if m:
         month, day, year = int(m.group(1)), int(m.group(2)), int(m.group(3))
-        if year < 1911:
-            year += 1911
+        year = as_roc_or_ad(year) if year < 1911 else year
         if 1 <= month <= 12 and 1 <= day <= 31:
             return f'{year}-{month:02d}-{day:02d}'
 

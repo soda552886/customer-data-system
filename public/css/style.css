@@ -328,6 +328,17 @@ body {
 .data-table td {
   padding: 0.65rem 0.75rem;
   border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  vertical-align: top;
+}
+.data-table td.cell-date {
+  min-width: 7.5rem;
+  font-variant-numeric: tabular-nums;
+}
+.data-table td.cell-wrap {
+  white-space: normal;
+  min-width: 12rem;
+  max-width: 28rem;
 }
 
 .data-table tr:hover td { background: #f8fafc; }

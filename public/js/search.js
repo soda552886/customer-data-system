@@ -218,22 +218,32 @@ function resetColumns() {
   if (lastResults.length > 0) renderResults({ records: lastResults, total: lastTotal, page: currentPage, limit: 50 });
 }
 
+function cellClassForKey(key) {
+  const dateKeys = new Set([
+    'visit_date', 'visitDate', 'firstVisitDate', 'returnVisitDate', 'prevVisitDate', 'cancelDate', 'created_at',
+  ]);
+  if (dateKeys.has(key)) return 'cell-date';
+  if (key === 'discussion' || key === 'remark' || key === 'address') return 'cell-wrap';
+  return '';
+}
+
 function formatDisplayDate(raw) {
   if (!raw) return '';
   const s = String(raw).trim().split(/\s+/)[0];
 
+  const asRocOrAd = (year) => (year >= 1 && year <= 200 ? year + 1911 : year);
+
   let m = s.match(/^(\d{4})[./-](\d{1,2})[./-](\d{1,2})$/);
   if (m) {
     let year = Number(m[1]);
-    if (year < 1911) year += 1911;
+    if (year < 1911) year = asRocOrAd(year);
     return `${year}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
   }
 
   // 民國 Y/M/D（2～3 碼年）
   m = s.match(/^(\d{2,3})[./-](\d{1,2})[./-](\d{1,2})$/);
   if (m) {
-    let year = Number(m[1]);
-    if (year < 1911) year += 1911;
+    const year = asRocOrAd(Number(m[1]));
     return `${year}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
   }
 
@@ -241,7 +251,7 @@ function formatDisplayDate(raw) {
   m = s.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})$/);
   if (m) {
     let year = Number(m[3]);
-    if (year < 1911) year += 1911;
+    if (year < 1911) year = asRocOrAd(year);
     return `${year}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}`;
   }
 
@@ -413,7 +423,8 @@ function renderResults(data) {
   tbody.innerHTML = data.records.map((r) => {
     const cells = cols.map((c) => {
       const val = getCellValue(r, c.key);
-      return `<td>${formatCellHtml(c.key, val, r)}</td>`;
+      const cls = cellClassForKey(c.key);
+      return `<td${cls ? ` class="${cls}"` : ''}>${formatCellHtml(c.key, val, r)}</td>`;
     }).join('');
     const editBtn = userCan('edit_customers')
       ? `<button class="btn-sm" onclick="openEdit(${r.id})">編輯</button>`
