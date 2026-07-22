@@ -27,6 +27,7 @@ ROLE_PERMISSIONS = {
     },
     'sales': {
         'submit_form',
+        'manage_weekly_reports',
     },
 }
 
