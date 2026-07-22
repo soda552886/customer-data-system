@@ -834,7 +834,7 @@
         },
         {
           "key": "productResidential",
-          "label": "產品需求－住宅（事務所／住宅則一）",
+          "label": "產品需求－住宅",
           "type": "multiselect",
           "options": [
             "不考慮住宅",
@@ -865,7 +865,7 @@
         },
         {
           "key": "productOffice",
-          "label": "產品需求－事務所（事務所／住宅則一）",
+          "label": "產品需求－事務所",
           "type": "multiselect",
           "options": [
             "不考慮事務所",

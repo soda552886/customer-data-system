@@ -173,13 +173,6 @@ function getCheckedValues(fieldKey) {
   return Array.from(document.querySelectorAll(`#${fieldKey} input:checked`)).map((cb) => cb.value);
 }
 
-function setMultiselectValues(fieldKey, values) {
-  const set = new Set(values || []);
-  document.querySelectorAll(`#${fieldKey} input`).forEach((cb) => {
-    cb.checked = set.has(cb.value);
-  });
-}
-
 function updateFocusUnitFromProducts() {
   const focusEl = document.getElementById('focusUnit');
   if (!focusEl) return;
@@ -195,27 +188,11 @@ function bindProductFocusUnitSync() {
   const officeWrap = document.getElementById('productOffice');
   if (!residentialWrap && !officeWrap) return;
 
-  const onChange = (source) => {
-    // 事務所／住宅則一：選了實際戶別時，另一邊改為「不考慮」
-    if (source === 'residential') {
-      const selected = getCheckedValues('productResidential').filter((v) => v !== '不考慮住宅');
-      if (selected.length && officeWrap) {
-        setMultiselectValues('productOffice', ['不考慮事務所']);
-      }
-    } else if (source === 'office') {
-      const selected = getCheckedValues('productOffice').filter((v) => v !== '不考慮事務所');
-      if (selected.length && residentialWrap) {
-        setMultiselectValues('productResidential', ['不考慮住宅']);
-      }
-    }
-    updateFocusUnitFromProducts();
-  };
-
   residentialWrap?.querySelectorAll('input').forEach((cb) => {
-    cb.addEventListener('change', () => onChange('residential'));
+    cb.addEventListener('change', updateFocusUnitFromProducts);
   });
   officeWrap?.querySelectorAll('input').forEach((cb) => {
-    cb.addEventListener('change', () => onChange('office'));
+    cb.addEventListener('change', updateFocusUnitFromProducts);
   });
   updateFocusUnitFromProducts();
 }

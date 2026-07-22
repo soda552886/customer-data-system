@@ -46,12 +46,16 @@
           <input type="date" id="searchEndDate">
         </div>
         <div class="form-group">
-          <label>日期快速選擇</label>
+          <label>日期快速選擇／排序</label>
           <div class="date-preset-row">
             <button type="button" class="btn-sm" data-date-preset="day">日內</button>
             <button type="button" class="btn-sm" data-date-preset="week">周內</button>
             <button type="button" class="btn-sm" data-date-preset="month">月內</button>
             <button type="button" class="btn-sm" data-date-preset="all">全部</button>
+            <select id="searchSortOrder" class="sort-order-select" title="日期排序">
+              <option value="desc" selected>最新在前</option>
+              <option value="asc">最久在前</option>
+            </select>
           </div>
         </div>
         <div class="form-group">
@@ -89,13 +93,6 @@
         <div class="form-group">
           <label for="searchName">姓名</label>
           <input type="text" id="searchName" placeholder="客戶姓名">
-        </div>
-        <div class="form-group">
-          <label for="searchSortOrder">日期排序</label>
-          <select id="searchSortOrder">
-            <option value="desc" selected>最新在前</option>
-            <option value="asc">最久在前</option>
-          </select>
         </div>
       </div>
       <div class="exclude-row">

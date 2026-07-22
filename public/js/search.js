@@ -613,13 +613,6 @@ function getEditCheckedValues(fieldKey) {
   return Array.from(document.querySelectorAll(`#edit_${fieldKey} input:checked`)).map((cb) => cb.value);
 }
 
-function setEditMultiselectValues(fieldKey, values) {
-  const set = new Set(values || []);
-  document.querySelectorAll(`#edit_${fieldKey} input`).forEach((cb) => {
-    cb.checked = set.has(cb.value);
-  });
-}
-
 function updateEditFocusUnitFromProducts() {
   const focusEl = document.getElementById('edit_focusUnit');
   if (!focusEl) return;
@@ -636,22 +629,11 @@ function bindEditProductFocusUnitSync() {
   const officeWrap = document.getElementById('edit_productOffice');
   if (!residentialWrap && !officeWrap) return;
 
-  const onChange = (source) => {
-    if (source === 'residential') {
-      const selected = getEditCheckedValues('productResidential').filter((v) => v !== '不考慮住宅');
-      if (selected.length && officeWrap) setEditMultiselectValues('productOffice', ['不考慮事務所']);
-    } else if (source === 'office') {
-      const selected = getEditCheckedValues('productOffice').filter((v) => v !== '不考慮事務所');
-      if (selected.length && residentialWrap) setEditMultiselectValues('productResidential', ['不考慮住宅']);
-    }
-    updateEditFocusUnitFromProducts();
-  };
-
   residentialWrap?.querySelectorAll('input').forEach((cb) => {
-    cb.addEventListener('change', () => onChange('residential'));
+    cb.addEventListener('change', updateEditFocusUnitFromProducts);
   });
   officeWrap?.querySelectorAll('input').forEach((cb) => {
-    cb.addEventListener('change', () => onChange('office'));
+    cb.addEventListener('change', updateEditFocusUnitFromProducts);
   });
   updateEditFocusUnitFromProducts();
 }
