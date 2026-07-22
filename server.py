@@ -4,7 +4,7 @@ import json
 import os
 import re
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import quote
 
@@ -25,6 +25,11 @@ from field_options import (
     load_site_option_overrides, load_site_report_export_config,
     normalize_hidden_fields_payload, normalize_report_export_payload, normalize_save_payload,
     save_site_hidden_fields, save_site_option_overrides, save_site_report_export_config,
+)
+from weekly_reports import (
+    build_auto_stats, default_week_number, empty_manual_payload, init_weekly_tables,
+    list_weekly_reports, load_weekly_report, monday_of, roc_year,
+    upsert_weekly_report, week_bounds,
 )
 
 BASE_DIR = Path(__file__).parent
@@ -82,6 +87,7 @@ def init_db():
     init_auth_tables(conn)
     init_field_options_table(conn)
     init_audit_table(conn)
+    init_weekly_tables(conn)
     migrate_retired_roles(conn)
     conn.commit()
 
@@ -649,6 +655,7 @@ def enforce_auth():
             '/site-fields.html': 'manage_field_options',
             '/field-options.html': 'manage_field_options',
             '/audit-log.html': 'view_audit_logs',
+            '/weekly.html': 'manage_weekly_reports',
         }
         need = page_perms.get(path)
         if need and not user_has_permission(user, need):
@@ -889,6 +896,11 @@ def import_page():
     return send_from_directory('public', 'import.html')
 
 
+@app.route('/weekly.html')
+def weekly_page():
+    return send_from_directory('public', 'weekly.html')
+
+
 @app.route('/api/import/template')
 def import_template():
     output = io.StringIO()
@@ -1104,6 +1116,238 @@ def site_fields_page():
 @app.route('/audit-log.html')
 def audit_log_page():
     return send_from_directory('public', 'audit-log.html')
+
+
+@app.route('/api/weekly/meta')
+def weekly_meta():
+    conn, user, err = auth_guard('manage_weekly_reports')
+    if err:
+        return err
+    today = datetime.now().date()
+    start = monday_of(today)
+    end = start + timedelta(days=6)
+    conn.close()
+    return jsonify({
+        'defaultWeekStart': start.isoformat(),
+        'defaultWeekEnd': end.isoformat(),
+        'defaultWeekNumber': default_week_number(start),
+        'rocLabel': f'{roc_year(start)}/{start.month}/{start.day}-{roc_year(end)}/{end.month}/{end.day}',
+    })
+
+
+@app.route('/api/weekly/summary')
+def weekly_summary():
+    conn, user, err = auth_guard('manage_weekly_reports')
+    if err:
+        return err
+
+    site_id = (request.args.get('siteId') or '').strip()
+    week_start = (request.args.get('weekStart') or '').strip()
+    if not site_id or not week_start:
+        conn.close()
+        return jsonify({'error': '請提供案場與週起始日（週一）'}), 400
+
+    denied = ensure_site_access(user, site_id)
+    if denied:
+        conn.close()
+        return denied
+
+    site = get_site_by_id(site_id)
+    if not site:
+        conn.close()
+        return jsonify({'error': '找不到此案場'}), 404
+
+    try:
+        start, end = week_bounds(week_start)
+    except ValueError as e:
+        conn.close()
+        return jsonify({'error': str(e)}), 400
+
+    week_start_s = start.isoformat()
+    week_end_s = end.isoformat()
+    saved = load_weekly_report(conn, site_id, week_start_s)
+    manual = (saved or {}).get('data') if saved else None
+    if not manual:
+        manual = empty_manual_payload(start, end)
+    else:
+        # ensure days skeleton exists
+        base = empty_manual_payload(start, end, manual.get('weekNumber'))
+        for key, val in base.items():
+            manual.setdefault(key, val)
+
+    auto = build_auto_stats(conn, site_id, start, end)
+    history = list_weekly_reports(conn, site_id)
+    conn.close()
+
+    return jsonify({
+        'siteId': site_id,
+        'siteName': site['name'],
+        'weekStart': week_start_s,
+        'weekEnd': week_end_s,
+        'weekNumber': manual.get('weekNumber') or default_week_number(start),
+        'rocLabel': f'{roc_year(start)}/{start.month}/{start.day}-{roc_year(end)}/{end.month}/{end.day}',
+        'saved': bool(saved),
+        'updatedAt': (saved or {}).get('updatedAt'),
+        'manual': manual,
+        'auto': auto,
+        'history': history,
+    })
+
+
+@app.route('/api/weekly/reports', methods=['PUT'])
+def save_weekly_report():
+    conn, user, err = auth_guard('manage_weekly_reports')
+    if err:
+        return err
+
+    body = request.get_json() or {}
+    site_id = (body.get('siteId') or '').strip()
+    week_start = (body.get('weekStart') or '').strip()
+    manual = body.get('manual') or {}
+    if not site_id or not week_start:
+        conn.close()
+        return jsonify({'error': '請提供案場與週起始日'}), 400
+
+    denied = ensure_site_access(user, site_id)
+    if denied:
+        conn.close()
+        return denied
+
+    site = get_site_by_id(site_id)
+    if not site:
+        conn.close()
+        return jsonify({'error': '找不到此案場'}), 404
+
+    try:
+        start, end = week_bounds(week_start)
+    except ValueError as e:
+        conn.close()
+        return jsonify({'error': str(e)}), 400
+
+    week_number = manual.get('weekNumber')
+    try:
+        week_number = int(week_number) if week_number not in (None, '') else default_week_number(start)
+    except (TypeError, ValueError):
+        week_number = default_week_number(start)
+    manual['weekNumber'] = week_number
+
+    report_id = upsert_weekly_report(
+        conn,
+        site_id=site_id,
+        site_name=site['name'],
+        week_start=start.isoformat(),
+        week_end=end.isoformat(),
+        week_number=week_number,
+        data=manual,
+        user_id=user.get('id') if user else None,
+    )
+    log_operation(
+        conn,
+        user,
+        'save_weekly_report',
+        f'儲存週報：{site["name"]} 第{week_number}週（{start.isoformat()}）',
+        entity_type='weekly_report',
+        entity_id=str(report_id),
+        site_id=site_id,
+        site_name=site['name'],
+        detail={'weekStart': start.isoformat(), 'weekNumber': week_number},
+    )
+    conn.commit()
+    saved = load_weekly_report(conn, site_id, start.isoformat())
+    conn.close()
+    return jsonify({'success': True, 'report': saved})
+
+
+@app.route('/api/weekly/export.csv')
+def export_weekly_csv():
+    conn, user, err = auth_guard('manage_weekly_reports')
+    if err:
+        return err
+
+    site_id = (request.args.get('siteId') or '').strip()
+    week_start = (request.args.get('weekStart') or '').strip()
+    if not site_id or not week_start:
+        conn.close()
+        return jsonify({'error': '請提供案場與週起始日'}), 400
+
+    denied = ensure_site_access(user, site_id)
+    if denied:
+        conn.close()
+        return denied
+
+    site = get_site_by_id(site_id)
+    if not site:
+        conn.close()
+        return jsonify({'error': '找不到此案場'}), 404
+
+    try:
+        start, end = week_bounds(week_start)
+    except ValueError as e:
+        conn.close()
+        return jsonify({'error': str(e)}), 400
+
+    saved = load_weekly_report(conn, site_id, start.isoformat())
+    manual = (saved or {}).get('data') or empty_manual_payload(start, end)
+    auto = build_auto_stats(conn, site_id, start, end)
+    conn.close()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    week_no = manual.get('weekNumber') or default_week_number(start)
+    writer.writerow([f'{site["name"]} 第{week_no}週週報'])
+    writer.writerow(['週次區間', f'{start.isoformat()} ~ {end.isoformat()}'])
+    writer.writerow([])
+    writer.writerow(['【自動統計：來人】'])
+    writer.writerow(['日期', '星期', '新客', '回訪', '成交', '合計'])
+    for day in auto['byDay']:
+        writer.writerow([
+            day['date'], day['weekday'], day['new'], day['return'], day['deal'], day['total'],
+        ])
+    t = auto['totals']
+    writer.writerow(['本週合計', '', t['new'], t['return'], t['deal'], t['total']])
+    writer.writerow([])
+    writer.writerow(['【人工填寫：來電／天氣】'])
+    writer.writerow(['日期', '星期', '天氣', '來電'])
+    for day in manual.get('days') or []:
+        writer.writerow([day.get('date'), day.get('weekday'), day.get('weather'), day.get('phoneCalls')])
+    writer.writerow([])
+    writer.writerow(['【成交／簽約／買進】'])
+    writer.writerow(['項目', '戶', '車', '金額(萬)'])
+    for label, key in [('本週成交', 'deals'), ('本週簽約', 'signings'), ('本週買進', 'purchases')]:
+        block = manual.get(key) or {}
+        writer.writerow([label, block.get('units', 0), block.get('parking', 0), block.get('amount', 0)])
+    writer.writerow([])
+    writer.writerow(['成交檢討', manual.get('reviewNotes') or ''])
+    writer.writerow(['區域個案分析', manual.get('competitorNotes') or ''])
+    writer.writerow(['備註', manual.get('memo') or ''])
+    writer.writerow([])
+    writer.writerow(['【區域統計】', '組數'])
+    for row in auto['byRegion']:
+        writer.writerow([row['name'], row['count']])
+    writer.writerow([])
+    writer.writerow(['【媒體統計】', '組數'])
+    for row in auto['byMedia']:
+        writer.writerow([row['name'], row['count']])
+    writer.writerow([])
+    writer.writerow(['【本週客況明細】'])
+    writer.writerow(['日期', '類型', '姓名', '電話', '區域', '媒體', '來源', '誠意度', '銷售', '洽談摘要'])
+    for v in auto['visitors']:
+        writer.writerow([
+            v['date'], v['visitType'], v['customerName'], v['phone'], v['region'],
+            v['media'], v['source'], v['sincerity'], v['salesperson1'], v['discussion'],
+        ])
+
+    utf8_name = quote(f'{site["name"]}_第{week_no}週週報_{start.isoformat()}.csv')
+    return Response(
+        '\ufeff' + output.getvalue(),
+        mimetype='text/csv; charset=utf-8',
+        headers={
+            'Content-Disposition': (
+                f"attachment; filename=\"weekly_report_{start.isoformat()}.csv\"; "
+                f"filename*=UTF-8''{utf8_name}"
+            ),
+        },
+    )
 
 
 @app.route('/api/fields')

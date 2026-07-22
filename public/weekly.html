@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>週報工作台 - 得意佳</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body data-app="weekly">
+  <header class="header">
+    <div class="header-inner">
+      <h1><span class="brand">得意佳</span>週報系統</h1>
+      <nav id="mainNav"></nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="card">
+      <h2>選擇週次</h2>
+      <p class="hint">先選案場與本週週一日期，系統會從客資自動帶出本週來人／區域／媒體；來電、天氣、成交請人工補填後儲存或匯出。</p>
+      <div class="search-grid">
+        <div class="form-group">
+          <label for="weekSite">案場 <span class="required">*</span></label>
+          <select id="weekSite">
+            <option value="">請選擇案場</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="weekStart">週起始日（週一） <span class="required">*</span></label>
+          <input type="date" id="weekStart">
+        </div>
+        <div class="form-group">
+          <label for="weekNumber">週次</label>
+          <input type="number" id="weekNumber" min="1" max="99" placeholder="例如 86">
+        </div>
+        <div class="form-group">
+          <label>區間</label>
+          <div id="weekRangeLabel" class="current-site-label">—</div>
+        </div>
+      </div>
+      <div class="form-actions">
+        <button type="button" id="loadWeekBtn" class="btn btn-primary">載入本週資料</button>
+        <button type="button" id="prevWeekBtn" class="btn btn-outline">上一週</button>
+        <button type="button" id="nextWeekBtn" class="btn btn-outline">下一週</button>
+      </div>
+    </section>
+
+    <div id="weekEmpty" class="empty-state">
+      <p>請選擇案場與週次後按「載入本週資料」</p>
+    </div>
+
+    <div id="weekWorkspace" class="hidden">
+      <section class="card">
+        <div class="results-header">
+          <h2>本週 KPI <span id="weekSaveBadge" class="badge badge-muted">尚未儲存</span></h2>
+          <div class="export-actions">
+            <button type="button" id="saveWeekBtn" class="btn btn-primary">儲存週報</button>
+            <button type="button" id="exportWeekBtn" class="btn btn-secondary">匯出 CSV</button>
+          </div>
+        </div>
+        <div id="kpiGrid" class="stats-grid"></div>
+      </section>
+
+      <section class="card">
+        <h2>每日來人（客資自動）／來電・天氣（手填）</h2>
+        <div class="table-wrap">
+          <table class="data-table" id="dailyTable">
+            <thead>
+              <tr>
+                <th>日期</th><th>星期</th><th>新客</th><th>回訪</th><th>合計</th><th>成交</th>
+                <th>來電</th><th>天氣</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>成交／簽約／買進（手填）</h2>
+        <div class="search-grid" id="dealInputs"></div>
+      </section>
+
+      <section class="card">
+        <h2>請佣摘要（手填）</h2>
+        <div class="search-grid" id="commissionInputs"></div>
+      </section>
+
+      <section class="card">
+        <h2>檢討與區域個案（手填）</h2>
+        <div class="form-group full-width">
+          <label for="reviewNotes">成交檢討</label>
+          <textarea id="reviewNotes" rows="4" placeholder="本週報售、未報戶、月／年統計說明…"></textarea>
+        </div>
+        <div class="form-group full-width" style="margin-top:1rem;">
+          <label for="competitorNotes">區域個案分析</label>
+          <textarea id="competitorNotes" rows="4" placeholder="例如：名軒海樂地 16/1、合康植芯 4/0…"></textarea>
+        </div>
+        <div class="form-group full-width" style="margin-top:1rem;">
+          <label for="weekMemo">備註</label>
+          <textarea id="weekMemo" rows="2"></textarea>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>區域／媒體／來源（客資自動）</h2>
+        <div class="weekly-split">
+          <div>
+            <h3 class="section-title">區域</h3>
+            <div id="regionStats" class="mini-stat-list"></div>
+          </div>
+          <div>
+            <h3 class="section-title">媒體</h3>
+            <div id="mediaStats" class="mini-stat-list"></div>
+          </div>
+          <div>
+            <h3 class="section-title">來源</h3>
+            <div id="sourceStats" class="mini-stat-list"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>本週客況明細（客資自動）</h2>
+        <div class="table-wrap">
+          <table class="data-table" id="visitorTable">
+            <thead>
+              <tr>
+                <th>日期</th><th>類型</th><th>姓名</th><th>電話</th><th>區域</th>
+                <th>媒體</th><th>來源</th><th>誠意度</th><th>銷售</th><th>洽談</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>已儲存週報紀錄</h2>
+        <div id="weekHistory" class="mini-stat-list"></div>
+      </section>
+    </div>
+  </main>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="/js/nav.js"></script>
+  <script src="/js/weekly.js"></script>
+</body>
+</html>

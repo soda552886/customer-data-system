@@ -17,11 +17,13 @@ ROLE_PERMISSIONS = {
         'view_customers', 'edit_customers', 'delete_customers',
         'import_customers', 'export_customers', 'delete_all_customers',
         'manage_sites', 'manage_users', 'manage_field_options', 'view_audit_logs', 'submit_form',
+        'manage_weekly_reports',
     },
     'field_staff': {
         'view_customers', 'edit_customers', 'delete_customers',
         'import_customers', 'export_customers', 'delete_all_customers',
         'manage_field_options', 'view_audit_logs', 'submit_form',
+        'manage_weekly_reports',
     },
     'sales': {
         'submit_form',
@@ -31,6 +33,7 @@ ROLE_PERMISSIONS = {
 PROTECTED_PAGES = frozenset({
     '/search.html', '/sites.html', '/users.html',
     '/site-fields.html', '/field-options.html', '/audit-log.html',
+    '/weekly.html',
 })
 
 PUBLIC_API_PREFIXES = (
