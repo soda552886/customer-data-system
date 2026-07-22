@@ -18,20 +18,28 @@ function todayStr() {
 function toDateInputValue(raw) {
   if (!raw) return '';
   const s = String(raw).trim().split(/\s+/)[0];
+
   let m = s.match(/^(\d{4})[./-](\d{1,2})[./-](\d{1,2})$/);
   if (m) {
-    return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+    let year = Number(m[1]);
+    if (year < 1911) year += 1911;
+    return `${year}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
   }
-  m = s.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/);
-  if (m) {
-    return `${m[3]}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}`;
-  }
+
   m = s.match(/^(\d{2,3})[./-](\d{1,2})[./-](\d{1,2})$/);
   if (m) {
     let year = Number(m[1]);
     if (year < 1911) year += 1911;
     return `${year}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
   }
+
+  m = s.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})$/);
+  if (m) {
+    let year = Number(m[3]);
+    if (year < 1911) year += 1911;
+    return `${year}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}`;
+  }
+
   return s;
 }
 

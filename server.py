@@ -163,22 +163,31 @@ def normalize_date_value(val):
         return None
     s = str(val).strip().split()[0]
 
-    m = re.match(r'^(\d{2,3})[./](\d{1,2})[./](\d{1,2})$', s)
+    # YYYY-MM-DD / YYYY/M/D（若年 < 1911 視為民國，如 0114）
+    m = re.match(r'^(\d{4})[./-](\d{1,2})[./-](\d{1,2})$', s)
     if m:
         year, month, day = int(m.group(1)), int(m.group(2)), int(m.group(3))
         if year < 1911:
             year += 1911
         return f'{year}-{month:02d}-{day:02d}'
 
-    m = re.match(r'^(\d{4})[./-](\d{1,2})[./-](\d{1,2})$', s)
+    # 民國 Y/M/D（2～3 碼年）
+    m = re.match(r'^(\d{2,3})[./-](\d{1,2})[./-](\d{1,2})$', s)
     if m:
         year, month, day = int(m.group(1)), int(m.group(2)), int(m.group(3))
-        return f'{year}-{month:02d}-{day:02d}'
+        if year < 1911:
+            year += 1911
+        if 1 <= month <= 12 and 1 <= day <= 31:
+            return f'{year}-{month:02d}-{day:02d}'
 
-    m = re.match(r'^(\d{1,2})[./](\d{1,2})[./](\d{4})$', s)
+    # M/D/YYYY 或 M/D/民國年（如 9/2/0114、9/2/114）
+    m = re.match(r'^(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})$', s)
     if m:
         month, day, year = int(m.group(1)), int(m.group(2)), int(m.group(3))
-        return f'{year}-{month:02d}-{day:02d}'
+        if year < 1911:
+            year += 1911
+        if 1 <= month <= 12 and 1 <= day <= 31:
+            return f'{year}-{month:02d}-{day:02d}'
 
     return s
 
@@ -1525,7 +1534,16 @@ def list_customers():
         record['return_visit_total'] = return_count_map.get((row['site_id'], phone_key), 0)
         if row['visit_type'] == '回訪' and not data.get('visitCount') and record['return_visit_total'] > 0:
             data['visitCount'] = f"第{record['return_visit_total']}次"
+        # 統一日期顯示（修正 9/2/0114 等民國／匯入格式）
+        for dk in ('visitDate', 'firstVisitDate', 'returnVisitDate', 'prevVisitDate'):
+            if data.get(dk):
+                normalized = normalize_date_value(data[dk])
+                if normalized:
+                    data[dk] = normalized
         record['data'] = data
+        visit_norm = normalize_date_value(record.get('visit_date'))
+        if visit_norm:
+            record['visit_date'] = visit_norm
         filtered.append(record)
 
     newest_first = sort_order != 'asc'

@@ -218,11 +218,47 @@ function resetColumns() {
   if (lastResults.length > 0) renderResults({ records: lastResults, total: lastTotal, page: currentPage, limit: 50 });
 }
 
+function formatDisplayDate(raw) {
+  if (!raw) return '';
+  const s = String(raw).trim().split(/\s+/)[0];
+
+  let m = s.match(/^(\d{4})[./-](\d{1,2})[./-](\d{1,2})$/);
+  if (m) {
+    let year = Number(m[1]);
+    if (year < 1911) year += 1911;
+    return `${year}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+  }
+
+  // 民國 Y/M/D（2～3 碼年）
+  m = s.match(/^(\d{2,3})[./-](\d{1,2})[./-](\d{1,2})$/);
+  if (m) {
+    let year = Number(m[1]);
+    if (year < 1911) year += 1911;
+    return `${year}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+  }
+
+  // M/D/YYYY 或 M/D/民國年（如 9/2/0114）
+  m = s.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})$/);
+  if (m) {
+    let year = Number(m[3]);
+    if (year < 1911) year += 1911;
+    return `${year}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}`;
+  }
+
+  return s;
+}
+
 function getCellValue(record, key) {
   const d = record.data || {};
   switch (key) {
     case 'visit_date':
-      return record.visit_date || d.visitDate || d.returnVisitDate || '';
+      return formatDisplayDate(record.visit_date || d.visitDate || d.returnVisitDate || '');
+    case 'visitDate':
+    case 'firstVisitDate':
+    case 'returnVisitDate':
+    case 'prevVisitDate':
+    case 'cancelDate':
+      return formatDisplayDate(d[key] || (key === 'visitDate' ? record.visit_date : '') || '');
     case 'site_name':
       return record.site_name || '';
     case 'visit_type':
@@ -481,7 +517,7 @@ window.showDetail = async function (id) {
     <dt>案場</dt><dd>${escapeHtml(record.site_name)}</dd>
     <dt>類型</dt><dd>${escapeHtml(record.visit_type)}</dd>
     <dt>成交</dt><dd>${record.is_deal ? '是' : '否'}</dd>
-    <dt>日期</dt><dd>${escapeHtml(record.visit_date || '-')}</dd>
+    <dt>日期</dt><dd>${escapeHtml(formatDisplayDate(record.visit_date) || '-')}</dd>
   `;
 
   Object.entries(d).forEach(([key, val]) => {
