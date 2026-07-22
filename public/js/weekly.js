@@ -343,14 +343,19 @@ function shiftWeek(delta) {
 }
 
 async function init() {
+  // 等 nav.js 建立並完成登入狀態檢查
+  for (let i = 0; i < 50 && !window.navReady; i += 1) {
+    await new Promise((r) => setTimeout(r, 20));
+  }
   if (window.navReady) await window.navReady;
+
   if (!window.currentUser) {
-    window.location.href = '/login.html?next=/weekly.html';
+    window.location.replace('/login.html?next=/weekly.html');
     return;
   }
   if (!(window.currentUser.permissions || []).includes('manage_weekly_reports')) {
     showToast('沒有週報權限', 'error');
-    setTimeout(() => { window.location.href = '/'; }, 1200);
+    setTimeout(() => { window.location.replace('/'); }, 1200);
     return;
   }
 
@@ -369,4 +374,8 @@ async function init() {
   });
 }
 
-init();
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => { init(); });
+} else {
+  init();
+}

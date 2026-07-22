@@ -98,7 +98,15 @@ body {
   font-weight: 600;
 }
 
-.header h1 { font-size: 1.35rem; font-weight: 600; flex: 1; }
+.header h1 {
+  font-size: 1.35rem;
+  font-weight: 600;
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .header h1 .brand { color: var(--accent); margin-right: 0.15em; }
 
 .header nav { display: flex; gap: 0.5rem; }

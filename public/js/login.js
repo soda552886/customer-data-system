@@ -9,11 +9,12 @@ const params = new URLSearchParams(window.location.search);
 const nextUrl = params.get('next') || '/search.html';
 
 function redirectAfterLogin(user) {
-  if (user.role === 'sales') {
-    window.location.href = '/';
+  // 若有指定 next（例如週報），一律導向該頁；否則業務回填表單、其他人回查看資料
+  if (nextUrl && nextUrl !== '/login.html') {
+    window.location.href = nextUrl;
     return;
   }
-  window.location.href = nextUrl;
+  window.location.href = user.role === 'sales' ? '/' : '/search.html';
 }
 
 document.getElementById('loginForm').addEventListener('submit', async (e) => {

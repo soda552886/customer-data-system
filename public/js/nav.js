@@ -66,13 +66,8 @@ function ensureAppSwitcher(activePath) {
   }).join('');
 
   const title = headerInner.querySelector('h1');
-  if (title && !title.dataset.locked) {
-    if (currentApp(activePath) === 'weekly') {
-      title.innerHTML = '<span class="brand">得意佳</span>週報系統';
-    } else if (!document.body.dataset.app) {
-      title.innerHTML = '<span class="brand">得意佳</span>客戶資料管理系統';
-    }
-  }
+  // 標題維持各頁原本文案，不在切換系統時改寫
+  if (title) title.style.whiteSpace = 'nowrap';
 }
 
 function renderNav(activePath) {
@@ -120,6 +115,12 @@ async function initNav(activePath) {
 
 window.navReady = null;
 
-document.addEventListener('DOMContentLoaded', () => {
+function startNav() {
   window.navReady = initNav(window.location.pathname);
-});
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', startNav);
+} else {
+  startNav();
+}
