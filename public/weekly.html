@@ -17,7 +17,7 @@
   <main class="container">
     <section class="card">
       <h2>選擇週次</h2>
-      <p class="hint">先選案場與本週週一日期，系統會從客資自動帶出本週來人／區域／媒體；來電、天氣、成交請人工補填後儲存或匯出。</p>
+      <p class="hint">先選案場與本週週一日期，系統會從客資自動帶出來人、成交比、回訪／有望客；來電、天氣、成交、去化、請佣請人工補填後儲存，可匯出多工作表 Excel。</p>
       <div class="search-grid">
         <div class="form-group">
           <label for="weekSite">案場 <span class="required">*</span></label>
@@ -55,7 +55,8 @@
           <h2>本週 KPI <span id="weekSaveBadge" class="badge badge-muted">尚未儲存</span></h2>
           <div class="export-actions">
             <button type="button" id="saveWeekBtn" class="btn btn-primary">儲存週報</button>
-            <button type="button" id="exportWeekBtn" class="btn btn-secondary">匯出 CSV</button>
+            <button type="button" id="exportWeekBtn" class="btn btn-secondary">匯出 Excel</button>
+            <button type="button" id="exportCsvBtn" class="btn btn-outline">匯出 CSV</button>
           </div>
         </div>
         <div id="kpiGrid" class="stats-grid"></div>
@@ -77,13 +78,35 @@
       </section>
 
       <section class="card">
-        <h2>成交／簽約／買進（手填）</h2>
+        <h2>成交／簽約／買進／未報（手填）</h2>
         <div class="search-grid" id="dealInputs"></div>
       </section>
 
       <section class="card">
-        <h2>請佣摘要（手填）</h2>
+        <h2>房屋去化（手填，自動算去化率）</h2>
+        <div class="search-grid" id="inventoryInputs"></div>
+        <div id="inventoryDerived" class="stats-grid" style="margin-top:1rem;"></div>
+      </section>
+
+      <section class="card">
+        <h2>請佣摘要（手填，自動算未請）</h2>
         <div class="search-grid" id="commissionInputs"></div>
+        <div id="commissionDerived" class="stats-grid" style="margin-top:1rem;"></div>
+      </section>
+
+      <section class="card">
+        <h2>銷售成交比（客資自動）</h2>
+        <div class="table-wrap">
+          <table class="data-table" id="conversionTable">
+            <thead>
+              <tr>
+                <th>銷售人員</th><th>累計接待</th><th>累計成交</th><th>成交率</th>
+                <th>本週接待</th><th>本週成交</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
       </section>
 
       <section class="card">
@@ -116,6 +139,20 @@
           <div>
             <h3 class="section-title">來源</h3>
             <div id="sourceStats" class="mini-stat-list"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>本週回訪／有望客（客資自動）</h2>
+        <div class="weekly-split">
+          <div>
+            <h3 class="section-title">回訪</h3>
+            <div id="returnList" class="mini-stat-list"></div>
+          </div>
+          <div>
+            <h3 class="section-title">有望客</h3>
+            <div id="hopeList" class="mini-stat-list"></div>
           </div>
         </div>
       </section>

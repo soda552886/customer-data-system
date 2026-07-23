@@ -27,9 +27,10 @@ from field_options import (
     save_site_hidden_fields, save_site_option_overrides, save_site_report_export_config,
 )
 from weekly_reports import (
-    build_auto_stats, default_week_number, empty_manual_payload, init_weekly_tables,
-    list_weekly_reports, load_weekly_report, monday_of, roc_year,
-    upsert_weekly_report, week_bounds,
+    build_auto_stats, build_weekly_excel, commission_summary, default_week_number,
+    empty_manual_payload, init_weekly_tables, inventory_summary, list_weekly_reports,
+    load_weekly_report, merge_manual, monday_of, roc_year, upsert_weekly_report,
+    week_bounds,
 )
 
 BASE_DIR = Path(__file__).parent
@@ -1166,14 +1167,8 @@ def weekly_summary():
     week_start_s = start.isoformat()
     week_end_s = end.isoformat()
     saved = load_weekly_report(conn, site_id, week_start_s)
-    manual = (saved or {}).get('data') if saved else None
-    if not manual:
-        manual = empty_manual_payload(start, end)
-    else:
-        # ensure days skeleton exists
-        base = empty_manual_payload(start, end, manual.get('weekNumber'))
-        for key, val in base.items():
-            manual.setdefault(key, val)
+    base = empty_manual_payload(start, end)
+    manual = merge_manual(base, (saved or {}).get('data') if saved else None)
 
     auto = build_auto_stats(conn, site_id, start, end)
     history = list_weekly_reports(conn, site_id)
@@ -1190,6 +1185,10 @@ def weekly_summary():
         'updatedAt': (saved or {}).get('updatedAt'),
         'manual': manual,
         'auto': auto,
+        'derived': {
+            'inventory': inventory_summary(manual),
+            'commission': commission_summary(manual),
+        },
         'history': history,
     })
 
@@ -1287,7 +1286,8 @@ def export_weekly_csv():
         return jsonify({'error': str(e)}), 400
 
     saved = load_weekly_report(conn, site_id, start.isoformat())
-    manual = (saved or {}).get('data') or empty_manual_payload(start, end)
+    base = empty_manual_payload(start, end)
+    manual = merge_manual(base, (saved or {}).get('data') if saved else None)
     auto = build_auto_stats(conn, site_id, start, end)
     conn.close()
 
@@ -1313,7 +1313,7 @@ def export_weekly_csv():
     writer.writerow([])
     writer.writerow(['【成交／簽約／買進】'])
     writer.writerow(['項目', '戶', '車', '金額(萬)'])
-    for label, key in [('本週成交', 'deals'), ('本週簽約', 'signings'), ('本週買進', 'purchases')]:
+    for label, key in [('本週成交', 'deals'), ('本週簽約', 'signings'), ('本週買進', 'purchases'), ('未報', 'unreported')]:
         block = manual.get(key) or {}
         writer.writerow([label, block.get('units', 0), block.get('parking', 0), block.get('amount', 0)])
     writer.writerow([])
@@ -1328,6 +1328,11 @@ def export_weekly_csv():
     writer.writerow(['【媒體統計】', '組數'])
     for row in auto['byMedia']:
         writer.writerow([row['name'], row['count']])
+    writer.writerow([])
+    writer.writerow(['【成交比】'])
+    writer.writerow(['銷售', '累計接待', '累計成交', '成交率%', '本週接待', '本週成交'])
+    for row in auto.get('conversion') or []:
+        writer.writerow([row['name'], row['visits'], row['deals'], row['rate'], row['weekVisits'], row['weekDeals']])
     writer.writerow([])
     writer.writerow(['【本週客況明細】'])
     writer.writerow(['日期', '類型', '姓名', '電話', '區域', '媒體', '來源', '誠意度', '銷售', '洽談摘要'])
@@ -1344,6 +1349,55 @@ def export_weekly_csv():
         headers={
             'Content-Disposition': (
                 f"attachment; filename=\"weekly_report_{start.isoformat()}.csv\"; "
+                f"filename*=UTF-8''{utf8_name}"
+            ),
+        },
+    )
+
+
+@app.route('/api/weekly/export.xlsx')
+def export_weekly_xlsx():
+    conn, user, err = auth_guard('manage_weekly_reports')
+    if err:
+        return err
+
+    site_id = (request.args.get('siteId') or '').strip()
+    week_start = (request.args.get('weekStart') or '').strip()
+    if not site_id or not week_start:
+        conn.close()
+        return jsonify({'error': '請提供案場與週起始日'}), 400
+
+    denied = ensure_site_access(user, site_id)
+    if denied:
+        conn.close()
+        return denied
+
+    site = get_site_by_id(site_id)
+    if not site:
+        conn.close()
+        return jsonify({'error': '找不到此案場'}), 404
+
+    try:
+        start, end = week_bounds(week_start)
+    except ValueError as e:
+        conn.close()
+        return jsonify({'error': str(e)}), 400
+
+    saved = load_weekly_report(conn, site_id, start.isoformat())
+    base = empty_manual_payload(start, end)
+    manual = merge_manual(base, (saved or {}).get('data') if saved else None)
+    auto = build_auto_stats(conn, site_id, start, end)
+    conn.close()
+
+    week_no = manual.get('weekNumber') or default_week_number(start)
+    content = build_weekly_excel(site['name'], start, end, week_no, manual, auto)
+    utf8_name = quote(f'{site["name"]}_第{week_no}週週報_{start.isoformat()}.xlsx')
+    return Response(
+        content,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        headers={
+            'Content-Disposition': (
+                f"attachment; filename=\"weekly_report_{start.isoformat()}.xlsx\"; "
                 f"filename*=UTF-8''{utf8_name}"
             ),
         },
