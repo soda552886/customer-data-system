@@ -1170,7 +1170,13 @@ def weekly_summary():
     base = empty_manual_payload(start, end)
     manual = merge_manual(base, (saved or {}).get('data') if saved else None)
 
-    auto = build_auto_stats(conn, site_id, start, end)
+    phone_sum = sum(float((d or {}).get('phoneCalls') or 0) for d in (manual.get('days') or []))
+    auto = build_auto_stats(
+        conn, site_id, start, end,
+        included_visitor_ids=manual.get('includedVisitorIds'),
+        active_staff=SALES_STAFF.get(site_id) or [],
+        week_phone_total=phone_sum,
+    )
     history = list_weekly_reports(conn, site_id)
     conn.close()
 
@@ -1288,7 +1294,13 @@ def export_weekly_csv():
     saved = load_weekly_report(conn, site_id, start.isoformat())
     base = empty_manual_payload(start, end)
     manual = merge_manual(base, (saved or {}).get('data') if saved else None)
-    auto = build_auto_stats(conn, site_id, start, end)
+    phone_sum = sum(float((d or {}).get('phoneCalls') or 0) for d in (manual.get('days') or []))
+    auto = build_auto_stats(
+        conn, site_id, start, end,
+        included_visitor_ids=manual.get('includedVisitorIds'),
+        active_staff=SALES_STAFF.get(site_id) or [],
+        week_phone_total=phone_sum,
+    )
     conn.close()
 
     output = io.StringIO()
@@ -1305,6 +1317,7 @@ def export_weekly_csv():
         ])
     t = auto['totals']
     writer.writerow(['本週合計', '', t['new'], t['return'], t['deal'], t['total']])
+    writer.writerow(['實際來人', t.get('actualTotal', ''), '納入週報', t.get('reportedTotal', '')])
     writer.writerow([])
     writer.writerow(['【人工填寫：來電／天氣】'])
     writer.writerow(['日期', '星期', '天氣', '來電'])
@@ -1321,25 +1334,49 @@ def export_weekly_csv():
     writer.writerow(['區域個案分析', manual.get('competitorNotes') or ''])
     writer.writerow(['備註', manual.get('memo') or ''])
     writer.writerow([])
-    writer.writerow(['【區域統計】', '組數'])
+    writer.writerow(['【區域統計（新客）】', '本週', '前期', '累計', '佔本週%', '佔累計%'])
     for row in auto['byRegion']:
-        writer.writerow([row['name'], row['count']])
+        writer.writerow([
+            row['name'], row.get('weekVisits'), row.get('priorVisits'), row.get('cumVisits'),
+            row.get('weekVisitPct'), row.get('cumVisitPct'),
+        ])
     writer.writerow([])
-    writer.writerow(['【媒體統計】', '組數'])
+    writer.writerow(['【媒體統計（新客）】', '本週', '前期', '累計', '佔本週%', '佔累計%'])
     for row in auto['byMedia']:
-        writer.writerow([row['name'], row['count']])
+        writer.writerow([
+            row['name'], row.get('weekVisits'), row.get('priorVisits'), row.get('cumVisits'),
+            row.get('weekVisitPct'), row.get('cumVisitPct'),
+        ])
+    writer.writerow([])
+    writer.writerow(['【職業】', '本週', '前期', '累計', '佔本週%', '佔累計%'])
+    for row in auto.get('byOccupation') or []:
+        writer.writerow([
+            row['name'], row.get('weekVisits'), row.get('priorVisits'), row.get('cumVisits'),
+            row.get('weekVisitPct'), row.get('cumVisitPct'),
+        ])
+    writer.writerow([])
+    writer.writerow(['【年齡】', '本週', '前期', '累計', '佔本週%', '佔累計%'])
+    for row in auto.get('byAge') or []:
+        writer.writerow([
+            row['name'], row.get('weekVisits'), row.get('priorVisits'), row.get('cumVisits'),
+            row.get('weekVisitPct'), row.get('cumVisitPct'),
+        ])
     writer.writerow([])
     writer.writerow(['【成交比】'])
-    writer.writerow(['銷售', '累計接待', '累計成交', '成交率%', '本週接待', '本週成交'])
+    writer.writerow(['銷售', '累計接待', '累計成交', '成交率%', '成交金額', '退戶', '本週接待', '本週成交'])
     for row in auto.get('conversion') or []:
-        writer.writerow([row['name'], row['visits'], row['deals'], row['rate'], row['weekVisits'], row['weekDeals']])
+        writer.writerow([
+            row['name'], row['visits'], row['deals'], row['rate'], row.get('amount'),
+            row.get('refunds'), row['weekVisits'], row['weekDeals'],
+        ])
     writer.writerow([])
-    writer.writerow(['【本週客況明細】'])
-    writer.writerow(['日期', '類型', '姓名', '電話', '區域', '媒體', '來源', '誠意度', '銷售', '洽談摘要'])
+    writer.writerow(['【本週客況明細（納入週報）】'])
+    writer.writerow(['日期', '類型', '姓名', '電話', '區域', '媒體', '職業', '年齡', '來源', '誠意度', '銷售', '洽談摘要'])
     for v in auto['visitors']:
         writer.writerow([
             v['date'], v['visitType'], v['customerName'], v['phone'], v['region'],
-            v['media'], v['source'], v['sincerity'], v['salesperson1'], v['discussion'],
+            v['media'], v.get('occupation'), v.get('age'), v['source'], v['sincerity'],
+            v['salesperson1'], v['discussion'],
         ])
 
     utf8_name = quote(f'{site["name"]}_第{week_no}週週報_{start.isoformat()}.csv')
@@ -1386,7 +1423,13 @@ def export_weekly_xlsx():
     saved = load_weekly_report(conn, site_id, start.isoformat())
     base = empty_manual_payload(start, end)
     manual = merge_manual(base, (saved or {}).get('data') if saved else None)
-    auto = build_auto_stats(conn, site_id, start, end)
+    phone_sum = sum(float((d or {}).get('phoneCalls') or 0) for d in (manual.get('days') or []))
+    auto = build_auto_stats(
+        conn, site_id, start, end,
+        included_visitor_ids=manual.get('includedVisitorIds'),
+        active_staff=SALES_STAFF.get(site_id) or [],
+        week_phone_total=phone_sum,
+    )
     conn.close()
 
     week_no = manual.get('weekNumber') or default_week_number(start)

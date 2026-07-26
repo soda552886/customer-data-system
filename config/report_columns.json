@@ -53,6 +53,10 @@
     { "group": "洽談", "key": "sincerity", "label": "客戶誠意度" },
     { "group": "洽談", "key": "salesperson1", "label": "銷售人員1" },
     { "group": "洽談", "key": "salesperson2", "label": "銷售人員2" },
+    { "group": "洽談", "key": "isCoManaged", "label": "共同經營" },
+    { "group": "洽談", "key": "dealAmount", "label": "成交金額(萬)" },
+    { "group": "洽談", "key": "isRefund", "label": "退戶" },
+    { "group": "洽談", "key": "refundAmount", "label": "退戶金額(萬)" },
     { "group": "系統", "key": "created_at", "label": "建檔時間" }
   ]
 }

@@ -17,7 +17,7 @@
   <main class="container">
     <section class="card">
       <h2>選擇週次</h2>
-      <p class="hint">先選案場與本週週一日期，系統會從客資自動帶出來人、成交比、回訪／有望客；來電、天氣、成交、去化、請佣請人工補填後儲存，可匯出多工作表 Excel。</p>
+      <p class="hint">系統會自動帶出來人分析（區域／媒體／職業／年齡）、成交比、回訪／有望客。可勾選「要報的來人」後套用；去化／請佣／成交手填後儲存，匯出 Excel 會以「週報一覽」為主閱讀頁。</p>
       <div class="search-grid">
         <div class="form-group">
           <label for="weekSite">案場 <span class="required">*</span></label>
@@ -63,7 +63,29 @@
       </section>
 
       <section class="card">
-        <h2>每日來人（客資自動）／來電・天氣（手填）</h2>
+        <h2>選取要報的來人</h2>
+        <p class="hint">實際來人可能多於上報組數。勾選要納入本週週報的組別後按「套用選取」，下方統計與匯出只會計算勾選的組。</p>
+        <div class="form-actions" style="margin-bottom:0.75rem;">
+          <button type="button" id="selectAllVisitorsBtn" class="btn btn-outline">全選</button>
+          <button type="button" id="clearVisitorsBtn" class="btn btn-outline">全不選</button>
+          <button type="button" id="applyVisitorsBtn" class="btn btn-primary">套用選取並重算</button>
+          <span id="visitorSelectSummary" class="hint"></span>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table" id="visitorSelectTable">
+            <thead>
+              <tr>
+                <th>納入</th><th>日期</th><th>類型</th><th>姓名</th><th>電話</th>
+                <th>區域</th><th>媒體</th><th>職業</th><th>年齡</th><th>銷售</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>每日來人（依選取）／來電・天氣（手填）</h2>
         <div class="table-wrap">
           <table class="data-table" id="dailyTable">
             <thead>
@@ -74,6 +96,40 @@
             </thead>
             <tbody></tbody>
           </table>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>來人訴求分析（前期／本週／累計＋%）</h2>
+        <p class="hint">區域／媒體／來源僅統計新客；職業／年齡含當週納入週報之來人。來電無法歸戶到單一訴求，% 以佔來人比例對照。</p>
+        <div class="table-wrap" style="margin-bottom:1.25rem;">
+          <h3 class="section-title">區域（新客）</h3>
+          <table class="data-table" id="regionDimTable">
+            <thead>
+              <tr>
+                <th>項目</th><th>前期累計</th><th>本週小計</th><th>目前累計</th>
+                <th>佔本週來人%</th><th>佔累計來人%</th>
+                <th>本週成交</th><th>佔本週成交%</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="table-wrap" style="margin-bottom:1.25rem;">
+          <h3 class="section-title">媒體（新客）</h3>
+          <table class="data-table" id="mediaDimTable"><thead></thead><tbody></tbody></table>
+        </div>
+        <div class="table-wrap" style="margin-bottom:1.25rem;">
+          <h3 class="section-title">來源（新客）</h3>
+          <table class="data-table" id="sourceDimTable"><thead></thead><tbody></tbody></table>
+        </div>
+        <div class="table-wrap" style="margin-bottom:1.25rem;">
+          <h3 class="section-title">職業</h3>
+          <table class="data-table" id="occupationDimTable"><thead></thead><tbody></tbody></table>
+        </div>
+        <div class="table-wrap">
+          <h3 class="section-title">年齡</h3>
+          <table class="data-table" id="ageDimTable"><thead></thead><tbody></tbody></table>
         </div>
       </section>
 
@@ -96,12 +152,14 @@
 
       <section class="card">
         <h2>銷售成交比（客資自動）</h2>
+        <p class="hint">已離職且不在案場銷售名單者歸入「前期銷售」。共同經營（勾選或填銷售2）組數／成交各算 0.5。</p>
         <div class="table-wrap">
           <table class="data-table" id="conversionTable">
             <thead>
               <tr>
                 <th>銷售人員</th><th>累計接待</th><th>累計成交</th><th>成交率</th>
-                <th>本週接待</th><th>本週成交</th>
+                <th>成交金額</th><th>退戶組數</th><th>退戶金額</th>
+                <th>本週接待</th><th>本週成交</th><th>本週金額</th>
               </tr>
             </thead>
             <tbody></tbody>
@@ -126,25 +184,7 @@
       </section>
 
       <section class="card">
-        <h2>區域／媒體／來源（客資自動）</h2>
-        <div class="weekly-split">
-          <div>
-            <h3 class="section-title">區域</h3>
-            <div id="regionStats" class="mini-stat-list"></div>
-          </div>
-          <div>
-            <h3 class="section-title">媒體</h3>
-            <div id="mediaStats" class="mini-stat-list"></div>
-          </div>
-          <div>
-            <h3 class="section-title">來源</h3>
-            <div id="sourceStats" class="mini-stat-list"></div>
-          </div>
-        </div>
-      </section>
-
-      <section class="card">
-        <h2>本週回訪／有望客（客資自動）</h2>
+        <h2>本週回訪／有望客（依選取）</h2>
         <div class="weekly-split">
           <div>
             <h3 class="section-title">回訪</h3>
@@ -158,13 +198,13 @@
       </section>
 
       <section class="card">
-        <h2>本週客況明細（客資自動）</h2>
+        <h2>本週客況明細（已納入週報）</h2>
         <div class="table-wrap">
           <table class="data-table" id="visitorTable">
             <thead>
               <tr>
                 <th>日期</th><th>類型</th><th>姓名</th><th>電話</th><th>區域</th>
-                <th>媒體</th><th>來源</th><th>誠意度</th><th>銷售</th><th>洽談</th>
+                <th>媒體</th><th>職業</th><th>年齡</th><th>誠意度</th><th>銷售</th><th>洽談</th>
               </tr>
             </thead>
             <tbody></tbody>

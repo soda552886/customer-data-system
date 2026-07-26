@@ -1,6 +1,13 @@
 let sites = [];
 let current = null;
 
+const DIM_HEADERS = `
+  <tr>
+    <th>項目</th><th>前期累計</th><th>本週小計</th><th>目前累計</th>
+    <th>佔本週來人%</th><th>佔累計來人%</th>
+    <th>本週成交</th><th>佔本週成交%</th>
+  </tr>`;
+
 function showToast(msg, type = 'success') {
   const toast = document.getElementById('toast');
   toast.textContent = msg;
@@ -25,7 +32,7 @@ function parseYmd(s) {
 
 function mondayOf(d) {
   const x = new Date(d);
-  const day = (x.getDay() + 6) % 7; // Mon=0
+  const day = (x.getDay() + 6) % 7;
   x.setDate(x.getDate() - day);
   return x;
 }
@@ -99,8 +106,8 @@ function collectManualFromForm(baseManual) {
   manual.inventory = manual.inventory || {};
   [
     'totalUnits', 'soldUnits', 'totalParking', 'soldParking',
-    'totalAmount', 'soldAmount', 'residentialTotal', 'residentialSold',
-    'officeTotal', 'officeSold',
+    'totalAmount', 'soldAmount', 'soldBasePrice',
+    'residentialTotal', 'residentialSold', 'officeTotal', 'officeSold',
   ].forEach((f) => {
     const el = document.querySelector(`[data-block="inventory"][data-field="${f}"]`);
     if (el) manual.inventory[f] = Number(el.value) || 0;
@@ -108,17 +115,30 @@ function collectManualFromForm(baseManual) {
 
   manual.commission = manual.commission || {};
   [
-    'sellableAmount', 'claimableAmount', 'claimedAmount',
+    'sellableAmount', 'claimableAmount', 'claimedAmount', 'bookedAmount',
     'claimableUnits', 'claimableParking', 'claimedUnits', 'claimedParking',
+    'nextMonthUnits', 'nextMonthParking', 'nextMonthAmount',
   ].forEach((f) => {
     const el = document.querySelector(`[data-block="commission"][data-field="${f}"]`);
     if (el) manual.commission[f] = Number(el.value) || 0;
   });
 
+  manual.includedVisitorIds = collectSelectedVisitorIds();
+
   manual.reviewNotes = document.getElementById('reviewNotes').value;
   manual.competitorNotes = document.getElementById('competitorNotes').value;
   manual.memo = document.getElementById('weekMemo').value;
   return manual;
+}
+
+function collectSelectedVisitorIds() {
+  const boxes = document.querySelectorAll('#visitorSelectTable tbody input[type="checkbox"][data-id]');
+  if (!boxes.length) {
+    return current?.manual?.includedVisitorIds ?? null;
+  }
+  return Array.from(boxes)
+    .filter((cb) => cb.checked)
+    .map((cb) => Number(cb.dataset.id));
 }
 
 function calcInventoryDerived(inv) {
@@ -128,20 +148,27 @@ function calcInventoryDerived(inv) {
     unitRate: rate(n('soldUnits'), n('totalUnits')),
     parkingRate: rate(n('soldParking'), n('totalParking')),
     amountRate: rate(n('soldAmount'), n('totalAmount')),
+    basePriceRate: rate(n('soldBasePrice'), n('totalAmount')),
     residentialRate: rate(n('residentialSold'), n('residentialTotal')),
     officeRate: rate(n('officeSold'), n('officeTotal')),
     remainUnits: Math.max(n('totalUnits') - n('soldUnits'), 0),
     remainParking: Math.max(n('totalParking') - n('soldParking'), 0),
     remainAmount: Math.max(n('totalAmount') - n('soldAmount'), 0),
+    remainBasePrice: Math.max(n('totalAmount') - n('soldBasePrice'), 0),
   };
 }
 
 function calcCommissionDerived(c) {
   const n = (k) => Number(c[k]) || 0;
+  const round4 = (x) => Math.round(x * 10000) / 10000;
   return {
-    unclaimedAmount: Math.max(n('claimableAmount') - n('claimedAmount'), 0),
+    unclaimedAmount: round4(Math.max(n('claimableAmount') - n('claimedAmount'), 0)),
     unclaimedUnits: Math.max(n('claimableUnits') - n('claimedUnits'), 0),
     unclaimedParking: Math.max(n('claimableParking') - n('claimedParking'), 0),
+    bookedAmount: round4(n('bookedAmount')),
+    nextMonthUnits: n('nextMonthUnits'),
+    nextMonthParking: n('nextMonthParking'),
+    nextMonthAmount: round4(n('nextMonthAmount')),
   };
 }
 
@@ -164,7 +191,8 @@ function renderKpi(auto, manual) {
   const mw = p.month || {};
   const yw = p.year || {};
   const items = [
-    { label: '本週來人', value: `${t.total || 0} 組` },
+    { label: '實際來人', value: `${t.actualTotal ?? t.total ?? 0} 組` },
+    { label: '納入週報', value: `${t.reportedTotal ?? t.total ?? 0} 組` },
     { label: '新客／回訪', value: `${t.new || 0} / ${t.return || 0}` },
     { label: '本週來電', value: `${phoneSum} 通` },
     { label: '客資成交', value: `${t.deal || 0} 筆` },
@@ -227,8 +255,9 @@ function renderInventory(manual, derived) {
     { key: 'soldUnits', label: '已售戶數' },
     { key: 'totalParking', label: '總車位' },
     { key: 'soldParking', label: '已售車位' },
-    { key: 'totalAmount', label: '總金額(萬)' },
-    { key: 'soldAmount', label: '已售金額(萬)' },
+    { key: 'totalAmount', label: '總底價金額(萬)' },
+    { key: 'soldAmount', label: '已售表價(萬)' },
+    { key: 'soldBasePrice', label: '已售底價(萬)' },
     { key: 'residentialTotal', label: '住宅總戶' },
     { key: 'residentialSold', label: '住宅已售' },
     { key: 'officeTotal', label: '事務所總戶' },
@@ -244,10 +273,10 @@ function renderInventory(manual, derived) {
   renderDerivedCards('inventoryDerived', [
     { label: '戶數去化率', value: `${d.unitRate}%` },
     { label: '車位去化率', value: `${d.parkingRate}%` },
-    { label: '金額去化率', value: `${d.amountRate}%` },
-    { label: '住宅去化率', value: `${d.residentialRate}%` },
-    { label: '事務所去化率', value: `${d.officeRate}%` },
-    { label: '剩餘戶／車／萬', value: `${d.remainUnits} / ${d.remainParking} / ${d.remainAmount}` },
+    { label: '表價去化率', value: `${d.amountRate}%` },
+    { label: '底價去化率', value: `${d.basePriceRate}%` },
+    { label: '未售底價(萬)', value: `${d.remainBasePrice}` },
+    { label: '剩餘戶／車', value: `${d.remainUnits} / ${d.remainParking}` },
   ]);
   document.querySelectorAll('[data-block="inventory"]').forEach((el) => {
     el.addEventListener('input', refreshDerivedFromForm);
@@ -258,17 +287,21 @@ function renderCommission(manual, derived) {
   const c = manual.commission || {};
   const fields = [
     { key: 'sellableAmount', label: '累積銷售金額(萬)' },
-    { key: 'claimableAmount', label: '可請佣金額(萬)' },
-    { key: 'claimedAmount', label: '已請佣金額(萬)' },
+    { key: 'claimableAmount', label: '可請佣金額(萬)', step: '0.0001' },
+    { key: 'claimedAmount', label: '已請佣金額(萬)', step: '0.0001' },
+    { key: 'bookedAmount', label: '已入帳金額(萬)', step: '0.0001' },
     { key: 'claimableUnits', label: '可請佣戶數' },
     { key: 'claimedUnits', label: '已請佣戶數' },
     { key: 'claimableParking', label: '可請佣車位' },
     { key: 'claimedParking', label: '已請佣車位' },
+    { key: 'nextMonthUnits', label: '預計下月可請戶數' },
+    { key: 'nextMonthParking', label: '預計下月可請車位' },
+    { key: 'nextMonthAmount', label: '預計下月可請金額(萬)', step: '0.0001' },
   ];
   document.getElementById('commissionInputs').innerHTML = fields.map((f) => `
     <div class="form-group">
       <label>${f.label}</label>
-      <input type="number" min="0" step="0.01" data-block="commission" data-field="${f.key}" value="${Number(c[f.key]) || 0}">
+      <input type="number" min="0" step="${f.step || '0.01'}" data-block="commission" data-field="${f.key}" value="${Number(c[f.key]) || 0}">
     </div>
   `).join('');
   const d = derived || calcCommissionDerived(c);
@@ -276,6 +309,8 @@ function renderCommission(manual, derived) {
     { label: '未請佣金額(萬)', value: `${d.unclaimedAmount}` },
     { label: '未請佣戶數', value: `${d.unclaimedUnits}` },
     { label: '未請佣車位', value: `${d.unclaimedParking}` },
+    { label: '已入帳(萬)', value: `${d.bookedAmount}` },
+    { label: '下月可請(戶/車/萬)', value: `${d.nextMonthUnits} / ${d.nextMonthParking} / ${d.nextMonthAmount}` },
   ]);
   document.querySelectorAll('[data-block="commission"]').forEach((el) => {
     el.addEventListener('input', refreshDerivedFromForm);
@@ -285,41 +320,70 @@ function renderCommission(manual, derived) {
 function refreshDerivedFromForm() {
   if (!current) return;
   const manual = collectManualFromForm(current.manual);
-  renderDerivedCards('inventoryDerived', (() => {
-    const d = calcInventoryDerived(manual.inventory || {});
-    return [
-      { label: '戶數去化率', value: `${d.unitRate}%` },
-      { label: '車位去化率', value: `${d.parkingRate}%` },
-      { label: '金額去化率', value: `${d.amountRate}%` },
-      { label: '住宅去化率', value: `${d.residentialRate}%` },
-      { label: '事務所去化率', value: `${d.officeRate}%` },
-      { label: '剩餘戶／車／萬', value: `${d.remainUnits} / ${d.remainParking} / ${d.remainAmount}` },
-    ];
-  })());
-  renderDerivedCards('commissionDerived', (() => {
-    const d = calcCommissionDerived(manual.commission || {});
-    return [
-      { label: '未請佣金額(萬)', value: `${d.unclaimedAmount}` },
-      { label: '未請佣戶數', value: `${d.unclaimedUnits}` },
-      { label: '未請佣車位', value: `${d.unclaimedParking}` },
-    ];
-  })());
+  const inv = calcInventoryDerived(manual.inventory || {});
+  renderDerivedCards('inventoryDerived', [
+    { label: '戶數去化率', value: `${inv.unitRate}%` },
+    { label: '車位去化率', value: `${inv.parkingRate}%` },
+    { label: '表價去化率', value: `${inv.amountRate}%` },
+    { label: '底價去化率', value: `${inv.basePriceRate}%` },
+    { label: '未售底價(萬)', value: `${inv.remainBasePrice}` },
+    { label: '剩餘戶／車', value: `${inv.remainUnits} / ${inv.remainParking}` },
+  ]);
+  const com = calcCommissionDerived(manual.commission || {});
+  renderDerivedCards('commissionDerived', [
+    { label: '未請佣金額(萬)', value: `${com.unclaimedAmount}` },
+    { label: '未請佣戶數', value: `${com.unclaimedUnits}` },
+    { label: '未請佣車位', value: `${com.unclaimedParking}` },
+    { label: '已入帳(萬)', value: `${com.bookedAmount}` },
+    { label: '下月可請(戶/車/萬)', value: `${com.nextMonthUnits} / ${com.nextMonthParking} / ${com.nextMonthAmount}` },
+  ]);
 }
 
 function renderConversion(auto) {
   const tbody = document.querySelector('#conversionTable tbody');
   const rows = auto.conversion || [];
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="6" class="empty-row">尚無銷售資料</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="10" class="empty-row">尚無銷售資料</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map((r) => {
+    const bold = r.name === '合計' || r.name === '前期銷售';
+    const name = bold ? `<strong>${escapeHtml(r.name)}</strong>` : escapeHtml(r.name);
+    return `<tr>
+      <td>${name}</td>
+      <td>${r.visits}</td>
+      <td>${r.deals}</td>
+      <td><strong>${r.rate}%</strong></td>
+      <td>${r.amount ?? 0}</td>
+      <td>${r.refunds ?? 0}</td>
+      <td>${r.refundAmount ?? 0}</td>
+      <td>${r.weekVisits}</td>
+      <td>${r.weekDeals}</td>
+      <td>${r.weekAmount ?? 0}</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderDimTable(tableId, rows) {
+  const table = document.getElementById(tableId);
+  if (!table) return;
+  const thead = table.querySelector('thead');
+  if (thead && !thead.innerHTML.trim()) thead.innerHTML = DIM_HEADERS;
+  if (tableId === 'regionDimTable' && thead) thead.innerHTML = DIM_HEADERS;
+  const tbody = table.querySelector('tbody');
+  if (!rows || !rows.length) {
+    tbody.innerHTML = '<tr><td colspan="8" class="empty-row">尚無資料</td></tr>';
     return;
   }
   tbody.innerHTML = rows.map((r) => `<tr>
     <td>${escapeHtml(r.name)}</td>
-    <td>${r.visits}</td>
-    <td>${r.deals}</td>
-    <td><strong>${r.rate}%</strong></td>
-    <td>${r.weekVisits}</td>
-    <td>${r.weekDeals}</td>
+    <td>${r.priorVisits ?? 0}</td>
+    <td>${r.weekVisits ?? r.count ?? 0}</td>
+    <td><strong>${r.cumVisits ?? 0}</strong></td>
+    <td>${r.weekVisitPct ?? 0}%</td>
+    <td>${r.cumVisitPct ?? 0}%</td>
+    <td>${r.weekDeals ?? 0}</td>
+    <td>${r.weekDealPct ?? 0}%</td>
   </tr>`).join('');
 }
 
@@ -337,25 +401,53 @@ function renderVisitorMini(elId, rows, emptyText) {
   `).join('');
 }
 
-function renderStatList(elId, rows) {
-  const el = document.getElementById(elId);
-  if (!rows || !rows.length) {
-    el.innerHTML = '<p class="hint">本週尚無資料</p>';
+function renderVisitorSelect(auto, manual) {
+  const tbody = document.querySelector('#visitorSelectTable tbody');
+  const all = auto.visitorsAllWeek || auto.visitors || [];
+  const saved = manual.includedVisitorIds;
+  const selected = saved == null
+    ? new Set(all.map((v) => v.id))
+    : new Set(saved.map(Number));
+
+  if (!all.length) {
+    tbody.innerHTML = '<tr><td colspan="10" class="empty-row">本週尚無客資紀錄</td></tr>';
+    document.getElementById('visitorSelectSummary').textContent = '';
     return;
   }
-  el.innerHTML = rows.map((r) => `
-    <div class="mini-stat-item">
-      <span>${escapeHtml(r.name)}</span>
-      <strong>${r.count}</strong>
-    </div>
-  `).join('');
+  tbody.innerHTML = all.map((v) => {
+    const checked = selected.has(v.id) ? 'checked' : '';
+    return `<tr>
+      <td><input type="checkbox" data-id="${v.id}" ${checked}></td>
+      <td class="cell-date">${escapeHtml(v.date)}</td>
+      <td>${escapeHtml(v.visitType)}</td>
+      <td>${escapeHtml(v.customerName)}</td>
+      <td>${escapeHtml(v.phone)}</td>
+      <td>${escapeHtml(v.region)}</td>
+      <td>${escapeHtml(v.media)}</td>
+      <td>${escapeHtml(v.occupation || '')}</td>
+      <td>${escapeHtml(v.age || '')}</td>
+      <td>${escapeHtml(v.salesperson1)}${v.isCoManaged ? '＋' + escapeHtml(v.salesperson2 || '') : ''}</td>
+    </tr>`;
+  }).join('');
+  updateVisitorSelectSummary();
+  tbody.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+    cb.addEventListener('change', updateVisitorSelectSummary);
+  });
+}
+
+function updateVisitorSelectSummary() {
+  const boxes = document.querySelectorAll('#visitorSelectTable tbody input[type="checkbox"][data-id]');
+  const total = boxes.length;
+  const selected = Array.from(boxes).filter((cb) => cb.checked).length;
+  document.getElementById('visitorSelectSummary').textContent =
+    total ? `已選 ${selected} / 實際 ${total} 組` : '';
 }
 
 function renderVisitors(auto) {
   const tbody = document.querySelector('#visitorTable tbody');
   const rows = auto.visitors || [];
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="10" class="empty-row">本週尚無客資紀錄</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="11" class="empty-row">本週尚無納入週報的客資</td></tr>';
     return;
   }
   tbody.innerHTML = rows.map((v) => `<tr>
@@ -365,7 +457,8 @@ function renderVisitors(auto) {
     <td>${escapeHtml(v.phone)}</td>
     <td>${escapeHtml(v.region)}</td>
     <td>${escapeHtml(v.media)}</td>
-    <td>${escapeHtml(v.source)}</td>
+    <td>${escapeHtml(v.occupation || '')}</td>
+    <td>${escapeHtml(v.age || '')}</td>
     <td>${escapeHtml(v.sincerity)}</td>
     <td>${escapeHtml(v.salesperson1)}</td>
     <td class="cell-wrap">${escapeHtml(v.discussion)}</td>
@@ -407,7 +500,13 @@ function renderAll(payload) {
   const auto = payload.auto || {};
   const derived = payload.derived || {};
   renderKpi(auto, manual);
+  renderVisitorSelect(auto, manual);
   renderDaily(auto, manual);
+  renderDimTable('regionDimTable', auto.byRegion);
+  renderDimTable('mediaDimTable', auto.byMedia);
+  renderDimTable('sourceDimTable', auto.bySource);
+  renderDimTable('occupationDimTable', auto.byOccupation);
+  renderDimTable('ageDimTable', auto.byAge);
   renderDealInputs(manual);
   renderInventory(manual, derived.inventory);
   renderCommission(manual, derived.commission);
@@ -415,9 +514,6 @@ function renderAll(payload) {
   document.getElementById('competitorNotes').value = manual.competitorNotes || '';
   document.getElementById('weekMemo').value = manual.memo || '';
   renderConversion(auto);
-  renderStatList('regionStats', auto.byRegion);
-  renderStatList('mediaStats', auto.byMedia);
-  renderStatList('sourceStats', auto.bySource);
   renderVisitorMini('returnList', auto.returnVisits, '本週尚無回訪');
   renderVisitorMini('hopeList', auto.hopeCustomers, '本週尚無有望客');
   renderVisitors(auto);
@@ -478,6 +574,11 @@ async function saveWeek() {
   }
 }
 
+async function applyVisitorSelection() {
+  if (!current) return;
+  await saveWeek();
+}
+
 function exportWeek(format) {
   if (!current) {
     showToast('請先載入本週資料', 'error');
@@ -501,7 +602,6 @@ function shiftWeek(delta) {
 }
 
 async function init() {
-  // 等 nav.js 建立並完成登入狀態檢查
   for (let i = 0; i < 50 && !window.navReady; i += 1) {
     await new Promise((r) => setTimeout(r, 20));
   }
@@ -525,6 +625,15 @@ async function init() {
   document.getElementById('prevWeekBtn').addEventListener('click', () => shiftWeek(-1));
   document.getElementById('nextWeekBtn').addEventListener('click', () => shiftWeek(1));
   document.getElementById('saveWeekBtn').addEventListener('click', saveWeek);
+  document.getElementById('selectAllVisitorsBtn').addEventListener('click', () => {
+    document.querySelectorAll('#visitorSelectTable tbody input[type="checkbox"]').forEach((cb) => { cb.checked = true; });
+    updateVisitorSelectSummary();
+  });
+  document.getElementById('clearVisitorsBtn').addEventListener('click', () => {
+    document.querySelectorAll('#visitorSelectTable tbody input[type="checkbox"]').forEach((cb) => { cb.checked = false; });
+    updateVisitorSelectSummary();
+  });
+  document.getElementById('applyVisitorsBtn').addEventListener('click', applyVisitorSelection);
   document.getElementById('exportWeekBtn').addEventListener('click', async () => {
     if (!current) {
       showToast('請先載入本週資料', 'error');

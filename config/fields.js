@@ -247,6 +247,10 @@ const FIELD_SECTIONS = [
       { key: 'sincerity', label: '客戶誠意度', type: 'select', options: SINCERITY },
       { key: 'salesperson1', label: '銷售人員1', type: 'select', dynamicStaff: true, required: true },
       { key: 'salesperson2', label: '銷售人員2', type: 'select', dynamicStaff: true },
+      { key: 'isCoManaged', label: '共同經營', type: 'select', options: ['是', '否'], placeholder: '兩人共同接待請選「是」（組數／成交各算 0.5）' },
+      { key: 'dealAmount', label: '成交金額(萬)', type: 'text', placeholder: '成交時填寫，供週報成交比統計' },
+      { key: 'isRefund', label: '退戶', type: 'select', options: ['是', '否'] },
+      { key: 'refundAmount', label: '退戶金額(萬)', type: 'text', placeholder: '退戶時填寫' },
     ],
   },
 ];
