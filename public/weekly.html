@@ -101,7 +101,15 @@
 
       <section class="card">
         <h2>來人訴求分析（前期／本週／累計＋%）</h2>
-        <p class="hint">區域／媒體／來源僅統計新客，比例也以「新客」為分母；職業／年齡含當週納入週報之來人（含回訪）。來電無法歸戶到單一訴求，% 以佔來人比例對照。</p>
+        <p class="hint">客資仍依實際區域細分登錄，報表預設只顯示「本週有來人」的列，避免 29 區全展開難讀。不建議把客資區域合併；若 PPT 要併列顯示，屬「版面分組」，與統計細項分開。</p>
+        <div class="form-actions" style="margin-bottom:0.75rem;">
+          <label class="hint" for="dimFilterMode">顯示範圍</label>
+          <select id="dimFilterMode" style="max-width:14rem;">
+            <option value="week" selected>僅本週有來人</option>
+            <option value="cum">累計有資料</option>
+            <option value="all">全部列出</option>
+          </select>
+        </div>
         <div class="table-wrap" style="margin-bottom:1.25rem;">
           <h3 class="section-title">區域（新客）</h3>
           <table class="data-table" id="regionDimTable">

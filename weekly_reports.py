@@ -736,7 +736,7 @@ def _style_header(ws, row=1):
         cell.alignment = Alignment(horizontal='center', wrap_text=True)
 
 
-def _append_dim_table(ws, title, rows):
+def _append_dim_table(ws, title, rows, *, week_only=True):
     if title:
         ws.append([title])
     ws.append([
@@ -746,13 +746,30 @@ def _append_dim_table(ws, title, rows):
         '佔本週成交%', '佔累計成交%',
     ])
     _style_header(ws, ws.max_row)
+    total_row = None
+    shown = 0
     for r in rows or []:
+        if r.get('name') == '合計':
+            total_row = r
+            continue
+        if week_only and not float(r.get('weekVisits') or 0):
+            continue
         ws.append([
             r.get('name'), r.get('priorVisits'), r.get('weekVisits'), r.get('cumVisits'),
             r.get('weekVisitPct'), r.get('cumVisitPct'),
             r.get('priorDeals'), r.get('weekDeals'), r.get('cumDeals'),
             r.get('weekDealPct'), r.get('cumDealPct'),
         ])
+        shown += 1
+    if total_row:
+        ws.append([
+            total_row.get('name'), total_row.get('priorVisits'), total_row.get('weekVisits'),
+            total_row.get('cumVisits'), total_row.get('weekVisitPct'), total_row.get('cumVisitPct'),
+            total_row.get('priorDeals'), total_row.get('weekDeals'), total_row.get('cumDeals'),
+            total_row.get('weekDealPct'), total_row.get('cumDealPct'),
+        ])
+    if week_only and shown == 0 and not total_row:
+        ws.append(['（本週無資料）'])
     ws.append([])
 
 

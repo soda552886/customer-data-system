@@ -364,6 +364,19 @@ function renderConversion(auto) {
   }).join('');
 }
 
+function filterDimRows(rows, mode) {
+  if (!rows || !rows.length) return [];
+  const dataRows = rows.filter((r) => r.name !== '合計');
+  let shown = dataRows;
+  if (mode === 'week') {
+    shown = dataRows.filter((r) => Number(r.weekVisits || r.count || 0) > 0);
+  } else if (mode === 'cum') {
+    shown = dataRows.filter((r) => Number(r.cumVisits || 0) > 0 || Number(r.weekVisits || 0) > 0);
+  }
+  const totalRow = rows.find((r) => r.name === '合計');
+  return totalRow ? [...shown, totalRow] : shown;
+}
+
 function renderDimTable(tableId, rows) {
   const table = document.getElementById(tableId);
   if (!table) return;
@@ -371,11 +384,13 @@ function renderDimTable(tableId, rows) {
   if (thead && !thead.innerHTML.trim()) thead.innerHTML = DIM_HEADERS;
   if (tableId === 'regionDimTable' && thead) thead.innerHTML = DIM_HEADERS;
   const tbody = table.querySelector('tbody');
-  if (!rows || !rows.length) {
+  const mode = document.getElementById('dimFilterMode')?.value || 'week';
+  const filtered = filterDimRows(rows, mode);
+  if (!filtered.length) {
     tbody.innerHTML = '<tr><td colspan="8" class="empty-row">尚無資料</td></tr>';
     return;
   }
-  tbody.innerHTML = rows.map((r) => {
+  tbody.innerHTML = filtered.map((r) => {
     const name = r.name === '合計' ? `<strong>${escapeHtml(r.name)}</strong>` : escapeHtml(r.name);
     return `<tr>
     <td>${name}</td>
@@ -388,6 +403,16 @@ function renderDimTable(tableId, rows) {
     <td>${r.weekDealPct ?? 0}%</td>
   </tr>`;
   }).join('');
+}
+
+function renderAllDimTables() {
+  if (!current?.auto) return;
+  const auto = current.auto;
+  renderDimTable('regionDimTable', auto.byRegion);
+  renderDimTable('mediaDimTable', auto.byMedia);
+  renderDimTable('sourceDimTable', auto.bySource);
+  renderDimTable('occupationDimTable', auto.byOccupation);
+  renderDimTable('ageDimTable', auto.byAge);
 }
 
 function renderVisitorMini(elId, rows, emptyText) {
@@ -535,11 +560,7 @@ function renderAll(payload) {
   renderKpi(auto, manual);
   renderVisitorSelect(auto, manual);
   renderDaily(auto, manual);
-  renderDimTable('regionDimTable', auto.byRegion);
-  renderDimTable('mediaDimTable', auto.byMedia);
-  renderDimTable('sourceDimTable', auto.bySource);
-  renderDimTable('occupationDimTable', auto.byOccupation);
-  renderDimTable('ageDimTable', auto.byAge);
+  renderAllDimTables();
   renderDealInputs(manual);
   renderInventory(manual, derived.inventory);
   renderCommission(manual, derived.commission);
@@ -674,6 +695,7 @@ async function init() {
   });
   document.getElementById('applyVisitorsBtn').addEventListener('click', applyVisitorSelection);
   document.getElementById('fillFromSalesBtn').addEventListener('click', applySuggestedFromSales);
+  document.getElementById('dimFilterMode')?.addEventListener('change', renderAllDimTables);
   document.getElementById('exportWeekBtn').addEventListener('click', async () => {
     if (!current) {
       showToast('請先載入本週資料', 'error');
