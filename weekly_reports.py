@@ -926,7 +926,7 @@ def build_weekly_excel(site_name: str, start, end, week_number, manual: dict, au
         ('職業', auto.get('byOccupation')),
         ('年齡', auto.get('byAge')),
     ]:
-        _append_dim_table(ws, title, rows)
+        _append_dim_table(ws, title, rows, week_only=False)
 
     # —— 客況（僅納入週報者）——
     ws = wb.create_sheet('本週客況')
