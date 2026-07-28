@@ -318,11 +318,11 @@ def build_auto_stats(
     month_start = start.replace(day=1)
     year_start = start.replace(month=1, day=1)
     period = {
-        'week': {'visits': 0.0, 'new': 0.0, 'return': 0.0, 'deals': 0.0, 'amount': 0.0},
-        'month': {'visits': 0.0, 'new': 0.0, 'return': 0.0, 'deals': 0.0, 'amount': 0.0},
-        'year': {'visits': 0.0, 'new': 0.0, 'return': 0.0, 'deals': 0.0, 'amount': 0.0},
-        'all': {'visits': 0.0, 'new': 0.0, 'return': 0.0, 'deals': 0.0, 'amount': 0.0},
-        'prior': {'visits': 0.0, 'new': 0.0, 'return': 0.0, 'deals': 0.0, 'amount': 0.0},
+        'week': {'visits': 0.0, 'new': 0.0, 'return': 0.0, 'deals': 0.0, 'newDeals': 0.0, 'amount': 0.0},
+        'month': {'visits': 0.0, 'new': 0.0, 'return': 0.0, 'deals': 0.0, 'newDeals': 0.0, 'amount': 0.0},
+        'year': {'visits': 0.0, 'new': 0.0, 'return': 0.0, 'deals': 0.0, 'newDeals': 0.0, 'amount': 0.0},
+        'all': {'visits': 0.0, 'new': 0.0, 'return': 0.0, 'deals': 0.0, 'newDeals': 0.0, 'amount': 0.0},
+        'prior': {'visits': 0.0, 'new': 0.0, 'return': 0.0, 'deals': 0.0, 'newDeals': 0.0, 'amount': 0.0},
     }
 
     sales_stats = defaultdict(lambda: {
@@ -449,6 +449,8 @@ def build_auto_stats(
             if is_deal and not is_refund:
                 period[key]['deals'] += w
                 period[key]['amount'] += amount * w
+                if is_new:
+                    period[key]['newDeals'] += w
 
         bump_period('all')
         if in_year:
@@ -508,14 +510,18 @@ def build_auto_stats(
     week_deals = period['week']['deals']
     cum_visits = period['prior']['visits'] + period['week']['visits']
     cum_deals = period['prior']['deals'] + period['week']['deals']
-    # 累計來電：僅有本週手填；前期來電無法從客資推得，cumPhone 暫用本週
+    # 新客專用分母（區域／媒體／來源表不含回訪）
+    week_new = period['week']['new']
+    week_new_deals = period['week']['newDeals']
+    cum_new = period['prior']['new'] + period['week']['new']
+    cum_new_deals = period['prior']['newDeals'] + period['week']['newDeals']
     week_phones = float(week_phone_total or 0)
     cum_phones = week_phones
 
-    def dims_pack(src):
+    def dims_pack(src, week_v, week_d, cum_v, cum_d):
         return {
             key: _finalize_dimension(
-                src[key], week_visits, week_deals, cum_visits, cum_deals, week_phones, cum_phones,
+                src[key], week_v, week_d, cum_v, cum_d, week_phones, cum_phones,
             )
             for key in src
         }
@@ -558,8 +564,8 @@ def build_auto_stats(
         tot['rate'] = round((tot['deals'] / tot['visits'] * 100), 1) if tot['visits'] else 0
         conversion.append(tot)
 
-    all_dims = dims_pack(dim_all)
-    new_dims = dims_pack(dim_new)
+    all_dims = dims_pack(dim_all, week_visits, week_deals, cum_visits, cum_deals)
+    new_dims = dims_pack(dim_new, week_new, week_new_deals, cum_new, cum_new_deals)
 
     return {
         'byDay': [
