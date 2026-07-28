@@ -134,7 +134,13 @@
       </section>
 
       <section class="card">
-        <h2>成交／簽約／買進／未報（手填）</h2>
+        <h2>成交／簽約／買進／未報</h2>
+        <p class="hint">可手填，或按「從銷售總表帶入」自動帶入本週／累計彙總（請先在銷售總表登錄明細）。</p>
+        <div class="form-actions" style="margin-bottom:0.75rem;">
+          <button type="button" id="fillFromSalesBtn" class="btn btn-secondary">從銷售總表帶入</button>
+          <a class="btn btn-outline" href="/sales.html">開啟銷售總表</a>
+          <span id="salesSuggestHint" class="hint"></span>
+        </div>
         <div class="search-grid" id="dealInputs"></div>
       </section>
 
@@ -145,14 +151,14 @@
       </section>
 
       <section class="card">
-        <h2>請佣摘要（手填，自動算未請）</h2>
+        <h2>請佣摘要（可從銷售總表帶入）</h2>
         <div class="search-grid" id="commissionInputs"></div>
         <div id="commissionDerived" class="stats-grid" style="margin-top:1rem;"></div>
       </section>
 
       <section class="card">
         <h2>銷售成交比（客資自動）</h2>
-        <p class="hint">已離職且不在案場銷售名單者歸入「前期銷售」。共同經營（勾選或填銷售2）組數／成交各算 0.5。</p>
+        <p class="hint">已離職人員請至「欄位選項 → 該案場 → 銷售人員（在職狀態）」取消勾選。取消後填寫表單不再出現，成交比累計併入「前期銷售」。共同經營（勾選或填銷售2）組數／成交各算 0.5。</p>
         <div class="table-wrap">
           <table class="data-table" id="conversionTable">
             <thead>

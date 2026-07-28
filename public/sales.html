@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>銷售總表 - 得意佳</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <header class="header">
+    <div class="header-inner">
+      <h1><span class="brand">得意佳</span>客戶資料管理系統</h1>
+      <nav id="mainNav"></nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="card">
+      <h2>銷售總表</h2>
+      <p class="hint">登錄成交／簽約／未報／買進／退換戶明細後，週報的「成交／簽約／買進／未報」與「請佣摘要」可一鍵從本表帶入，取代 Excel 手抄。</p>
+      <div class="search-grid">
+        <div class="form-group">
+          <label for="salesSite">案場 <span class="required">*</span></label>
+          <select id="salesSite"><option value="">請選擇案場</option></select>
+        </div>
+        <div class="form-group">
+          <label for="salesType">類型</label>
+          <select id="salesType"><option value="">全部</option></select>
+        </div>
+        <div class="form-group">
+          <label for="salesQ">搜尋</label>
+          <input type="text" id="salesQ" placeholder="戶號／姓名／電話／銷售">
+        </div>
+      </div>
+      <div class="form-actions">
+        <button type="button" id="loadSalesBtn" class="btn btn-primary">載入</button>
+        <button type="button" id="newSalesBtn" class="btn btn-secondary">新增明細</button>
+        <a class="btn btn-outline" href="/weekly.html">前往週報工作台</a>
+      </div>
+    </section>
+
+    <section class="card" id="salesSummaryCard">
+      <h2>彙總（供週報帶入）</h2>
+      <div id="salesSummaryGrid" class="stats-grid"></div>
+    </section>
+
+    <section class="card hidden" id="salesFormCard">
+      <h2 id="salesFormTitle">新增銷售明細</h2>
+      <input type="hidden" id="salesEditId" value="">
+      <div class="search-grid">
+        <div class="form-group">
+          <label for="fRecordType">類型</label>
+          <select id="fRecordType"></select>
+        </div>
+        <div class="form-group">
+          <label for="fUnitNo">戶號</label>
+          <input type="text" id="fUnitNo" placeholder="如 A3-11F">
+        </div>
+        <div class="form-group">
+          <label for="fCustomerName">客戶姓名</label>
+          <input type="text" id="fCustomerName">
+        </div>
+        <div class="form-group">
+          <label for="fPhone">電話</label>
+          <input type="tel" id="fPhone">
+        </div>
+        <div class="form-group">
+          <label for="fProductType">產品別</label>
+          <select id="fProductType">
+            <option value="">未填</option>
+            <option value="住宅">住宅</option>
+            <option value="事務所">事務所</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="fAreaPing">坪數</label>
+          <input type="number" step="0.01" id="fAreaPing" value="0">
+        </div>
+        <div class="form-group">
+          <label for="fUnits">戶數</label>
+          <input type="number" step="0.5" id="fUnits" value="1">
+        </div>
+        <div class="form-group">
+          <label for="fParkingCount">車位數</label>
+          <input type="number" step="0.5" id="fParkingCount" value="0">
+        </div>
+        <div class="form-group">
+          <label for="fParkingNos">車位編號</label>
+          <input type="text" id="fParkingNos" placeholder="如 B3-63">
+        </div>
+        <div class="form-group">
+          <label for="fListPrice">表價(萬)</label>
+          <input type="number" step="0.01" id="fListPrice" value="0">
+        </div>
+        <div class="form-group">
+          <label for="fBasePrice">底價(萬)</label>
+          <input type="number" step="0.01" id="fBasePrice" value="0">
+        </div>
+        <div class="form-group">
+          <label for="fTotalPrice">成交總價(萬)</label>
+          <input type="number" step="0.01" id="fTotalPrice" value="0">
+        </div>
+        <div class="form-group">
+          <label for="fDepositDate">下定日期</label>
+          <input type="date" id="fDepositDate">
+        </div>
+        <div class="form-group">
+          <label for="fSignDate">簽約日期</label>
+          <input type="date" id="fSignDate">
+        </div>
+        <div class="form-group">
+          <label for="fReportDate">報售／成交日期</label>
+          <input type="date" id="fReportDate">
+        </div>
+        <div class="form-group">
+          <label for="fSales1">銷售人員1</label>
+          <select id="fSales1"><option value="">未填</option></select>
+        </div>
+        <div class="form-group">
+          <label for="fSales2">銷售人員2</label>
+          <select id="fSales2"><option value="">未填</option></select>
+        </div>
+        <div class="form-group">
+          <label for="fCoManaged">共同經營</label>
+          <select id="fCoManaged">
+            <option value="否">否</option>
+            <option value="是">是</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="fCommClaimable">可請佣金額(萬)</label>
+          <input type="number" step="0.0001" id="fCommClaimable" value="0">
+        </div>
+        <div class="form-group">
+          <label for="fCommClaimed">已請佣金額(萬)</label>
+          <input type="number" step="0.0001" id="fCommClaimed" value="0">
+        </div>
+        <div class="form-group">
+          <label for="fCommBooked">已入帳金額(萬)</label>
+          <input type="number" step="0.0001" id="fCommBooked" value="0">
+        </div>
+        <div class="form-group">
+          <label for="fNextMonthAmt">預計下月可請(萬)</label>
+          <input type="number" step="0.0001" id="fNextMonthAmt" value="0">
+        </div>
+        <div class="form-group">
+          <label for="fNextMonthUnits">預計下月可請戶數</label>
+          <input type="number" step="0.5" id="fNextMonthUnits" value="0">
+        </div>
+        <div class="form-group">
+          <label for="fNextMonthParking">預計下月可請車位</label>
+          <input type="number" step="0.5" id="fNextMonthParking" value="0">
+        </div>
+        <div class="form-group full-width">
+          <label for="fMemo">備註</label>
+          <input type="text" id="fMemo">
+        </div>
+      </div>
+      <div class="form-actions">
+        <button type="button" id="saveSalesBtn" class="btn btn-primary">儲存明細</button>
+        <button type="button" id="cancelSalesBtn" class="btn btn-outline">取消</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>明細列表 <span id="salesTotalBadge" class="badge badge-muted">0</span></h2>
+      <div class="table-wrap">
+        <table class="data-table" id="salesTable">
+          <thead>
+            <tr>
+              <th>類型</th><th>戶號</th><th>客戶</th><th>戶/車</th><th>總價(萬)</th><th>底價</th>
+              <th>報售日</th><th>簽約日</th><th>銷售</th><th>可請佣</th><th>已請佣</th><th>操作</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="/js/nav.js"></script>
+  <script src="/js/sales.js"></script>
+</body>
+</html>

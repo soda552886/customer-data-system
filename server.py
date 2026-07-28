@@ -18,6 +18,17 @@ from auth import (
 )
 from audit import init_audit_table, log_operation, row_to_log_dict
 from config.sites import SITES as DEFAULT_SITES
+from weekly_reports import (
+    build_auto_stats, build_weekly_excel, commission_summary, default_week_number,
+    empty_manual_payload, init_weekly_tables, inventory_summary, list_weekly_reports,
+    load_weekly_report, merge_manual, monday_of, roc_year, upsert_weekly_report,
+    week_bounds,
+)
+from sales_ledger import (
+    RECORD_TYPES as SALES_RECORD_TYPES, aggregate_for_weekly, create_sales_deal,
+    delete_sales_deal, get_sales_deal, init_sales_tables, list_sales_deals,
+    update_sales_deal,
+)
 from field_options import (
     apply_site_field_options, apply_site_hidden_fields, build_site_field_config,
     build_site_field_visibility, build_site_report_export_config,
@@ -25,12 +36,7 @@ from field_options import (
     load_site_option_overrides, load_site_report_export_config,
     normalize_hidden_fields_payload, normalize_report_export_payload, normalize_save_payload,
     save_site_hidden_fields, save_site_option_overrides, save_site_report_export_config,
-)
-from weekly_reports import (
-    build_auto_stats, build_weekly_excel, commission_summary, default_week_number,
-    empty_manual_payload, init_weekly_tables, inventory_summary, list_weekly_reports,
-    load_weekly_report, merge_manual, monday_of, roc_year, upsert_weekly_report,
-    week_bounds,
+    SALES_STAFF_FIELD_KEY, resolve_field_options,
 )
 
 BASE_DIR = Path(__file__).parent
@@ -89,6 +95,7 @@ def init_db():
     init_field_options_table(conn)
     init_audit_table(conn)
     init_weekly_tables(conn)
+    init_sales_tables(conn)
     migrate_retired_roles(conn)
     conn.commit()
 
@@ -145,6 +152,16 @@ def get_site_by_id(site_id):
     if not row:
         return None
     return {'id': row['id'], 'name': row['name'], 'group': row['group_type']}
+
+
+def get_active_sales_staff(conn, site_id: str) -> list:
+    """在職銷售名單（案場欄位選項有勾選者）；未自訂則用系統預設。"""
+    overrides = load_site_option_overrides(conn, site_id)
+    defaults = list(SALES_STAFF.get(site_id) or [])
+    if SALES_STAFF_FIELD_KEY in overrides:
+        _, enabled, _ = resolve_field_options(defaults, overrides, SALES_STAFF_FIELD_KEY)
+        return list(enabled)
+    return defaults
 
 
 def get_site_maps():
@@ -657,6 +674,7 @@ def enforce_auth():
             '/field-options.html': 'manage_field_options',
             '/audit-log.html': 'view_audit_logs',
             '/weekly.html': 'manage_weekly_reports',
+            '/sales.html': 'manage_weekly_reports',
         }
         need = page_perms.get(path)
         if need and not user_has_permission(user, need):
@@ -900,6 +918,11 @@ def import_page():
 @app.route('/weekly.html')
 def weekly_page():
     return send_from_directory('public', 'weekly.html')
+
+
+@app.route('/sales.html')
+def sales_page():
+    return send_from_directory('public', 'sales.html')
 
 
 @app.route('/api/import/template')
@@ -1171,12 +1194,14 @@ def weekly_summary():
     manual = merge_manual(base, (saved or {}).get('data') if saved else None)
 
     phone_sum = sum(float((d or {}).get('phoneCalls') or 0) for d in (manual.get('days') or []))
+    active_staff = get_active_sales_staff(conn, site_id)
     auto = build_auto_stats(
         conn, site_id, start, end,
         included_visitor_ids=manual.get('includedVisitorIds'),
-        active_staff=SALES_STAFF.get(site_id) or [],
+        active_staff=active_staff,
         week_phone_total=phone_sum,
     )
+    suggested = aggregate_for_weekly(conn, site_id, start, end)
     history = list_weekly_reports(conn, site_id)
     conn.close()
 
@@ -1191,6 +1216,8 @@ def weekly_summary():
         'updatedAt': (saved or {}).get('updatedAt'),
         'manual': manual,
         'auto': auto,
+        'suggested': suggested,
+        'activeStaff': active_staff,
         'derived': {
             'inventory': inventory_summary(manual),
             'commission': commission_summary(manual),
@@ -1298,7 +1325,7 @@ def export_weekly_csv():
     auto = build_auto_stats(
         conn, site_id, start, end,
         included_visitor_ids=manual.get('includedVisitorIds'),
-        active_staff=SALES_STAFF.get(site_id) or [],
+        active_staff=get_active_sales_staff(conn, site_id),
         week_phone_total=phone_sum,
     )
     conn.close()
@@ -1427,7 +1454,7 @@ def export_weekly_xlsx():
     auto = build_auto_stats(
         conn, site_id, start, end,
         included_visitor_ids=manual.get('includedVisitorIds'),
-        active_staff=SALES_STAFF.get(site_id) or [],
+        active_staff=get_active_sales_staff(conn, site_id),
         week_phone_total=phone_sum,
     )
     conn.close()
@@ -1445,6 +1472,171 @@ def export_weekly_xlsx():
             ),
         },
     )
+
+
+@app.route('/api/sales/meta')
+def sales_meta():
+    conn, user, err = auth_guard('manage_weekly_reports')
+    if err:
+        return err
+    conn.close()
+    return jsonify({
+        'recordTypes': [{'id': k, 'label': v} for k, v in SALES_RECORD_TYPES.items()],
+    })
+
+
+@app.route('/api/sales/deals')
+def api_list_sales_deals():
+    conn, user, err = auth_guard('manage_weekly_reports')
+    if err:
+        return err
+    site_id = (request.args.get('siteId') or '').strip()
+    if not site_id:
+        conn.close()
+        return jsonify({'error': '請提供案場'}), 400
+    denied = ensure_site_access(user, site_id)
+    if denied:
+        conn.close()
+        return denied
+    record_type = (request.args.get('recordType') or '').strip() or None
+    q = (request.args.get('q') or '').strip()
+    try:
+        limit = min(max(int(request.args.get('limit', 200)), 1), 1000)
+        offset = max(int(request.args.get('offset', 0)), 0)
+    except ValueError:
+        limit, offset = 200, 0
+    rows, total = list_sales_deals(
+        conn, site_id, record_type=record_type, q=q, limit=limit, offset=offset,
+    )
+    staff = get_active_sales_staff(conn, site_id)
+    conn.close()
+    return jsonify({
+        'total': total,
+        'records': rows,
+        'activeStaff': staff,
+        'recordTypes': [{'id': k, 'label': v} for k, v in SALES_RECORD_TYPES.items()],
+    })
+
+
+@app.route('/api/sales/deals', methods=['POST'])
+def api_create_sales_deal():
+    conn, user, err = auth_guard('manage_weekly_reports')
+    if err:
+        return err
+    body = request.get_json() or {}
+    site_id = (body.get('siteId') or '').strip()
+    if not site_id:
+        conn.close()
+        return jsonify({'error': '請提供案場'}), 400
+    denied = ensure_site_access(user, site_id)
+    if denied:
+        conn.close()
+        return denied
+    if not str(body.get('unitNo') or '').strip() and not str(body.get('customerName') or '').strip():
+        conn.close()
+        return jsonify({'error': '請至少填寫戶號或客戶姓名'}), 400
+    deal_id = create_sales_deal(conn, site_id, body, user_id=user.get('id') if user else None)
+    log_operation(
+        conn, user, 'create_sales_deal',
+        f'新增銷售明細：{body.get("unitNo") or ""} {body.get("customerName") or ""}',
+        entity_type='sales_deal', entity_id=str(deal_id),
+        site_id=site_id, site_name=(get_site_by_id(site_id) or {}).get('name'),
+    )
+    conn.commit()
+    deal = get_sales_deal(conn, deal_id, site_id)
+    conn.close()
+    return jsonify({'success': True, 'record': deal})
+
+
+@app.route('/api/sales/deals/<int:deal_id>', methods=['PUT'])
+def api_update_sales_deal(deal_id):
+    conn, user, err = auth_guard('manage_weekly_reports')
+    if err:
+        return err
+    body = request.get_json() or {}
+    site_id = (body.get('siteId') or '').strip()
+    if not site_id:
+        conn.close()
+        return jsonify({'error': '請提供案場'}), 400
+    denied = ensure_site_access(user, site_id)
+    if denied:
+        conn.close()
+        return denied
+    ok = update_sales_deal(conn, deal_id, site_id, body, user_id=user.get('id') if user else None)
+    if not ok:
+        conn.close()
+        return jsonify({'error': '找不到此筆資料'}), 404
+    log_operation(
+        conn, user, 'update_sales_deal',
+        f'更新銷售明細 #{deal_id}',
+        entity_type='sales_deal', entity_id=str(deal_id),
+        site_id=site_id, site_name=(get_site_by_id(site_id) or {}).get('name'),
+    )
+    conn.commit()
+    deal = get_sales_deal(conn, deal_id, site_id)
+    conn.close()
+    return jsonify({'success': True, 'record': deal})
+
+
+@app.route('/api/sales/deals/<int:deal_id>', methods=['DELETE'])
+def api_delete_sales_deal(deal_id):
+    conn, user, err = auth_guard('manage_weekly_reports')
+    if err:
+        return err
+    site_id = (request.args.get('siteId') or '').strip()
+    if not site_id:
+        conn.close()
+        return jsonify({'error': '請提供案場'}), 400
+    denied = ensure_site_access(user, site_id)
+    if denied:
+        conn.close()
+        return denied
+    ok = delete_sales_deal(conn, deal_id, site_id)
+    if not ok:
+        conn.close()
+        return jsonify({'error': '找不到此筆資料'}), 404
+    log_operation(
+        conn, user, 'delete_sales_deal',
+        f'刪除銷售明細 #{deal_id}',
+        entity_type='sales_deal', entity_id=str(deal_id),
+        site_id=site_id, site_name=(get_site_by_id(site_id) or {}).get('name'),
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True})
+
+
+@app.route('/api/sales/summary')
+def api_sales_summary():
+    conn, user, err = auth_guard('manage_weekly_reports')
+    if err:
+        return err
+    site_id = (request.args.get('siteId') or '').strip()
+    week_start = (request.args.get('weekStart') or '').strip()
+    if not site_id:
+        conn.close()
+        return jsonify({'error': '請提供案場'}), 400
+    denied = ensure_site_access(user, site_id)
+    if denied:
+        conn.close()
+        return denied
+    if week_start:
+        try:
+            start, end = week_bounds(week_start)
+        except ValueError as e:
+            conn.close()
+            return jsonify({'error': str(e)}), 400
+    else:
+        today = datetime.now().date()
+        start, end = week_bounds(monday_of(today).isoformat())
+    summary = aggregate_for_weekly(conn, site_id, start, end)
+    conn.close()
+    return jsonify({
+        'siteId': site_id,
+        'weekStart': start.isoformat(),
+        'weekEnd': end.isoformat(),
+        'summary': summary,
+    })
 
 
 @app.route('/api/fields')

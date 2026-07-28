@@ -234,13 +234,40 @@ def _finalize_dimension(counter: dict, week_visits: float, week_deals: float,
             'cumVisitPct': _pct(st['cumVisits'], cum_visits),
             'weekDealPct': _pct(st['weekDeals'], week_deals),
             'cumDealPct': _pct(st['cumDeals'], cum_deals),
-            # 來電無法歸屬到區域／媒體，改以「佔當週／累計來人比例」對照來電總量僅供參考欄
             'weekPhonePct': _pct(st['weekVisits'], week_visits) if week_phones else 0.0,
             'cumPhonePct': _pct(st['cumVisits'], cum_visits) if cum_phones else 0.0,
-            # 相容舊 UI
             'count': round(st['weekVisits'], 2),
         })
     rows.sort(key=lambda x: (-x['weekVisits'], -x['cumVisits'], x['name']))
+    if rows:
+        tot_prior_v = sum(r['priorVisits'] for r in rows)
+        tot_week_v = sum(r['weekVisits'] for r in rows)
+        tot_cum_v = sum(r['cumVisits'] for r in rows)
+        tot_prior_d = sum(r['priorDeals'] for r in rows)
+        tot_week_d = sum(r['weekDeals'] for r in rows)
+        tot_cum_d = sum(r['cumDeals'] for r in rows)
+        tot_prior_a = sum(r['priorAmount'] for r in rows)
+        tot_week_a = sum(r['weekAmount'] for r in rows)
+        tot_cum_a = sum(r['cumAmount'] for r in rows)
+        rows.append({
+            'name': '合計',
+            'priorVisits': round(tot_prior_v, 2),
+            'weekVisits': round(tot_week_v, 2),
+            'cumVisits': round(tot_cum_v, 2),
+            'priorDeals': round(tot_prior_d, 2),
+            'weekDeals': round(tot_week_d, 2),
+            'cumDeals': round(tot_cum_d, 2),
+            'priorAmount': round(tot_prior_a, 2),
+            'weekAmount': round(tot_week_a, 2),
+            'cumAmount': round(tot_cum_a, 2),
+            'weekVisitPct': _pct(tot_week_v, week_visits),
+            'cumVisitPct': _pct(tot_cum_v, cum_visits),
+            'weekDealPct': _pct(tot_week_d, week_deals),
+            'cumDealPct': _pct(tot_cum_d, cum_deals),
+            'weekPhonePct': _pct(tot_week_v, week_visits) if week_phones else 0.0,
+            'cumPhonePct': _pct(tot_cum_v, cum_visits) if cum_phones else 0.0,
+            'count': round(tot_week_v, 2),
+        })
     return rows
 
 

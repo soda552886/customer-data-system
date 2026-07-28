@@ -72,26 +72,36 @@ function renderFieldCard(field) {
   const enabled = new Set(field.enabledOptions || []);
   const total = field.allOptions.length;
   const count = enabled.size;
+  const isStaff = field.key === '__salesStaff__';
   const checks = field.allOptions.map((opt) => {
     const custom = isCustomOption(field, opt);
+    const on = enabled.has(opt);
+    const statusHint = isStaff
+      ? (on ? ' <span class="hint">在職</span>' : ' <span class="hint">已離職</span>')
+      : '';
     return `
-    <label class="checkbox-label${custom ? ' option-custom' : ''}">
-      <input type="checkbox" data-field-key="${escapeHtml(field.key)}" value="${escapeHtml(opt)}" ${enabled.has(opt) ? 'checked' : ''}>
-      ${escapeHtml(opt)}${custom ? ' <span class="hint">自訂</span>' : ''}
+    <label class="checkbox-label${custom ? ' option-custom' : ''}${isStaff && !on ? ' option-inactive' : ''}">
+      <input type="checkbox" data-field-key="${escapeHtml(field.key)}" value="${escapeHtml(opt)}" ${on ? 'checked' : ''}>
+      ${escapeHtml(opt)}${statusHint}${custom ? ' <span class="hint">自訂</span>' : ''}
       ${custom ? `<button type="button" class="btn-xs link-btn" data-field-key="${escapeHtml(field.key)}" data-remove-option="${escapeHtml(opt)}" title="移除自訂選項">✕</button>` : ''}
     </label>
   `;
   }).join('');
 
+  const staffHint = isStaff
+    ? '<p class="hint" style="margin:0.5rem 0 0;">勾選＝在職（填寫表單可選）；取消勾選＝已離職（表單自動隱藏，週報成交比累計併入「前期銷售」）。名單勿刪除，保留歷史統計。</p>'
+    : '';
+
   return `
     <div class="field-options-card" data-field-key="${escapeHtml(field.key)}">
       <div class="field-options-card-head">
-        <strong>${escapeHtml(field.label)}</strong>
-        <span class="hint field-options-count" data-count-for="${escapeHtml(field.key)}">${count} / ${total} 項</span>
-        <button type="button" class="btn-sm" data-add-option="${escapeHtml(field.key)}">新增選項</button>
-        <button type="button" class="btn-sm" data-select-all="${escapeHtml(field.key)}">全選</button>
-        <button type="button" class="btn-sm" data-select-none="${escapeHtml(field.key)}">全不選</button>
+        <strong>${escapeHtml(isStaff ? '銷售人員（在職狀態）' : field.label)}</strong>
+        <span class="hint field-options-count" data-count-for="${escapeHtml(field.key)}">${isStaff ? `在職 ${count}` : `${count}`} / ${total} 項</span>
+        <button type="button" class="btn-sm" data-add-option="${escapeHtml(field.key)}">${isStaff ? '新增人員' : '新增選項'}</button>
+        <button type="button" class="btn-sm" data-select-all="${escapeHtml(field.key)}">全選在職</button>
+        <button type="button" class="btn-sm" data-select-none="${escapeHtml(field.key)}">全部離職</button>
       </div>
+      ${staffHint}
       <div class="checkbox-grid field-options-grid">${checks || '<p class="hint">尚無選項，請按「新增選項」</p>'}</div>
     </div>
   `;

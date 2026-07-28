@@ -107,7 +107,7 @@ def iter_configurable_fields(sections: list, site_id: str, sales_staff: dict) ->
                 staff_added = True
                 items.append({
                     'key': SALES_STAFF_FIELD_KEY,
-                    'label': '銷售人員',
+                    'label': '銷售人員（在職狀態）',
                     'sectionTitle': section.get('title', ''),
                     'type': 'select',
                     'defaultOptions': staff_defaults,
@@ -270,9 +270,10 @@ def normalize_save_payload(
             continue
         defaults = list(configurable[field_key] or [])
         picked = _normalize_override_list(selected)
-        if not picked:
+        # 銷售人員允許空清單（＝全部標為已離職）；其他欄位空值視為未設定
+        if not picked and field_key != SALES_STAFF_FIELD_KEY:
             continue
-        if picked != defaults:
+        if picked != defaults or field_key == SALES_STAFF_FIELD_KEY:
             normalized[field_key] = picked
     return normalized
 

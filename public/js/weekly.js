@@ -375,8 +375,10 @@ function renderDimTable(tableId, rows) {
     tbody.innerHTML = '<tr><td colspan="8" class="empty-row">尚無資料</td></tr>';
     return;
   }
-  tbody.innerHTML = rows.map((r) => `<tr>
-    <td>${escapeHtml(r.name)}</td>
+  tbody.innerHTML = rows.map((r) => {
+    const name = r.name === '合計' ? `<strong>${escapeHtml(r.name)}</strong>` : escapeHtml(r.name);
+    return `<tr>
+    <td>${name}</td>
     <td>${r.priorVisits ?? 0}</td>
     <td>${r.weekVisits ?? r.count ?? 0}</td>
     <td><strong>${r.cumVisits ?? 0}</strong></td>
@@ -384,7 +386,8 @@ function renderDimTable(tableId, rows) {
     <td>${r.cumVisitPct ?? 0}%</td>
     <td>${r.weekDeals ?? 0}</td>
     <td>${r.weekDealPct ?? 0}%</td>
-  </tr>`).join('');
+  </tr>`;
+  }).join('');
 }
 
 function renderVisitorMini(elId, rows, emptyText) {
@@ -486,6 +489,35 @@ function renderHistory(history) {
   });
 }
 
+function applySuggestedFromSales() {
+  if (!current) {
+    showToast('請先載入本週資料', 'error');
+    return;
+  }
+  const s = current.suggested;
+  if (!s || !(s.totalRecords > 0)) {
+    showToast('銷售總表尚無資料，請先至銷售總表登錄', 'error');
+    return;
+  }
+  const manual = collectManualFromForm(current.manual);
+  ['deals', 'signings', 'purchases', 'unreported'].forEach((key) => {
+    if (s[key]) manual[key] = { ...manual[key], ...s[key] };
+  });
+  if (s.commission) {
+    manual.commission = { ...manual.commission, ...s.commission };
+  }
+  if (s.inventory) {
+    manual.inventory = { ...manual.inventory, ...s.inventory };
+  }
+  current.manual = manual;
+  renderDealInputs(manual);
+  renderInventory(manual, null);
+  renderCommission(manual, null);
+  document.getElementById('salesSuggestHint').textContent =
+    `已帶入（銷售總表 ${s.totalRecords} 筆；本週成交 ${s.weekDealCount || 0} 筆）`;
+  showToast('已從銷售總表帶入成交／請佣／去化數字');
+}
+
 function renderAll(payload) {
   current = payload;
   document.getElementById('weekEmpty').classList.add('hidden');
@@ -499,6 +531,7 @@ function renderAll(payload) {
   const manual = payload.manual || {};
   const auto = payload.auto || {};
   const derived = payload.derived || {};
+  const suggested = payload.suggested || {};
   renderKpi(auto, manual);
   renderVisitorSelect(auto, manual);
   renderDaily(auto, manual);
@@ -518,6 +551,12 @@ function renderAll(payload) {
   renderVisitorMini('hopeList', auto.hopeCustomers, '本週尚無有望客');
   renderVisitors(auto);
   renderHistory(payload.history || []);
+  const hint = document.getElementById('salesSuggestHint');
+  if (hint) {
+    hint.textContent = suggested.totalRecords
+      ? `銷售總表 ${suggested.totalRecords} 筆可帶入`
+      : '銷售總表尚無資料';
+  }
 }
 
 async function loadWeek() {
@@ -634,6 +673,7 @@ async function init() {
     updateVisitorSelectSummary();
   });
   document.getElementById('applyVisitorsBtn').addEventListener('click', applyVisitorSelection);
+  document.getElementById('fillFromSalesBtn').addEventListener('click', applySuggestedFromSales);
   document.getElementById('exportWeekBtn').addEventListener('click', async () => {
     if (!current) {
       showToast('請先載入本週資料', 'error');
