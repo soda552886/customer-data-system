@@ -195,6 +195,57 @@ body {
 }
 
 .form-group textarea { min-height: 100px; resize: vertical; }
+.form-group input[readonly] {
+  background: #f1f5f9;
+  color: #334155;
+  cursor: default;
+}
+
+.sales-form-block {
+  margin-top: 1.1rem;
+  padding: 1rem 1.1rem 1.15rem;
+  border: 1px solid #d9e2ec;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #fbfcfe 0%, #f7f9fc 100%);
+}
+.sales-form-block-title {
+  margin: 0 0 0.65rem;
+  font-size: 1.05rem;
+  color: #1a4d7c;
+}
+.sales-form-subtitle {
+  margin: 1rem 0 0.55rem;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: #475569;
+  border-left: 3px solid #94a3b8;
+  padding-left: 0.55rem;
+}
+.sales-form-block .hint {
+  margin: 0 0 0.75rem;
+}
+.field-hint {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 0.78rem;
+  color: #64748b;
+}
+.comm-sales-amount.is-deal-mode {
+  color: #c62828;
+  font-weight: 600;
+}
+td.is-deal-mode {
+  color: #c62828;
+  font-weight: 600;
+}
+.comm-status-claimed {
+  color: #166534;
+  font-weight: 600;
+}
+.comm-status-open {
+  color: #9a3412;
+  font-weight: 600;
+}
 .form-group textarea.readonly-autofill {
   min-height: 70px;
   background: #f5f7fa;

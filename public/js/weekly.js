@@ -162,9 +162,15 @@ function calcCommissionDerived(c) {
   const n = (k) => Number(c[k]) || 0;
   const round4 = (x) => Math.round(x * 10000) / 10000;
   return {
-    unclaimedAmount: round4(Math.max(n('claimableAmount') - n('claimedAmount'), 0)),
+    unclaimedAmount: round4(
+      c.unclaimedAmount != null
+        ? n('unclaimedAmount')
+        : Math.max(n('claimableAmount') - n('claimedAmount'), 0),
+    ),
     unclaimedUnits: Math.max(n('claimableUnits') - n('claimedUnits'), 0),
     unclaimedParking: Math.max(n('claimableParking') - n('claimedParking'), 0),
+    payableAmount: round4(n('payableAmount')),
+    retentionAmount: round4(n('retentionAmount')),
     bookedAmount: round4(n('bookedAmount')),
     nextMonthUnits: n('nextMonthUnits'),
     nextMonthParking: n('nextMonthParking'),
@@ -306,6 +312,8 @@ function renderCommission(manual, derived) {
   `).join('');
   const d = derived || calcCommissionDerived(c);
   renderDerivedCards('commissionDerived', [
+    { label: '本期可請97%(萬)', value: `${d.payableAmount}` },
+    { label: '保留款3%(萬)', value: `${d.retentionAmount}` },
     { label: '未請佣金額(萬)', value: `${d.unclaimedAmount}` },
     { label: '未請佣戶數', value: `${d.unclaimedUnits}` },
     { label: '未請佣車位', value: `${d.unclaimedParking}` },
@@ -331,6 +339,8 @@ function refreshDerivedFromForm() {
   ]);
   const com = calcCommissionDerived(manual.commission || {});
   renderDerivedCards('commissionDerived', [
+    { label: '本期可請97%(萬)', value: `${com.payableAmount}` },
+    { label: '保留款3%(萬)', value: `${com.retentionAmount}` },
     { label: '未請佣金額(萬)', value: `${com.unclaimedAmount}` },
     { label: '未請佣戶數', value: `${com.unclaimedUnits}` },
     { label: '未請佣車位', value: `${com.unclaimedParking}` },

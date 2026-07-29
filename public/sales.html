@@ -47,115 +47,275 @@
     <section class="card hidden" id="salesFormCard">
       <h2 id="salesFormTitle">新增銷售明細</h2>
       <input type="hidden" id="salesEditId" value="">
-      <div class="search-grid">
-        <div class="form-group">
-          <label for="fRecordType">類型</label>
-          <select id="fRecordType"></select>
-        </div>
-        <div class="form-group">
-          <label for="fUnitNo">戶號</label>
-          <input type="text" id="fUnitNo" placeholder="如 A3-11F">
-        </div>
-        <div class="form-group">
-          <label for="fCustomerName">客戶姓名</label>
-          <input type="text" id="fCustomerName">
-        </div>
-        <div class="form-group">
-          <label for="fPhone">電話</label>
-          <input type="tel" id="fPhone">
-        </div>
-        <div class="form-group">
-          <label for="fProductType">產品別</label>
-          <select id="fProductType">
-            <option value="">未填</option>
-            <option value="住宅">住宅</option>
-            <option value="事務所">事務所</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label for="fAreaPing">坪數</label>
-          <input type="number" step="0.01" id="fAreaPing" value="0">
-        </div>
-        <div class="form-group">
-          <label for="fUnits">戶數</label>
-          <input type="number" step="0.5" id="fUnits" value="1">
-        </div>
-        <div class="form-group">
-          <label for="fParkingCount">車位數</label>
-          <input type="number" step="0.5" id="fParkingCount" value="0">
-        </div>
-        <div class="form-group">
-          <label for="fParkingNos">車位編號</label>
-          <input type="text" id="fParkingNos" placeholder="如 B3-63">
-        </div>
-        <div class="form-group">
-          <label for="fListPrice">表價(萬)</label>
-          <input type="number" step="0.01" id="fListPrice" value="0">
-        </div>
-        <div class="form-group">
-          <label for="fBasePrice">底價(萬)</label>
-          <input type="number" step="0.01" id="fBasePrice" value="0">
-        </div>
-        <div class="form-group">
-          <label for="fTotalPrice">成交總價(萬)</label>
-          <input type="number" step="0.01" id="fTotalPrice" value="0">
-        </div>
-        <div class="form-group">
-          <label for="fDepositDate">下定日期</label>
-          <input type="date" id="fDepositDate">
-        </div>
-        <div class="form-group">
-          <label for="fSignDate">簽約日期</label>
-          <input type="date" id="fSignDate">
-        </div>
-        <div class="form-group">
-          <label for="fReportDate">報售／成交日期</label>
-          <input type="date" id="fReportDate">
-        </div>
-        <div class="form-group">
-          <label for="fSales1">銷售人員1</label>
-          <select id="fSales1"><option value="">未填</option></select>
-        </div>
-        <div class="form-group">
-          <label for="fSales2">銷售人員2</label>
-          <select id="fSales2"><option value="">未填</option></select>
-        </div>
-        <div class="form-group">
-          <label for="fCoManaged">共同經營</label>
-          <select id="fCoManaged">
-            <option value="否">否</option>
-            <option value="是">是</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label for="fCommClaimable">可請佣金額(萬)</label>
-          <input type="number" step="0.0001" id="fCommClaimable" value="0">
-        </div>
-        <div class="form-group">
-          <label for="fCommClaimed">已請佣金額(萬)</label>
-          <input type="number" step="0.0001" id="fCommClaimed" value="0">
-        </div>
-        <div class="form-group">
-          <label for="fCommBooked">已入帳金額(萬)</label>
-          <input type="number" step="0.0001" id="fCommBooked" value="0">
-        </div>
-        <div class="form-group">
-          <label for="fNextMonthAmt">預計下月可請(萬)</label>
-          <input type="number" step="0.0001" id="fNextMonthAmt" value="0">
-        </div>
-        <div class="form-group">
-          <label for="fNextMonthUnits">預計下月可請戶數</label>
-          <input type="number" step="0.5" id="fNextMonthUnits" value="0">
-        </div>
-        <div class="form-group">
-          <label for="fNextMonthParking">預計下月可請車位</label>
-          <input type="number" step="0.5" id="fNextMonthParking" value="0">
-        </div>
-        <div class="form-group full-width">
-          <label for="fMemo">備註</label>
-          <input type="text" id="fMemo">
+      <p class="hint">欄位已分區：先填基本／日期／戶別，再填成交價格；灰底為自動計算欄位。</p>
+
+      <div class="sales-form-block">
+        <h3 class="sales-form-block-title">1. 基本資訊</h3>
+        <div class="search-grid">
+          <div class="form-group">
+            <label for="fRecordType">類型</label>
+            <select id="fRecordType"></select>
+          </div>
+          <div class="form-group">
+            <label for="fOrderNo">訂單編號</label>
+            <input type="text" id="fOrderNo">
+          </div>
         </div>
       </div>
+
+      <div class="sales-form-block">
+        <h3 class="sales-form-block-title">2. 日期</h3>
+        <p class="hint">下定 → 補足 → 簽約 → 業主報售／報簽</p>
+        <div class="search-grid">
+          <div class="form-group">
+            <label for="fDepositDate">下定日期</label>
+            <input type="date" id="fDepositDate">
+          </div>
+          <div class="form-group">
+            <label for="fSupplementDate">補足日期</label>
+            <input type="date" id="fSupplementDate">
+          </div>
+          <div class="form-group">
+            <label for="fSignDate">簽約日期</label>
+            <input type="date" id="fSignDate">
+          </div>
+          <div class="form-group">
+            <label for="fOwnerSaleReportDate">業主報售日</label>
+            <input type="date" id="fOwnerSaleReportDate">
+          </div>
+          <div class="form-group">
+            <label for="fOwnerSignReportDate">業主報簽日</label>
+            <input type="date" id="fOwnerSignReportDate">
+          </div>
+        </div>
+      </div>
+
+      <div class="sales-form-block">
+        <h3 class="sales-form-block-title">3. 戶別與客戶</h3>
+        <div class="search-grid">
+          <div class="form-group">
+            <label for="fUnitNo">戶別</label>
+            <input type="text" id="fUnitNo" placeholder="如 A3-11F">
+          </div>
+          <div class="form-group">
+            <label for="fCustomerName">客戶姓名</label>
+            <input type="text" id="fCustomerName">
+          </div>
+          <div class="form-group">
+            <label for="fPhone">電話</label>
+            <input type="tel" id="fPhone">
+          </div>
+          <div class="form-group">
+            <label for="fProductType">產品別</label>
+            <select id="fProductType">
+              <option value="">未填</option>
+              <option value="住宅">住宅</option>
+              <option value="事務所">事務所</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="fAreaPing">坪數</label>
+            <input type="number" step="0.01" id="fAreaPing" value="0">
+          </div>
+          <div class="form-group">
+            <label for="fUnits">戶數</label>
+            <input type="number" step="0.5" id="fUnits" value="1">
+          </div>
+          <div class="form-group">
+            <label for="fParkingNo1">車位1</label>
+            <input type="text" id="fParkingNo1" placeholder="如 B3-63">
+          </div>
+          <div class="form-group">
+            <label for="fParkingNo2">車位2</label>
+            <input type="text" id="fParkingNo2">
+          </div>
+        </div>
+      </div>
+
+      <div class="sales-form-block">
+        <h3 class="sales-form-block-title">4. 成交價格（單位：萬）</h3>
+
+        <h4 class="sales-form-subtitle">合約售價</h4>
+        <div class="search-grid">
+          <div class="form-group">
+            <label for="fHouseSalePrice">房售</label>
+            <input type="number" step="0.01" id="fHouseSalePrice" value="0">
+          </div>
+          <div class="form-group">
+            <label for="fParkingSalePrice">車售</label>
+            <input type="number" step="0.01" id="fParkingSalePrice" value="0">
+          </div>
+          <div class="form-group">
+            <label for="fContractTotal">合約總價＝房售＋車售</label>
+            <input type="number" step="0.01" id="fContractTotal" value="0" readonly>
+          </div>
+        </div>
+
+        <h4 class="sales-form-subtitle">附加／減項</h4>
+        <div class="search-grid">
+          <div class="form-group">
+            <label for="fSurcharge">附加費</label>
+            <input type="number" step="0.01" id="fSurcharge" value="0">
+          </div>
+          <div class="form-group">
+            <label for="fApplianceGift">家電禮券</label>
+            <input type="number" step="0.01" id="fApplianceGift" value="0">
+          </div>
+          <div class="form-group">
+            <label for="fPickupVoucher">提貨券</label>
+            <input type="number" step="0.01" id="fPickupVoucher" value="0">
+          </div>
+          <div class="form-group">
+            <label for="fDecoration">裝潢</label>
+            <input type="number" step="0.01" id="fDecoration" value="0">
+          </div>
+          <div class="form-group">
+            <label for="fCompanyLoanInterest">公司貸利息</label>
+            <input type="number" step="0.01" id="fCompanyLoanInterest" value="0">
+          </div>
+        </div>
+
+        <h4 class="sales-form-subtitle">實際成交（自動計算）</h4>
+        <div class="search-grid">
+          <div class="form-group">
+            <label for="fActualHousePrice">實際房價＝房售−附加費−家電禮券−提貨券−裝潢−公司貸利息</label>
+            <input type="number" step="0.01" id="fActualHousePrice" value="0" readonly>
+          </div>
+          <div class="form-group">
+            <label for="fActualTotalPrice">實際成交總價＝實際房價＋車售</label>
+            <input type="number" step="0.01" id="fActualTotalPrice" value="0" readonly>
+          </div>
+        </div>
+
+        <h4 class="sales-form-subtitle">底價與超價</h4>
+        <div class="search-grid">
+          <div class="form-group">
+            <label for="fHouseBasePrice">房底</label>
+            <input type="number" step="0.01" id="fHouseBasePrice" value="0">
+          </div>
+          <div class="form-group">
+            <label for="fParkingBasePrice">車底</label>
+            <input type="number" step="0.01" id="fParkingBasePrice" value="0">
+          </div>
+          <div class="form-group">
+            <label for="fBaseTotal">底總＝房底＋車底</label>
+            <input type="number" step="0.01" id="fBaseTotal" value="0" readonly>
+          </div>
+          <div class="form-group">
+            <label for="fExcessPrice">超價＝合約總價−底總−附加費−家電禮券−提貨券−裝潢−公司貸利息</label>
+            <input type="number" step="0.01" id="fExcessPrice" value="0" readonly>
+          </div>
+        </div>
+      </div>
+
+      <div class="sales-form-block">
+        <h3 class="sales-form-block-title">5. 銷售人員</h3>
+        <div class="search-grid">
+          <div class="form-group">
+            <label for="fSales1">銷售人員1</label>
+            <select id="fSales1"><option value="">未填</option></select>
+          </div>
+          <div class="form-group">
+            <label for="fSales2">銷售人員2</label>
+            <select id="fSales2"><option value="">未填</option></select>
+          </div>
+          <div class="form-group">
+            <label for="fCoManaged">共同經營</label>
+            <select id="fCoManaged">
+              <option value="否">否</option>
+              <option value="是">是</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="sales-form-block">
+        <h3 class="sales-form-block-title">6. 請佣（自動計算）</h3>
+        <p class="hint" id="commDefaultsHint">預設：底價×4.85%，本期可請97%，保留款3%。低底改選「成交價請款」即可（等同 Excel 紅字）。</p>
+        <div class="search-grid">
+          <div class="form-group">
+            <label for="fCommBaseMode">請佣銷售金額來源</label>
+            <select id="fCommBaseMode">
+              <option value="base">底價請款（正常）</option>
+              <option value="deal">成交價請款（低底／特例）</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="fCommSalesAmount">請佣銷售金額(萬)</label>
+            <input type="number" step="0.01" id="fCommSalesAmount" value="0" class="comm-sales-amount">
+            <small class="field-hint">切換來源會自動帶入；也可手動改成特殊金額</small>
+          </div>
+          <div class="form-group">
+            <label for="fCommRatePct">佣金比例(%)</label>
+            <input type="number" step="0.01" id="fCommRatePct" value="4.85">
+          </div>
+          <div class="form-group">
+            <label for="fCommPayablePct">本期可請比例(%)</label>
+            <input type="number" step="0.01" id="fCommPayablePct" value="97">
+          </div>
+          <div class="form-group">
+            <label for="fCommRetentionPct">保留款比例(%)</label>
+            <input type="number" step="0.01" id="fCommRetentionPct" value="3">
+          </div>
+          <div class="form-group">
+            <label for="fCommDeduction">扣佣金(萬)</label>
+            <input type="number" step="0.0001" id="fCommDeduction" value="0">
+          </div>
+          <div class="form-group">
+            <label for="fCommClaimable">可請佣金額 4.85%(萬)</label>
+            <input type="number" step="0.0001" id="fCommClaimable" value="0" readonly>
+          </div>
+          <div class="form-group">
+            <label for="fCommPayable">本期可請 97%(萬)</label>
+            <input type="number" step="0.0001" id="fCommPayable" value="0" readonly>
+          </div>
+          <div class="form-group">
+            <label for="fCommRetention">保留款 3%(萬)</label>
+            <input type="number" step="0.0001" id="fCommRetention" value="0" readonly>
+          </div>
+          <div class="form-group">
+            <label for="fCommPeriod">請佣期別</label>
+            <input type="text" id="fCommPeriod" placeholder="例：第3期／2026-03">
+          </div>
+          <div class="form-group">
+            <label for="fCommClaimDate">請佣日期</label>
+            <input type="date" id="fCommClaimDate">
+          </div>
+          <div class="form-group">
+            <label for="fCommStatus">已請／未請</label>
+            <input type="text" id="fCommStatus" value="未請" readonly>
+          </div>
+          <div class="form-group">
+            <label for="fCommClaimed">已請佣金額(萬)</label>
+            <input type="number" step="0.0001" id="fCommClaimed" value="0" readonly>
+          </div>
+          <div class="form-group">
+            <label for="fCommUnclaimed">未請金額(萬)</label>
+            <input type="number" step="0.0001" id="fCommUnclaimed" value="0" readonly>
+          </div>
+          <div class="form-group">
+            <label for="fCommBooked">已入帳金額(萬)</label>
+            <input type="number" step="0.0001" id="fCommBooked" value="0">
+          </div>
+          <div class="form-group">
+            <label for="fNextMonthAmt">預計下月可請(萬)</label>
+            <input type="number" step="0.0001" id="fNextMonthAmt" value="0">
+          </div>
+          <div class="form-group">
+            <label for="fNextMonthUnits">預計下月可請戶數</label>
+            <input type="number" step="0.5" id="fNextMonthUnits" value="0">
+          </div>
+          <div class="form-group">
+            <label for="fNextMonthParking">預計下月可請車位</label>
+            <input type="number" step="0.5" id="fNextMonthParking" value="0">
+          </div>
+          <div class="form-group full-width">
+            <label for="fMemo">備註</label>
+            <input type="text" id="fMemo">
+          </div>
+        </div>
+      </div>
+
       <div class="form-actions">
         <button type="button" id="saveSalesBtn" class="btn btn-primary">儲存明細</button>
         <button type="button" id="cancelSalesBtn" class="btn btn-outline">取消</button>
@@ -168,8 +328,9 @@
         <table class="data-table" id="salesTable">
           <thead>
             <tr>
-              <th>類型</th><th>戶號</th><th>客戶</th><th>戶/車</th><th>總價(萬)</th><th>底價</th>
-              <th>報售日</th><th>簽約日</th><th>銷售</th><th>可請佣</th><th>已請佣</th><th>操作</th>
+              <th>類型</th><th>訂單編號</th><th>戶別</th><th>客戶</th><th>車位1/2</th>
+              <th>合約總價</th><th>實際成交總價</th><th>底總</th><th>請佣銷售金額</th>
+              <th>可請／已請</th><th>狀態</th><th>業主報售日</th><th>銷售</th><th>操作</th>
             </tr>
           </thead>
           <tbody></tbody>

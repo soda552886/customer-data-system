@@ -25,8 +25,8 @@ from weekly_reports import (
     week_bounds,
 )
 from sales_ledger import (
-    RECORD_TYPES as SALES_RECORD_TYPES, aggregate_for_weekly, create_sales_deal,
-    delete_sales_deal, get_sales_deal, init_sales_tables, list_sales_deals,
+    RECORD_TYPES as SALES_RECORD_TYPES, aggregate_for_weekly, commission_defaults_for_site,
+    create_sales_deal, delete_sales_deal, get_sales_deal, init_sales_tables, list_sales_deals,
     update_sales_deal,
 )
 from field_options import (
@@ -1365,35 +1365,35 @@ def export_weekly_csv():
     for row in auto['byRegion']:
         writer.writerow([
             row['name'], row.get('weekVisits'), row.get('priorVisits'), row.get('cumVisits'),
-            row.get('weekVisitPct'), row.get('cumVisitPct'),
+            f"{row.get('weekVisitPct', 0)}%", f"{row.get('cumVisitPct', 0)}%",
         ])
     writer.writerow([])
     writer.writerow(['【媒體統計（新客）】', '本週', '前期', '累計', '佔本週%', '佔累計%'])
     for row in auto['byMedia']:
         writer.writerow([
             row['name'], row.get('weekVisits'), row.get('priorVisits'), row.get('cumVisits'),
-            row.get('weekVisitPct'), row.get('cumVisitPct'),
+            f"{row.get('weekVisitPct', 0)}%", f"{row.get('cumVisitPct', 0)}%",
         ])
     writer.writerow([])
-    writer.writerow(['【職業】', '本週', '前期', '累計', '佔本週%', '佔累計%'])
+    writer.writerow(['【職業（新客）】', '本週', '前期', '累計', '佔本週%', '佔累計%'])
     for row in auto.get('byOccupation') or []:
         writer.writerow([
             row['name'], row.get('weekVisits'), row.get('priorVisits'), row.get('cumVisits'),
-            row.get('weekVisitPct'), row.get('cumVisitPct'),
+            f"{row.get('weekVisitPct', 0)}%", f"{row.get('cumVisitPct', 0)}%",
         ])
     writer.writerow([])
-    writer.writerow(['【年齡】', '本週', '前期', '累計', '佔本週%', '佔累計%'])
+    writer.writerow(['【年齡（新客）】', '本週', '前期', '累計', '佔本週%', '佔累計%'])
     for row in auto.get('byAge') or []:
         writer.writerow([
             row['name'], row.get('weekVisits'), row.get('priorVisits'), row.get('cumVisits'),
-            row.get('weekVisitPct'), row.get('cumVisitPct'),
+            f"{row.get('weekVisitPct', 0)}%", f"{row.get('cumVisitPct', 0)}%",
         ])
     writer.writerow([])
     writer.writerow(['【成交比】'])
     writer.writerow(['銷售', '累計接待', '累計成交', '成交率%', '成交金額', '退戶', '本週接待', '本週成交'])
     for row in auto.get('conversion') or []:
         writer.writerow([
-            row['name'], row['visits'], row['deals'], row['rate'], row.get('amount'),
+            row['name'], row['visits'], row['deals'], f"{row['rate']}%", row.get('amount'),
             row.get('refunds'), row['weekVisits'], row['weekDeals'],
         ])
     writer.writerow([])
@@ -1480,8 +1480,11 @@ def sales_meta():
     if err:
         return err
     conn.close()
+    site_id = (request.args.get('siteId') or '').strip()
+    defaults = commission_defaults_for_site(site_id) if site_id else commission_defaults_for_site('_default')
     return jsonify({
         'recordTypes': [{'id': k, 'label': v} for k, v in SALES_RECORD_TYPES.items()],
+        'commissionDefaults': defaults,
     })
 
 

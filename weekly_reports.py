@@ -302,11 +302,13 @@ def build_auto_stats(
         'age': defaultdict(_dim_bucket),
         'source': defaultdict(_dim_bucket),
     }
-    # 新客專用（區域／媒體／來源報表）
+    # 新客專用（區域／媒體／來源／職業／年齡報表）
     dim_new = {
         'region': defaultdict(_dim_bucket),
         'media': defaultdict(_dim_bucket),
         'source': defaultdict(_dim_bucket),
+        'occupation': defaultdict(_dim_bucket),
+        'age': defaultdict(_dim_bucket),
     }
 
     visitors_all_week = []
@@ -581,12 +583,12 @@ def build_auto_stats(
         ],
         'totals': totals,
         'period': period,
-        # 相容舊欄位：區域／媒體／來源改為「僅新客」
+        # 區域／媒體／來源／職業／年齡皆僅統計新客
         'byRegion': new_dims['region'],
         'byMedia': new_dims['media'],
         'bySource': new_dims['source'],
-        'byOccupation': all_dims['occupation'],
-        'byAge': all_dims['age'],
+        'byOccupation': new_dims['occupation'],
+        'byAge': new_dims['age'],
         'dimensions': {
             'all': all_dims,
             'newOnly': new_dims,
@@ -760,6 +762,8 @@ def _append_dim_table(ws, title, rows, *, week_only=True):
             r.get('priorDeals'), r.get('weekDeals'), r.get('cumDeals'),
             r.get('weekDealPct'), r.get('cumDealPct'),
         ])
+        for col in (5, 6, 10, 11):
+            ws.cell(ws.max_row, col).number_format = '0.##"%"'
         shown += 1
     if total_row:
         ws.append([
@@ -768,6 +772,8 @@ def _append_dim_table(ws, title, rows, *, week_only=True):
             total_row.get('priorDeals'), total_row.get('weekDeals'), total_row.get('cumDeals'),
             total_row.get('weekDealPct'), total_row.get('cumDealPct'),
         ])
+        for col in (5, 6, 10, 11):
+            ws.cell(ws.max_row, col).number_format = '0.##"%"'
     if week_only and shown == 0 and not total_row:
         ws.append(['（本週無資料）'])
     ws.append([])
@@ -838,6 +844,7 @@ def build_weekly_excel(site_name: str, start, end, week_number, manual: dict, au
             row.get('amount'), row.get('refunds'), row.get('refundAmount'),
             row.get('weekVisits'), row.get('weekDeals'), row.get('weekAmount'),
         ])
+        ws.cell(ws.max_row, 4).number_format = '0.##"%"'
     ws.append([])
     ws.append(['五、來人區域分析（新客）'])
     _append_dim_table(ws, '', auto.get('byRegion') or [])
@@ -846,9 +853,9 @@ def build_weekly_excel(site_name: str, start, end, week_number, manual: dict, au
 
     ws.append(['六、來人媒體分析（新客）'])
     _append_dim_table(ws, '', auto.get('byMedia') or [])
-    ws.append(['七、職業／年齡分析'])
-    _append_dim_table(ws, '職業', auto.get('byOccupation') or [])
-    _append_dim_table(ws, '年齡', auto.get('byAge') or [])
+    ws.append(['七、職業／年齡分析（新客）'])
+    _append_dim_table(ws, '職業（新客）', auto.get('byOccupation') or [])
+    _append_dim_table(ws, '年齡（新客）', auto.get('byAge') or [])
 
     for col in range(1, 12):
         ws.column_dimensions[get_column_letter(col)].width = 14
@@ -877,6 +884,7 @@ def build_weekly_excel(site_name: str, start, end, week_number, manual: dict, au
             row.get('amount'), row.get('refunds'), row.get('refundAmount'),
             row.get('weekVisits'), row.get('weekDeals'), row.get('weekAmount'), row.get('weekRefunds'),
         ])
+        ws.cell(ws.max_row, 4).number_format = '0.##"%"'
 
     # —— 去化／請佣 ——
     ws = wb.create_sheet('去化與請佣')
@@ -893,7 +901,9 @@ def build_weekly_excel(site_name: str, start, end, week_number, manual: dict, au
     ]:
         ws.append([label, inv_m.get(key, 0)])
     ws.append(['戶數去化率%', inv['unitRate']])
+    ws.cell(ws.max_row, 2).number_format = '0.##"%"'
     ws.append(['底價去化率%', inv['basePriceRate']])
+    ws.cell(ws.max_row, 2).number_format = '0.##"%"'
     ws.append(['未售底價(萬)', inv['remainBasePrice']])
     ws.append([])
     ws.append(['請佣項目', '數值'])
@@ -923,8 +933,8 @@ def build_weekly_excel(site_name: str, start, end, week_number, manual: dict, au
         ('區域（新客）', auto.get('byRegion')),
         ('媒體（新客）', auto.get('byMedia')),
         ('來源（新客）', auto.get('bySource')),
-        ('職業', auto.get('byOccupation')),
-        ('年齡', auto.get('byAge')),
+        ('職業（新客）', auto.get('byOccupation')),
+        ('年齡（新客）', auto.get('byAge')),
     ]:
         _append_dim_table(ws, title, rows, week_only=False)
 
