@@ -35,8 +35,13 @@
       <div class="form-actions">
         <button type="button" id="loadSalesBtn" class="btn btn-primary">載入</button>
         <button type="button" id="newSalesBtn" class="btn btn-secondary">新增明細</button>
+        <button type="button" id="exportSalesExcelBtn" class="btn btn-secondary">匯出 Excel</button>
+        <button type="button" id="exportSalesCsvBtn" class="btn btn-outline">匯出 CSV</button>
+        <input type="file" id="importSalesFile" accept=".xlsx,.xlsm,.csv" hidden>
+        <button type="button" id="importSalesBtn" class="btn btn-outline">匯入 Excel／CSV</button>
         <a class="btn btn-outline" href="/weekly.html">前往週報工作台</a>
       </div>
+      <p class="hint">匯入支援系統匯出的 Excel／CSV；也會辨識含「戶別、客戶」欄位的未報、已報及退換戶明細。重複訂單或相同戶別＋客戶會自動略過。</p>
     </section>
 
     <section class="card" id="salesSummaryCard">
@@ -294,20 +299,34 @@
             <input type="number" step="0.0001" id="fCommUnclaimed" value="0" readonly>
           </div>
           <div class="form-group">
+            <label for="fCommissionBookedStatus">是否已入帳</label>
+            <select id="fCommissionBookedStatus">
+              <option value="否">否</option>
+              <option value="是">是（自動帶入本期可請97%金額）</option>
+            </select>
+          </div>
+          <div class="form-group">
             <label for="fCommBooked">已入帳金額(萬)</label>
             <input type="number" step="0.0001" id="fCommBooked" value="0">
           </div>
           <div class="form-group">
-            <label for="fNextMonthAmt">預計下月可請(萬)</label>
-            <input type="number" step="0.0001" id="fNextMonthAmt" value="0">
+            <label for="fCurrentMonthClaimable">預計可於本月請款</label>
+            <select id="fCurrentMonthClaimable">
+              <option value="否">否</option>
+              <option value="是">是（自動帶入戶／車／97%金額）</option>
+            </select>
           </div>
           <div class="form-group">
-            <label for="fNextMonthUnits">預計下月可請戶數</label>
+            <label for="fNextMonthUnits">預計本月可請戶數</label>
             <input type="number" step="0.5" id="fNextMonthUnits" value="0">
           </div>
           <div class="form-group">
-            <label for="fNextMonthParking">預計下月可請車位</label>
+            <label for="fNextMonthParking">預計本月可請車位</label>
             <input type="number" step="0.5" id="fNextMonthParking" value="0">
+          </div>
+          <div class="form-group">
+            <label for="fNextMonthAmt">預計本月可請金額(萬)</label>
+            <input type="number" step="0.0001" id="fNextMonthAmt" value="0">
           </div>
           <div class="form-group full-width">
             <label for="fMemo">備註</label>
@@ -330,10 +349,12 @@
             <tr>
               <th>類型</th><th>訂單編號</th><th>戶別</th><th>客戶</th><th>車位1/2</th>
               <th>合約總價</th><th>實際成交總價</th><th>底總</th><th>請佣銷售金額</th>
-              <th>可請／已請</th><th>狀態</th><th>業主報售日</th><th>銷售</th><th>操作</th>
+              <th>可請</th><th>已請</th><th>未請</th><th>狀態</th>
+              <th>業主報售日</th><th>銷售</th><th>操作</th>
             </tr>
           </thead>
           <tbody></tbody>
+          <tfoot id="salesTableTotal"></tfoot>
         </table>
       </div>
     </section>

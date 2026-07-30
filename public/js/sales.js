@@ -117,6 +117,24 @@ function calculateCommission() {
   statusEl.classList.toggle('comm-status-claimed', isClaimed);
   statusEl.classList.toggle('comm-status-open', !isClaimed);
   syncCommSalesAmountStyle();
+  syncBookedAmount();
+  syncCurrentMonthClaimable();
+}
+
+function syncBookedAmount() {
+  const select = document.getElementById('fCommissionBookedStatus');
+  if (!select || select.value !== '是') return;
+  document.getElementById('fCommBooked').value = roundMoney(numberValue('fCommPayable'));
+}
+
+function syncCurrentMonthClaimable() {
+  const select = document.getElementById('fCurrentMonthClaimable');
+  if (!select || select.value !== '是') return;
+  const parking = ['fParkingNo1', 'fParkingNo2']
+    .filter((id) => document.getElementById(id).value.trim()).length;
+  document.getElementById('fNextMonthUnits').value = numberValue('fUnits') || 1;
+  document.getElementById('fNextMonthParking').value = parking;
+  document.getElementById('fNextMonthAmt').value = roundMoney(numberValue('fCommPayable'));
 }
 
 async function loadSites() {
@@ -269,9 +287,16 @@ function fillForm(rec) {
   document.getElementById('fCommPeriod').value = rec?.commissionPeriod || '';
   document.getElementById('fCommClaimDate').value = rec?.commissionClaimDate || '';
   document.getElementById('fCommBooked').value = rec?.commissionBooked || 0;
+  document.getElementById('fCommissionBookedStatus').value =
+    Number(rec?.commissionBooked || 0) > 0 ? '是' : '否';
   document.getElementById('fNextMonthAmt').value = rec?.nextMonthClaimable || 0;
   document.getElementById('fNextMonthUnits').value = rec?.nextMonthUnits || 0;
   document.getElementById('fNextMonthParking').value = rec?.nextMonthParking || 0;
+  document.getElementById('fCurrentMonthClaimable').value = (
+    Number(rec?.nextMonthClaimable || 0)
+    || Number(rec?.nextMonthUnits || 0)
+    || Number(rec?.nextMonthParking || 0)
+  ) ? '是' : '否';
   document.getElementById('fMemo').value = rec?.memo || '';
 
   salesAmountManual = false;
@@ -323,7 +348,10 @@ function renderSummary(summary) {
     { label: '已請佣(萬)', value: c.claimedAmount ?? 0 },
     { label: '未請(萬)', value: c.unclaimedAmount ?? 0 },
     { label: '已入帳(萬)', value: c.bookedAmount ?? 0 },
-    { label: '下月可請(萬)', value: c.nextMonthAmount ?? 0 },
+    {
+      label: '本月預計可請(戶/車/萬)',
+      value: `${c.nextMonthUnits ?? 0}/${c.nextMonthParking ?? 0}/${c.nextMonthAmount ?? 0}`,
+    },
   ];
   document.getElementById('salesSummaryGrid').innerHTML = items.map((it) => `
     <div class="stat-card">
@@ -335,9 +363,11 @@ function renderSummary(summary) {
 
 function renderTable(rows) {
   const tbody = document.querySelector('#salesTable tbody');
+  const tfoot = document.getElementById('salesTableTotal');
   document.getElementById('salesTotalBadge').textContent = String(rows.length);
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="14" class="empty-row">尚無銷售明細，請按「新增明細」</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="16" class="empty-row">尚無銷售明細，請按「新增明細」</td></tr>';
+    tfoot.innerHTML = '';
     return;
   }
   tbody.innerHTML = rows.map((r) => {
@@ -353,7 +383,9 @@ function renderTable(rows) {
       <td>${r.actualTotalPrice ?? 0}</td>
       <td>${r.baseTotal ?? r.basePrice ?? 0}</td>
       <td${salesAmtClass}>${r.commissionSalesAmount ?? 0}</td>
-      <td>${r.commissionClaimable ?? 0}／${r.commissionClaimed ?? 0}</td>
+      <td>${r.commissionClaimable ?? 0}</td>
+      <td>${r.commissionClaimed ?? 0}</td>
+      <td>${r.commissionUnclaimed ?? 0}</td>
       <td>${escapeHtml(r.commissionStatus || '未請')}</td>
       <td class="cell-date">${escapeHtml(r.ownerSaleReportDate || r.reportDate || '')}</td>
       <td>${escapeHtml(sales)}</td>
@@ -363,6 +395,21 @@ function renderTable(rows) {
       </td>
     </tr>`;
   }).join('');
+  const sum = (key, fallbackKey) => roundMoney(rows.reduce(
+    (total, row) => total + Number(row[key] ?? row[fallbackKey] ?? 0),
+    0,
+  ));
+  tfoot.innerHTML = `<tr class="sales-total-row">
+    <th colspan="5">合計（${rows.length} 筆）</th>
+    <th>${sum('contractTotal', 'totalPrice')}</th>
+    <th>${sum('actualTotalPrice')}</th>
+    <th>${sum('baseTotal', 'basePrice')}</th>
+    <th>${sum('commissionSalesAmount')}</th>
+    <th>${sum('commissionClaimable')}</th>
+    <th>${sum('commissionClaimed')}</th>
+    <th>${sum('commissionUnclaimed')}</th>
+    <th colspan="4"></th>
+  </tr>`;
   tbody.querySelectorAll('[data-edit]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const rec = rows.find((x) => String(x.id) === btn.dataset.edit);
@@ -372,6 +419,61 @@ function renderTable(rows) {
   tbody.querySelectorAll('[data-del]').forEach((btn) => {
     btn.addEventListener('click', () => deleteDeal(Number(btn.dataset.del)));
   });
+}
+
+function exportSales(format) {
+  const siteId = document.getElementById('salesSite').value;
+  if (!siteId) {
+    showToast('請先選擇案場', 'error');
+    return;
+  }
+  const params = new URLSearchParams({
+    siteId,
+    recordType: document.getElementById('salesType').value,
+    q: document.getElementById('salesQ').value.trim(),
+  });
+  window.location.href = `/api/sales/export.${format}?${params}`;
+}
+
+async function importSales(file) {
+  const siteId = document.getElementById('salesSite').value;
+  if (!siteId) {
+    showToast('請先選擇案場', 'error');
+    return;
+  }
+  if (!file) return;
+  if (!confirm(`確定將「${file.name}」匯入目前案場？重複資料會自動略過。`)) return;
+
+  const btn = document.getElementById('importSalesBtn');
+  const originalText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '匯入中…';
+  const body = new FormData();
+  body.append('siteId', siteId);
+  body.append('file', file);
+  try {
+    const res = await fetch('/api/sales/import', { method: 'POST', body });
+    const json = await res.json();
+    if (!res.ok) {
+      showToast(json.error || '匯入失敗', 'error');
+      return;
+    }
+    const sheetText = (json.sheets || []).length
+      ? `（工作表：${json.sheets.join('、')}）`
+      : '';
+    const errorText = json.failed
+      ? `；失敗 ${json.failed} 筆：${(json.errors || []).slice(0, 3).map((e) => `${e.row} ${e.message}`).join('、')}`
+      : '';
+    showToast(`新增 ${json.imported} 筆，略過重複 ${json.skipped} 筆${sheetText}${errorText}`,
+      json.failed ? 'error' : 'success');
+    await loadSales();
+  } catch {
+    showToast('匯入失敗，請稍後再試', 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = originalText;
+    document.getElementById('importSalesFile').value = '';
+  }
 }
 
 async function loadSales() {
@@ -479,6 +581,18 @@ async function init() {
   await loadCommissionDefaults(document.getElementById('salesSite').value);
 
   document.getElementById('loadSalesBtn').addEventListener('click', loadSales);
+  document.getElementById('exportSalesExcelBtn').addEventListener('click', () => exportSales('xlsx'));
+  document.getElementById('exportSalesCsvBtn').addEventListener('click', () => exportSales('csv'));
+  document.getElementById('importSalesBtn').addEventListener('click', () => {
+    if (!document.getElementById('salesSite').value) {
+      showToast('請先選擇案場', 'error');
+      return;
+    }
+    document.getElementById('importSalesFile').click();
+  });
+  document.getElementById('importSalesFile').addEventListener('change', (event) => {
+    importSales(event.target.files?.[0]);
+  });
   document.getElementById('newSalesBtn').addEventListener('click', () => {
     if (!document.getElementById('salesSite').value) {
       showToast('請先選擇案場', 'error');
@@ -512,6 +626,25 @@ async function init() {
     'fCommRatePct', 'fCommPayablePct', 'fCommRetentionPct', 'fCommDeduction',
     'fCommPeriod', 'fCommClaimDate',
   ].forEach((id) => document.getElementById(id).addEventListener('input', calculateCommission));
+  document.getElementById('fCurrentMonthClaimable').addEventListener('change', () => {
+    if (document.getElementById('fCurrentMonthClaimable').value === '是') {
+      syncCurrentMonthClaimable();
+    } else {
+      document.getElementById('fNextMonthUnits').value = 0;
+      document.getElementById('fNextMonthParking').value = 0;
+      document.getElementById('fNextMonthAmt').value = 0;
+    }
+  });
+  ['fUnits', 'fParkingNo1', 'fParkingNo2'].forEach((id) => {
+    document.getElementById(id).addEventListener('input', syncCurrentMonthClaimable);
+  });
+  document.getElementById('fCommissionBookedStatus').addEventListener('change', () => {
+    if (document.getElementById('fCommissionBookedStatus').value === '是') {
+      syncBookedAmount();
+    } else {
+      document.getElementById('fCommBooked').value = 0;
+    }
+  });
 
   if (document.getElementById('salesSite').value) loadSales();
 }

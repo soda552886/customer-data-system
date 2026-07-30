@@ -143,13 +143,13 @@
 
       <section class="card">
         <h2>成交／簽約／買進／未報</h2>
-        <p class="hint">可手填，或按「從銷售總表帶入」自動帶入本週／累計彙總（請先在銷售總表登錄明細）。</p>
+        <p class="hint">可手填，或按「從銷售總表帶入」自動帶入。成交／簽約／買進金額＝實際房價＋車售；未報金額＝合約總價。</p>
         <div class="form-actions" style="margin-bottom:0.75rem;">
           <button type="button" id="fillFromSalesBtn" class="btn btn-secondary">從銷售總表帶入</button>
           <a class="btn btn-outline" href="/sales.html">開啟銷售總表</a>
           <span id="salesSuggestHint" class="hint"></span>
         </div>
-        <div class="search-grid" id="dealInputs"></div>
+        <div class="deal-input-list" id="dealInputs"></div>
       </section>
 
       <section class="card">
@@ -160,13 +160,18 @@
 
       <section class="card">
         <h2>請佣摘要（可從銷售總表帶入）</h2>
-        <div class="search-grid" id="commissionInputs"></div>
-        <div id="commissionDerived" class="stats-grid" style="margin-top:1rem;"></div>
+        <p class="hint">請先在銷售總表登錄請佣資料，再按下方按鈕更新本區數字。</p>
+        <div class="form-actions" style="margin-bottom:0.75rem;">
+          <button type="button" id="fillCommissionFromSalesBtn" class="btn btn-secondary">從銷售總表更新請佣</button>
+          <span id="commissionSuggestHint" class="hint"></span>
+        </div>
+        <div class="commission-grid" id="commissionInputs"></div>
+        <div id="commissionDerived" class="commission-grid" style="margin-top:1rem;"></div>
       </section>
 
       <section class="card">
         <h2>銷售成交比（客資自動）</h2>
-        <p class="hint">已離職人員請至「欄位選項 → 該案場 → 銷售人員（在職狀態）」取消勾選。取消後填寫表單不再出現，成交比累計併入「前期銷售」。共同經營（勾選或填銷售2）組數／成交各算 0.5。</p>
+        <p class="hint">接客、成交與退戶僅統計新客，不含回訪。已離職人員請至「欄位選項 → 該案場 → 銷售人員（在職狀態）」取消勾選；取消後累計併入「前期銷售」。共同經營（勾選或填銷售2）組數／成交各算 0.5。</p>
         <div class="table-wrap">
           <table class="data-table" id="conversionTable">
             <thead>

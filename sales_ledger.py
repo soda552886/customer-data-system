@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import json
+import io
 import sqlite3
 from datetime import datetime
 from typing import Optional
+
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.utils import get_column_letter
 
 
 RECORD_TYPES = {
@@ -654,7 +659,18 @@ def aggregate_for_weekly(conn: sqlite3.Connection, site_id: str, start, end) -> 
         rt = row['record_type'] or 'deal'
         units = _num(row['units'], 1)
         parking = _num(row['parking_count'])
-        amount = _num(row['total_price']) or _num(row['list_price'])
+        contract_amount = _num(row['total_price']) or _num(row['list_price'])
+        actual_amount = _num(row['actual_total_price']) if 'actual_total_price' in row.keys() else 0
+        if actual_amount <= 0:
+            actual_house = _num(row['actual_house_price']) if 'actual_house_price' in row.keys() else 0
+            parking_sale = _num(row['parking_sale_price']) if 'parking_sale_price' in row.keys() else 0
+            actual_amount = (
+                actual_house + parking_sale
+                if (actual_house or parking_sale)
+                else contract_amount
+            )
+        # 成交／簽約／買進金額＝實際房價＋車售；未報金額＝合約總價
+        amount = contract_amount if rt == 'unreported' else actual_amount
         base = _num(row['base_price'])
         report_d = row['owner_sale_report_date'] or row['report_date']
         sign_d = row['sign_date']
@@ -663,18 +679,18 @@ def aggregate_for_weekly(conn: sqlite3.Connection, site_id: str, start, end) -> 
 
         # 累計請佣／銷售（不含退換戶，或退換戶沖銷）
         if rt == 'refund':
-            sellable_amount -= amount
+            sellable_amount -= actual_amount
             sold_units -= units
             sold_parking -= parking
-            sold_amount -= amount
+            sold_amount -= actual_amount
             sold_base -= base
         elif rt in ('deal', 'signing', 'unreported', 'purchase'):
             # 已報／簽約／買進計入累積銷售；未報也常算入銷售金額但週報另列
             if rt != 'unreported':
-                sellable_amount += amount
+                sellable_amount += actual_amount
                 sold_units += units
                 sold_parking += parking
-                sold_amount += amount
+                sold_amount += actual_amount
                 sold_base += base
                 pt = str(row['product_type'] or '')
                 if '事務' in pt or '辦公' in pt:
@@ -724,9 +740,8 @@ def aggregate_for_weekly(conn: sqlite3.Connection, site_id: str, start, end) -> 
         elif rt == 'purchase' and _in_range(report_d or sign_d or deposit_d, start, end):
             add(purchases, units, parking, amount)
         elif rt == 'unreported':
-            # 未報：列在總表即計入未報小計（或本週新增的未報）
-            if _in_range(report_d or deposit_d or sign_d, start, end) or not (report_d or deposit_d or sign_d):
-                add(unreported, units, parking, amount)
+            # 未報是目前狀態，不受成交／簽約日期限制；改成已報後才移出。
+            add(unreported, units, parking, amount)
         elif rt == 'refund' and _in_range(report_d or sign_d, start, end):
             add(refunds, units, parking, amount)
 
@@ -744,6 +759,8 @@ def aggregate_for_weekly(conn: sqlite3.Connection, site_id: str, start, end) -> 
         'unreported': round_block(unreported),
         'refunds': round_block(refunds),
         'commission': {
+            'sellableUnits': round(max(sold_units, 0), 2),
+            'sellableParking': round(max(sold_parking, 0), 2),
             'sellableAmount': round(sellable_amount, 4),
             'claimableAmount': round(claimable_amount, 4),
             'payableAmount': round(payable_amount, 4),
@@ -771,3 +788,91 @@ def aggregate_for_weekly(conn: sqlite3.Connection, site_id: str, start, end) -> 
         'weekDeals': week_deal_rows[:50],
         'totalRecords': len(rows),
     }
+
+
+def build_sales_excel(site_name: str, rows: list[dict]) -> bytes:
+    """匯出目前篩選到的銷售明細，並於最後一列加總金額。"""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = '銷售總表'
+    headers = [
+        '類型', '訂單編號', '戶別', '客戶', '電話', '產品類型', '坪數',
+        '車位1', '車位2', '合約總價(萬)', '實際成交總價(萬)', '底總(萬)', '超價(萬)',
+        '請佣計價方式', '請佣銷售金額(萬)', '可請佣(萬)', '本期可請97%(萬)',
+        '保留款3%(萬)', '已請(萬)', '未請(萬)', '請佣狀態', '請佣期別', '請佣日期',
+        '已入帳金額(萬)', '預計本月可請戶數', '預計本月可請車位',
+        '預計本月可請金額(萬)', '業主報售日', '簽約日', '銷售人員1', '銷售人員2', '備註',
+    ]
+    ws.append([f'{site_name} 銷售總表'])
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(headers))
+    ws['A1'].font = Font(bold=True, size=16, color='1A4D7C')
+    ws.append(headers)
+    header_fill = PatternFill('solid', fgColor='1A4D7C')
+    for cell in ws[2]:
+        cell.font = Font(bold=True, color='FFFFFF')
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+
+    amount_keys = [
+        'contractTotal', 'actualTotalPrice', 'baseTotal', 'excessPrice',
+        'commissionSalesAmount', 'commissionClaimable', 'commissionPayable',
+        'commissionRetention', 'commissionClaimed', 'commissionUnclaimed',
+        'commissionBooked', 'nextMonthUnits', 'nextMonthParking', 'nextMonthClaimable',
+    ]
+    totals = {key: 0.0 for key in amount_keys}
+    for row in rows:
+        for key in amount_keys:
+            totals[key] += _num(row.get(key))
+        ws.append([
+            row.get('recordTypeLabel') or row.get('recordType'),
+            row.get('orderNo'), row.get('unitNo'), row.get('customerName'), row.get('phone'),
+            row.get('productType'), row.get('areaPing'), row.get('parkingNo1'), row.get('parkingNo2'),
+            row.get('contractTotal'), row.get('actualTotalPrice'), row.get('baseTotal'), row.get('excessPrice'),
+            '成交價' if row.get('commissionBaseMode') == 'deal' else '底價',
+            row.get('commissionSalesAmount'), row.get('commissionClaimable'), row.get('commissionPayable'),
+            row.get('commissionRetention'), row.get('commissionClaimed'), row.get('commissionUnclaimed'),
+            row.get('commissionStatus'), row.get('commissionPeriod'), row.get('commissionClaimDate'),
+            row.get('commissionBooked'), row.get('nextMonthUnits'), row.get('nextMonthParking'),
+            row.get('nextMonthClaimable'),
+            row.get('ownerSaleReportDate') or row.get('reportDate'), row.get('signDate'),
+            row.get('salesperson1'), row.get('salesperson2'), row.get('memo'),
+        ])
+
+    total_values = [''] * len(headers)
+    total_values[0] = '合計'
+    total_values[3] = f'{len(rows)} 筆'
+    total_columns = {
+        'contractTotal': 9, 'actualTotalPrice': 10, 'baseTotal': 11, 'excessPrice': 12,
+        'commissionSalesAmount': 14, 'commissionClaimable': 15, 'commissionPayable': 16,
+        'commissionRetention': 17, 'commissionClaimed': 18, 'commissionUnclaimed': 19,
+        'commissionBooked': 23, 'nextMonthUnits': 24, 'nextMonthParking': 25,
+        'nextMonthClaimable': 26,
+    }
+    for key, column_idx in total_columns.items():
+        total_values[column_idx] = round(totals[key], 4)
+    ws.append(total_values)
+    total_row = ws.max_row
+    for cell in ws[total_row]:
+        cell.font = Font(bold=True)
+        cell.fill = PatternFill('solid', fgColor='E8F1F8')
+
+    thin = Border(
+        left=Side(style='thin', color='D9E2EC'),
+        right=Side(style='thin', color='D9E2EC'),
+        top=Side(style='thin', color='D9E2EC'),
+        bottom=Side(style='thin', color='D9E2EC'),
+    )
+    for row in ws.iter_rows(min_row=2):
+        for cell in row:
+            cell.border = thin
+            cell.alignment = Alignment(vertical='center', wrap_text=True)
+    for col in range(1, len(headers) + 1):
+        ws.column_dimensions[get_column_letter(col)].width = 15
+    ws.column_dimensions['D'].width = 18
+    ws.column_dimensions[get_column_letter(len(headers))].width = 26
+    ws.freeze_panes = 'A3'
+    ws.auto_filter.ref = f'A2:{get_column_letter(len(headers))}{max(ws.max_row - 1, 2)}'
+
+    output = io.BytesIO()
+    wb.save(output)
+    return output.getvalue()

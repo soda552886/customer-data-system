@@ -9,6 +9,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from flask import Flask, jsonify, request, send_from_directory, Response, session, redirect
+from openpyxl import load_workbook
 
 from auth import (
     PROTECTED_PAGES, ROLES, get_allowed_site_ids, get_current_user,
@@ -25,9 +26,9 @@ from weekly_reports import (
     week_bounds,
 )
 from sales_ledger import (
-    RECORD_TYPES as SALES_RECORD_TYPES, aggregate_for_weekly, commission_defaults_for_site,
-    create_sales_deal, delete_sales_deal, get_sales_deal, init_sales_tables, list_sales_deals,
-    update_sales_deal,
+    RECORD_TYPES as SALES_RECORD_TYPES, aggregate_for_weekly, build_sales_excel,
+    commission_defaults_for_site, create_sales_deal, delete_sales_deal, get_sales_deal,
+    init_sales_tables, list_sales_deals, update_sales_deal,
 )
 from field_options import (
     apply_site_field_options, apply_site_hidden_fields, build_site_field_config,
@@ -1519,6 +1520,409 @@ def api_list_sales_deals():
         'activeStaff': staff,
         'recordTypes': [{'id': k, 'label': v} for k, v in SALES_RECORD_TYPES.items()],
     })
+
+
+def _sales_export_rows(conn, site_id):
+    record_type = (request.args.get('recordType') or '').strip() or None
+    q = (request.args.get('q') or '').strip()
+    rows, _ = list_sales_deals(
+        conn, site_id, record_type=record_type, q=q, limit=1000, offset=0,
+    )
+    return rows
+
+
+def _sales_import_header(value):
+    return re.sub(r'[\s\u3000（）()]', '', str(value or '')).lower()
+
+
+SALES_IMPORT_ALIASES = {
+    'recordType': ['類型', '狀態', '銷售階段'],
+    'orderNo': ['訂單編號', '訂單', 'no', '編號'],
+    'unitNo': ['戶別', '戶號'],
+    'customerName': ['客戶', '客戶姓名', '姓名'],
+    'phone': ['電話', '手機'],
+    'productType': ['產品類型', '產品', '用途'],
+    'areaPing': ['坪數', '建物坪數'],
+    'parkingNo1': ['車位1', '車位號碼1'],
+    'parkingNo2': ['車位2', '車位號碼2'],
+    'parkingNos': ['車位號碼', '車位'],
+    'houseSalePrice': ['房售價', '房屋成交價', '房售價未含其他費用'],
+    'parkingSalePrice': ['車售價', '車位售價'],
+    'totalPrice': ['合約總價萬', '合約總價', '房車總價未含其他費用', '房車總價'],
+    'actualTotalPrice': ['實際成交總價萬', '實際成交總價'],
+    'houseBasePrice': ['房底價', '房底'],
+    'parkingBasePrice': ['車底價', '車底'],
+    'basePrice': ['底總萬', '底總', '總底價'],
+    'surcharge': ['附加費'],
+    'applianceGift': ['家電禮券'],
+    'pickupVoucher': ['提貨券'],
+    'decoration': ['裝潢'],
+    'companyLoanInterest': ['公司貸利息'],
+    'depositDate': ['訂金日期', '下訂日', '銷售日期', '日期'],
+    'supplementDate': ['補足日', '補足日期'],
+    'signDate': ['簽約日', '簽約日期'],
+    'ownerSaleReportDate': ['業主報售日', '報售日'],
+    'ownerSignReportDate': ['業主報簽日', '報簽日'],
+    'salesperson1': ['銷售人員1', '銷售1', '銷售人員', '銷售'],
+    'salesperson2': ['銷售人員2', '銷售2'],
+    'commissionBaseMode': ['請佣計價方式', '請佣方式'],
+    'commissionSalesAmount': ['請佣銷售金額萬', '請佣銷售金額'],
+    'commissionClaimable': ['可請佣萬', '可請佣'],
+    'commissionPayable': ['本期可請97%萬', '本期可請97%'],
+    'commissionRetention': ['保留款3%萬', '保留款3%'],
+    'commissionClaimed': ['已請萬', '已請佣金額萬', '已請佣金額'],
+    'commissionUnclaimed': ['未請萬', '未請金額萬', '未請金額'],
+    'commissionStatus': ['請佣狀態'],
+    'commissionPeriod': ['請佣期別'],
+    'commissionClaimDate': ['請佣日期'],
+    'commissionBooked': ['已入帳金額萬', '已入帳金額'],
+    'nextMonthUnits': ['預計本月可請戶數', '預計可於本月請款戶數'],
+    'nextMonthParking': ['預計本月可請車位', '預計可於本月請款車位'],
+    'nextMonthClaimable': ['預計本月可請金額萬', '預計本月可請金額'],
+    'memo': ['備註'],
+}
+
+
+def _sales_import_value(row, normalized_headers, key):
+    for alias in SALES_IMPORT_ALIASES.get(key, []):
+        idx = normalized_headers.get(_sales_import_header(alias))
+        if idx is not None and idx < len(row):
+            value = row[idx]
+            if value not in (None, ''):
+                if isinstance(value, datetime):
+                    return value.date().isoformat()
+                return value
+    return None
+
+
+def _sales_import_num(value):
+    if value in (None, ''):
+        return 0.0
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip().replace(',', '').replace('，', '')
+    text = re.sub(r'[^0-9.\-]', '', text)
+    return float(text) if text not in ('', '-', '.', '-.') else 0.0
+
+
+def _sales_record_type(value, sheet_name=''):
+    text = str(value or sheet_name or '').strip()
+    if '未報' in text:
+        return 'unreported'
+    if '退' in text or '換戶' in text:
+        return 'refund'
+    if '簽約' in text:
+        return 'signing'
+    if '買進' in text:
+        return 'purchase'
+    if text in SALES_RECORD_TYPES:
+        return text
+    return 'deal'
+
+
+def _sales_import_payload(row, normalized_headers, sheet_name=''):
+    get = lambda key: _sales_import_value(row, normalized_headers, key)
+    unit_no = str(get('unitNo') or '').strip()
+    customer_name = str(get('customerName') or '').strip()
+    if not unit_no and not customer_name:
+        return None
+    if unit_no == '合計' or customer_name.endswith('筆'):
+        return None
+
+    payload = {
+        key: get(key) for key in SALES_IMPORT_ALIASES
+        if key not in {
+            'recordType', 'parkingNos', 'actualTotalPrice', 'commissionClaimable',
+            'commissionPayable', 'commissionRetention', 'commissionClaimed',
+            'commissionUnclaimed', 'commissionStatus',
+        }
+    }
+    payload['recordType'] = _sales_record_type(get('recordType'), sheet_name)
+    payload['unitNo'] = unit_no
+    payload['customerName'] = customer_name
+
+    parking_nos = str(get('parkingNos') or '').strip()
+    if parking_nos and not payload.get('parkingNo1'):
+        parts = [x.strip() for x in re.split(r'[、,，/／;；]+', parking_nos) if x.strip()]
+        payload['parkingNo1'] = parts[0] if parts else ''
+        payload['parkingNo2'] = parts[1] if len(parts) > 1 else ''
+
+    contract = _sales_import_num(get('totalPrice'))
+    actual = _sales_import_num(get('actualTotalPrice'))
+    if not payload.get('houseSalePrice') and contract:
+        payload['totalPrice'] = contract
+        # 系統會由合約總價扣除附加項目回算實際成交總價。
+        if actual and contract > actual and not any(
+            _sales_import_num(payload.get(k))
+            for k in ('surcharge', 'applianceGift', 'pickupVoucher', 'decoration', 'companyLoanInterest')
+        ):
+            payload['surcharge'] = contract - actual
+    if not payload.get('houseBasePrice') and get('basePrice'):
+        payload['basePrice'] = get('basePrice')
+
+    mode = str(payload.get('commissionBaseMode') or '').strip()
+    payload['commissionBaseMode'] = 'deal' if '成交' in mode or mode == 'deal' else 'base'
+    sales_amount = _sales_import_num(payload.get('commissionSalesAmount'))
+    claimable = _sales_import_num(get('commissionClaimable'))
+    if sales_amount and claimable:
+        payload['commissionDeduction'] = max(sales_amount * 0.0485 - claimable, 0)
+    for key in (
+        'areaPing', 'houseSalePrice', 'parkingSalePrice', 'totalPrice',
+        'houseBasePrice', 'parkingBasePrice', 'basePrice',
+        'surcharge', 'applianceGift', 'pickupVoucher', 'decoration',
+        'companyLoanInterest', 'commissionSalesAmount', 'commissionBooked',
+        'nextMonthUnits', 'nextMonthParking', 'nextMonthClaimable',
+    ):
+        if payload.get(key) not in (None, ''):
+            payload[key] = _sales_import_num(payload[key])
+    return payload
+
+
+def _sales_import_tables(raw: bytes, filename: str):
+    ext = Path(filename).suffix.lower()
+    if ext == '.csv':
+        text = None
+        for encoding in ('utf-8-sig', 'utf-8', 'big5', 'cp950'):
+            try:
+                text = raw.decode(encoding)
+                break
+            except UnicodeDecodeError:
+                continue
+        if text is None:
+            raise ValueError('無法讀取 CSV 編碼')
+        rows = list(csv.reader(io.StringIO(text)))
+        return [('CSV', rows)]
+    if ext not in ('.xlsx', '.xlsm'):
+        raise ValueError('僅支援 .xlsx、.xlsm 或 .csv 檔案')
+    wb = load_workbook(io.BytesIO(raw), data_only=True, read_only=True)
+    return [
+        (ws.title, [list(row) for row in ws.iter_rows(values_only=True)])
+        for ws in wb.worksheets
+    ]
+
+
+def _find_sales_header(rows):
+    for idx, row in enumerate(rows[:60]):
+        normalized = {
+            _sales_import_header(value): col
+            for col, value in enumerate(row)
+            if value not in (None, '')
+        }
+        keys = set(normalized)
+        has_unit = any(_sales_import_header(x) in keys for x in SALES_IMPORT_ALIASES['unitNo'])
+        has_name = any(_sales_import_header(x) in keys for x in SALES_IMPORT_ALIASES['customerName'])
+        if has_unit and has_name:
+            return idx, normalized
+    return None, None
+
+
+@app.route('/api/sales/export.xlsx')
+def api_export_sales_excel():
+    conn, user, err = auth_guard('manage_weekly_reports')
+    if err:
+        return err
+    site_id = (request.args.get('siteId') or '').strip()
+    denied = ensure_site_access(user, site_id) if site_id else None
+    site = get_site_by_id(site_id) if site_id else None
+    if not site_id or not site:
+        conn.close()
+        return jsonify({'error': '請選擇有效案場'}), 400
+    if denied:
+        conn.close()
+        return denied
+    rows = _sales_export_rows(conn, site_id)
+    conn.close()
+    content = build_sales_excel(site['name'], rows)
+    utf8_name = quote(f'{site["name"]}_銷售總表.xlsx')
+    return Response(
+        content,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        headers={
+            'Content-Disposition': (
+                f"attachment; filename=\"sales_ledger.xlsx\"; filename*=UTF-8''{utf8_name}"
+            ),
+        },
+    )
+
+
+@app.route('/api/sales/export.csv')
+def api_export_sales_csv():
+    conn, user, err = auth_guard('manage_weekly_reports')
+    if err:
+        return err
+    site_id = (request.args.get('siteId') or '').strip()
+    denied = ensure_site_access(user, site_id) if site_id else None
+    site = get_site_by_id(site_id) if site_id else None
+    if not site_id or not site:
+        conn.close()
+        return jsonify({'error': '請選擇有效案場'}), 400
+    if denied:
+        conn.close()
+        return denied
+    rows = _sales_export_rows(conn, site_id)
+    conn.close()
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        '類型', '訂單編號', '戶別', '客戶', '電話', '產品類型', '車位1', '車位2',
+        '合約總價(萬)', '實際成交總價(萬)', '底總(萬)', '請佣計價方式',
+        '請佣銷售金額(萬)', '可請佣(萬)', '本期可請97%(萬)', '保留款3%(萬)',
+        '已請(萬)', '未請(萬)', '狀態', '請佣期別', '請佣日期', '已入帳金額(萬)',
+        '預計本月可請戶數', '預計本月可請車位', '預計本月可請金額(萬)',
+        '業主報售日', '簽約日',
+        '銷售人員1', '銷售人員2', '備註',
+    ])
+    total_fields = [
+        'contractTotal', 'actualTotalPrice', 'baseTotal', 'commissionSalesAmount',
+        'commissionClaimable', 'commissionPayable', 'commissionRetention',
+        'commissionClaimed', 'commissionUnclaimed', 'commissionBooked',
+        'nextMonthUnits', 'nextMonthParking', 'nextMonthClaimable',
+    ]
+    totals = {key: 0.0 for key in total_fields}
+    for row in rows:
+        for key in total_fields:
+            totals[key] += float(row.get(key) or 0)
+        writer.writerow([
+            row.get('recordTypeLabel') or row.get('recordType'), row.get('orderNo'),
+            row.get('unitNo'), row.get('customerName'), row.get('phone'), row.get('productType'),
+            row.get('parkingNo1'), row.get('parkingNo2'), row.get('contractTotal'),
+            row.get('actualTotalPrice'), row.get('baseTotal'),
+            '成交價' if row.get('commissionBaseMode') == 'deal' else '底價',
+            row.get('commissionSalesAmount'), row.get('commissionClaimable'),
+            row.get('commissionPayable'), row.get('commissionRetention'),
+            row.get('commissionClaimed'), row.get('commissionUnclaimed'),
+            row.get('commissionStatus'), row.get('commissionPeriod'), row.get('commissionClaimDate'),
+            row.get('commissionBooked'), row.get('nextMonthUnits'), row.get('nextMonthParking'),
+            row.get('nextMonthClaimable'),
+            row.get('ownerSaleReportDate') or row.get('reportDate'), row.get('signDate'),
+            row.get('salesperson1'), row.get('salesperson2'), row.get('memo'),
+        ])
+    writer.writerow([
+        '合計', '', '', f'{len(rows)} 筆', '', '', '', '',
+        round(totals['contractTotal'], 4), round(totals['actualTotalPrice'], 4),
+        round(totals['baseTotal'], 4), '', round(totals['commissionSalesAmount'], 4),
+        round(totals['commissionClaimable'], 4), round(totals['commissionPayable'], 4),
+        round(totals['commissionRetention'], 4), round(totals['commissionClaimed'], 4),
+        round(totals['commissionUnclaimed'], 4),
+        '', '', '', round(totals['commissionBooked'], 4),
+        round(totals['nextMonthUnits'], 4), round(totals['nextMonthParking'], 4),
+        round(totals['nextMonthClaimable'], 4),
+        '', '', '', '', '',
+    ])
+    utf8_name = quote(f'{site["name"]}_銷售總表.csv')
+    return Response(
+        '\ufeff' + output.getvalue(),
+        mimetype='text/csv; charset=utf-8',
+        headers={
+            'Content-Disposition': (
+                f"attachment; filename=\"sales_ledger.csv\"; filename*=UTF-8''{utf8_name}"
+            ),
+        },
+    )
+
+
+@app.route('/api/sales/import', methods=['POST'])
+def api_import_sales():
+    conn, user, err = auth_guard('manage_weekly_reports')
+    if err:
+        return err
+    site_id = (request.form.get('siteId') or '').strip()
+    if not site_id or not get_site_by_id(site_id):
+        conn.close()
+        return jsonify({'error': '請選擇有效案場'}), 400
+    denied = ensure_site_access(user, site_id)
+    if denied:
+        conn.close()
+        return denied
+    file = request.files.get('file')
+    if not file or not file.filename:
+        conn.close()
+        return jsonify({'error': '請選擇要匯入的 Excel 或 CSV 檔案'}), 400
+
+    imported = 0
+    skipped = 0
+    errors = []
+    recognized_sheets = []
+    try:
+        tables = _sales_import_tables(file.read(), file.filename)
+        for sheet_name, rows in tables:
+            header_idx, headers = _find_sales_header(rows)
+            if header_idx is None:
+                continue
+            normalized_type_header = _sales_import_header('類型') in headers
+            relevant_sheet = any(
+                name in sheet_name for name in ('銷售總表', '未報明細', '已報明細', '退換戶明細')
+            )
+            if not normalized_type_header and not relevant_sheet:
+                continue
+            recognized_sheets.append(sheet_name)
+            for row_no, row in enumerate(rows[header_idx + 1:], start=header_idx + 2):
+                try:
+                    payload = _sales_import_payload(row, headers, sheet_name)
+                    if not payload:
+                        continue
+                    order_no = str(payload.get('orderNo') or '').strip()
+                    unit_no = str(payload.get('unitNo') or '').strip()
+                    customer_name = str(payload.get('customerName') or '').strip()
+                    if order_no:
+                        duplicate = conn.execute(
+                            'SELECT id FROM sales_deals WHERE site_id=? AND order_no=?',
+                            (site_id, order_no),
+                        ).fetchone()
+                    else:
+                        duplicate = conn.execute(
+                            '''
+                            SELECT id FROM sales_deals
+                            WHERE site_id=? AND unit_no=? AND customer_name=?
+                            ''',
+                            (site_id, unit_no, customer_name),
+                        ).fetchone()
+                    if duplicate:
+                        skipped += 1
+                        continue
+                    create_sales_deal(
+                        conn, site_id, payload,
+                        user_id=user.get('id') if user else None,
+                    )
+                    imported += 1
+                except Exception as exc:
+                    errors.append({
+                        'row': f'{sheet_name}!{row_no}',
+                        'message': str(exc),
+                    })
+        if not recognized_sheets:
+            conn.rollback()
+            return jsonify({
+                'error': '找不到可匯入的銷售明細表頭；請使用系統匯出的檔案，或包含戶別、客戶欄位的銷售明細',
+            }), 400
+        log_operation(
+            conn, user, 'sales_import',
+            f'匯入銷售總表：新增 {imported} 筆、略過重複 {skipped} 筆、失敗 {len(errors)} 筆',
+            entity_type='sales_deal', site_id=site_id,
+            site_name=(get_site_by_id(site_id) or {}).get('name'),
+            detail={
+                'filename': file.filename, 'imported': imported,
+                'skipped': skipped, 'failed': len(errors),
+                'sheets': recognized_sheets,
+            },
+        )
+        conn.commit()
+        return jsonify({
+            'success': True,
+            'imported': imported,
+            'skipped': skipped,
+            'failed': len(errors),
+            'errors': errors[:50],
+            'sheets': recognized_sheets,
+        })
+    except ValueError as exc:
+        conn.rollback()
+        return jsonify({'error': str(exc)}), 400
+    except Exception as exc:
+        conn.rollback()
+        return jsonify({'error': f'匯入失敗：{exc}'}), 500
+    finally:
+        conn.close()
 
 
 @app.route('/api/sales/deals', methods=['POST'])

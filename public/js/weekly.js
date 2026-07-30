@@ -115,7 +115,8 @@ function collectManualFromForm(baseManual) {
 
   manual.commission = manual.commission || {};
   [
-    'sellableAmount', 'claimableAmount', 'claimedAmount', 'bookedAmount',
+    'sellableUnits', 'sellableParking', 'sellableAmount',
+    'claimableAmount', 'claimedAmount', 'bookedAmount',
     'claimableUnits', 'claimableParking', 'claimedUnits', 'claimedParking',
     'nextMonthUnits', 'nextMonthParking', 'nextMonthAmount',
   ].forEach((f) => {
@@ -162,11 +163,7 @@ function calcCommissionDerived(c) {
   const n = (k) => Number(c[k]) || 0;
   const round4 = (x) => Math.round(x * 10000) / 10000;
   return {
-    unclaimedAmount: round4(
-      c.unclaimedAmount != null
-        ? n('unclaimedAmount')
-        : Math.max(n('claimableAmount') - n('claimedAmount'), 0),
-    ),
+    unclaimedAmount: round4(Math.max(n('claimableAmount') - n('claimedAmount'), 0)),
     unclaimedUnits: Math.max(n('claimableUnits') - n('claimedUnits'), 0),
     unclaimedParking: Math.max(n('claimableParking') - n('claimedParking'), 0),
     payableAmount: round4(n('payableAmount')),
@@ -236,20 +233,23 @@ function renderDaily(auto, manual) {
 
 function renderDealInputs(manual) {
   const blocks = [
-    { key: 'deals', title: '本週成交' },
-    { key: 'signings', title: '本週簽約' },
-    { key: 'purchases', title: '本週買進' },
-    { key: 'unreported', title: '未報' },
+    { key: 'deals', title: '成交', amountHint: '實際房價＋車售' },
+    { key: 'signings', title: '簽約', amountHint: '實際房價＋車售' },
+    { key: 'purchases', title: '買進', amountHint: '實際房價＋車售' },
+    { key: 'unreported', title: '未報', amountHint: '合約總價' },
   ];
   document.getElementById('dealInputs').innerHTML = blocks.map((b) => {
     const v = manual[b.key] || {};
     return `
-      <div class="form-group"><label>${b.title} 戶</label>
-        <input type="number" min="0" data-block="${b.key}" data-field="units" value="${Number(v.units) || 0}"></div>
-      <div class="form-group"><label>${b.title} 車</label>
-        <input type="number" min="0" data-block="${b.key}" data-field="parking" value="${Number(v.parking) || 0}"></div>
-      <div class="form-group"><label>${b.title} 金額(萬)</label>
-        <input type="number" min="0" step="0.01" data-block="${b.key}" data-field="amount" value="${Number(v.amount) || 0}"></div>
+      <div class="deal-input-row">
+        <div class="deal-input-label">${escapeHtml(b.title)}</div>
+        <div class="form-group"><label>戶</label>
+          <input type="number" min="0" data-block="${b.key}" data-field="units" value="${Number(v.units) || 0}"></div>
+        <div class="form-group"><label>車</label>
+          <input type="number" min="0" data-block="${b.key}" data-field="parking" value="${Number(v.parking) || 0}"></div>
+        <div class="form-group"><label>金額(萬) <span class="field-hint-inline">${escapeHtml(b.amountHint)}</span></label>
+          <input type="number" min="0" step="0.01" data-block="${b.key}" data-field="amount" value="${Number(v.amount) || 0}"></div>
+      </div>
     `;
   }).join('');
 }
@@ -262,7 +262,7 @@ function renderInventory(manual, derived) {
     { key: 'totalParking', label: '總車位' },
     { key: 'soldParking', label: '已售車位' },
     { key: 'totalAmount', label: '總底價金額(萬)' },
-    { key: 'soldAmount', label: '已售表價(萬)' },
+    { key: 'soldAmount', label: '已售成交價(萬)' },
     { key: 'soldBasePrice', label: '已售底價(萬)' },
     { key: 'residentialTotal', label: '住宅總戶' },
     { key: 'residentialSold', label: '住宅已售' },
@@ -279,7 +279,7 @@ function renderInventory(manual, derived) {
   renderDerivedCards('inventoryDerived', [
     { label: '戶數去化率', value: `${d.unitRate}%` },
     { label: '車位去化率', value: `${d.parkingRate}%` },
-    { label: '表價去化率', value: `${d.amountRate}%` },
+    { label: '成交價去化率', value: `${d.amountRate}%` },
     { label: '底價去化率', value: `${d.basePriceRate}%` },
     { label: '未售底價(萬)', value: `${d.remainBasePrice}` },
     { label: '剩餘戶／車', value: `${d.remainUnits} / ${d.remainParking}` },
@@ -292,17 +292,19 @@ function renderInventory(manual, derived) {
 function renderCommission(manual, derived) {
   const c = manual.commission || {};
   const fields = [
+    { key: 'sellableUnits', label: '累積銷售戶數' },
+    { key: 'sellableParking', label: '累積銷售車位' },
     { key: 'sellableAmount', label: '累積銷售金額(萬)' },
-    { key: 'claimableAmount', label: '可請佣金額(萬)', step: '0.0001' },
-    { key: 'claimedAmount', label: '已請佣金額(萬)', step: '0.0001' },
-    { key: 'bookedAmount', label: '已入帳金額(萬)', step: '0.0001' },
     { key: 'claimableUnits', label: '可請佣戶數' },
-    { key: 'claimedUnits', label: '已請佣戶數' },
     { key: 'claimableParking', label: '可請佣車位' },
+    { key: 'claimableAmount', label: '可請佣金額(萬)', step: '0.0001' },
+    { key: 'claimedUnits', label: '已請佣戶數' },
     { key: 'claimedParking', label: '已請佣車位' },
-    { key: 'nextMonthUnits', label: '預計下月可請戶數' },
-    { key: 'nextMonthParking', label: '預計下月可請車位' },
-    { key: 'nextMonthAmount', label: '預計下月可請金額(萬)', step: '0.0001' },
+    { key: 'claimedAmount', label: '已請佣金額(萬)', step: '0.0001' },
+    { key: 'nextMonthUnits', label: '預計本月可請戶數' },
+    { key: 'nextMonthParking', label: '預計本月可請車位' },
+    { key: 'nextMonthAmount', label: '預計本月可請金額(萬)', step: '0.0001' },
+    { key: 'bookedAmount', label: '已入帳金額(萬)', step: '0.0001' },
   ];
   document.getElementById('commissionInputs').innerHTML = fields.map((f) => `
     <div class="form-group">
@@ -318,7 +320,7 @@ function renderCommission(manual, derived) {
     { label: '未請佣戶數', value: `${d.unclaimedUnits}` },
     { label: '未請佣車位', value: `${d.unclaimedParking}` },
     { label: '已入帳(萬)', value: `${d.bookedAmount}` },
-    { label: '下月可請(戶/車/萬)', value: `${d.nextMonthUnits} / ${d.nextMonthParking} / ${d.nextMonthAmount}` },
+    { label: '本月預計可請(戶/車/萬)', value: `${d.nextMonthUnits} / ${d.nextMonthParking} / ${d.nextMonthAmount}` },
   ]);
   document.querySelectorAll('[data-block="commission"]').forEach((el) => {
     el.addEventListener('input', refreshDerivedFromForm);
@@ -332,7 +334,7 @@ function refreshDerivedFromForm() {
   renderDerivedCards('inventoryDerived', [
     { label: '戶數去化率', value: `${inv.unitRate}%` },
     { label: '車位去化率', value: `${inv.parkingRate}%` },
-    { label: '表價去化率', value: `${inv.amountRate}%` },
+    { label: '成交價去化率', value: `${inv.amountRate}%` },
     { label: '底價去化率', value: `${inv.basePriceRate}%` },
     { label: '未售底價(萬)', value: `${inv.remainBasePrice}` },
     { label: '剩餘戶／車', value: `${inv.remainUnits} / ${inv.remainParking}` },
@@ -345,7 +347,7 @@ function refreshDerivedFromForm() {
     { label: '未請佣戶數', value: `${com.unclaimedUnits}` },
     { label: '未請佣車位', value: `${com.unclaimedParking}` },
     { label: '已入帳(萬)', value: `${com.bookedAmount}` },
-    { label: '下月可請(戶/車/萬)', value: `${com.nextMonthUnits} / ${com.nextMonthParking} / ${com.nextMonthAmount}` },
+    { label: '本月預計可請(戶/車/萬)', value: `${com.nextMonthUnits} / ${com.nextMonthParking} / ${com.nextMonthAmount}` },
   ]);
 }
 
@@ -550,7 +552,45 @@ function applySuggestedFromSales() {
   renderCommission(manual, null);
   document.getElementById('salesSuggestHint').textContent =
     `已帶入（銷售總表 ${s.totalRecords} 筆；本週成交 ${s.weekDealCount || 0} 筆）`;
+  document.getElementById('commissionSuggestHint').textContent =
+    `已帶入銷售總表 ${s.totalRecords} 筆請佣資料`;
   showToast('已從銷售總表帶入成交／請佣／去化數字');
+}
+
+async function applyCommissionFromSales() {
+  if (!current) {
+    showToast('請先載入本週資料', 'error');
+    return;
+  }
+  let s;
+  try {
+    const params = new URLSearchParams({
+      siteId: document.getElementById('weekSite').value,
+      weekStart: document.getElementById('weekStart').value,
+    });
+    const res = await fetch(`/api/sales/summary?${params}`);
+    const json = await res.json();
+    if (!res.ok) {
+      showToast(json.error || '讀取銷售總表失敗', 'error');
+      return;
+    }
+    s = json.summary;
+    current.suggested = s;
+  } catch {
+    showToast('讀取銷售總表失敗', 'error');
+    return;
+  }
+  if (!s || !(s.totalRecords > 0)) {
+    showToast('銷售總表尚無資料，請先至銷售總表登錄', 'error');
+    return;
+  }
+  const manual = collectManualFromForm(current.manual);
+  manual.commission = { ...manual.commission, ...(s.commission || {}) };
+  current.manual = manual;
+  renderCommission(manual, null);
+  document.getElementById('commissionSuggestHint').textContent =
+    `已帶入銷售總表 ${s.totalRecords} 筆請佣資料`;
+  showToast('請佣摘要已從銷售總表更新');
 }
 
 function renderAll(payload) {
@@ -585,6 +625,12 @@ function renderAll(payload) {
   const hint = document.getElementById('salesSuggestHint');
   if (hint) {
     hint.textContent = suggested.totalRecords
+      ? `銷售總表 ${suggested.totalRecords} 筆可帶入`
+      : '銷售總表尚無資料';
+  }
+  const commissionHint = document.getElementById('commissionSuggestHint');
+  if (commissionHint) {
+    commissionHint.textContent = suggested.totalRecords
       ? `銷售總表 ${suggested.totalRecords} 筆可帶入`
       : '銷售總表尚無資料';
   }
@@ -705,6 +751,7 @@ async function init() {
   });
   document.getElementById('applyVisitorsBtn').addEventListener('click', applyVisitorSelection);
   document.getElementById('fillFromSalesBtn').addEventListener('click', applySuggestedFromSales);
+  document.getElementById('fillCommissionFromSalesBtn').addEventListener('click', applyCommissionFromSales);
   document.getElementById('dimFilterMode')?.addEventListener('change', renderAllDimTables);
   document.getElementById('exportWeekBtn').addEventListener('click', async () => {
     if (!current) {

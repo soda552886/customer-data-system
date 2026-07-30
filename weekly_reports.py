@@ -91,8 +91,13 @@ def empty_manual_payload(start, end, week_number=None):
         'purchases': {'units': 0, 'parking': 0, 'amount': 0},
         'unreported': {'units': 0, 'parking': 0, 'amount': 0},
         'commission': {
+            'sellableUnits': 0,
+            'sellableParking': 0,
             'sellableAmount': 0,
             'claimableAmount': 0,
+            'payableAmount': 0,
+            'retentionAmount': 0,
+            'unclaimedAmount': 0,
             'claimedAmount': 0,
             'bookedAmount': 0,
             'claimableUnits': 0,
@@ -413,8 +418,8 @@ def build_auto_stats(
         if in_week:
             visitors_all_week.append(item)
 
-        # —— 銷售成交比（含共同經營拆分、前期銷售歸戶）——
-        if d:
+        # —— 銷售成交比（僅新客；含共同經營拆分、前期銷售歸戶）——
+        if d and is_new:
             for name in recipients:
                 bucket = _sales_bucket(name, active_set)
                 w = weight if len(recipients) == 1 else 0.5
@@ -643,6 +648,8 @@ def commission_summary(manual: dict) -> dict:
         'unclaimedAmount': round(max(claimable_amt - claimed_amt, 0), 4),
         'unclaimedUnits': max(claimable_u - claimed_u, 0),
         'unclaimedParking': max(claimable_p - claimed_p, 0),
+        'payableAmount': round(_num(c.get('payableAmount')), 4),
+        'retentionAmount': round(_num(c.get('retentionAmount')), 4),
         'bookedAmount': round(_num(c.get('bookedAmount')), 4),
         'nextMonthUnits': _num(c.get('nextMonthUnits')),
         'nextMonthParking': _num(c.get('nextMonthParking')),
@@ -819,7 +826,7 @@ def build_weekly_excel(site_name: str, start, end, week_number, manual: dict, au
         ('去化率(戶/底價%)', f"{inv['unitRate']}% / {inv['basePriceRate']}%",
          '未售底價(萬)', inv['remainBasePrice']),
         ('可請佣-已請(萬)', com['unclaimedAmount'], '已入帳(萬)', com['bookedAmount']),
-        ('預計下月可請(戶/車/萬)',
+        ('預計本月可請(戶/車/萬)',
          f"{com['nextMonthUnits']}/{com['nextMonthParking']}/{com['nextMonthAmount']}",
          '剩餘戶／車', f"{inv['remainUnits']} / {inv['remainParking']}"),
     ]
@@ -894,7 +901,7 @@ def build_weekly_excel(site_name: str, start, end, week_number, manual: dict, au
     for label, key in [
         ('總戶數', 'totalUnits'), ('已售戶數', 'soldUnits'),
         ('總車位', 'totalParking'), ('已售車位', 'soldParking'),
-        ('總金額／總底價(萬)', 'totalAmount'), ('已售表價(萬)', 'soldAmount'),
+        ('總金額／總底價(萬)', 'totalAmount'), ('已售成交價(萬)', 'soldAmount'),
         ('已售底價(萬)', 'soldBasePrice'),
         ('住宅總戶', 'residentialTotal'), ('住宅已售', 'residentialSold'),
         ('事務所總戶', 'officeTotal'), ('事務所已售', 'officeSold'),
@@ -910,6 +917,8 @@ def build_weekly_excel(site_name: str, start, end, week_number, manual: dict, au
     _style_header(ws, ws.max_row)
     c = manual.get('commission') or {}
     for label, key in [
+        ('累積銷售戶數', 'sellableUnits'),
+        ('累積銷售車位', 'sellableParking'),
         ('累積銷售金額(萬)', 'sellableAmount'),
         ('可請佣金額(萬)', 'claimableAmount'),
         ('已請佣金額(萬)', 'claimedAmount'),
@@ -918,9 +927,9 @@ def build_weekly_excel(site_name: str, start, end, week_number, manual: dict, au
         ('已請佣戶數', 'claimedUnits'),
         ('可請佣車位', 'claimableParking'),
         ('已請佣車位', 'claimedParking'),
-        ('預計下月可請戶數', 'nextMonthUnits'),
-        ('預計下月可請車位', 'nextMonthParking'),
-        ('預計下月可請金額(萬)', 'nextMonthAmount'),
+        ('預計本月可請戶數', 'nextMonthUnits'),
+        ('預計本月可請車位', 'nextMonthParking'),
+        ('預計本月可請金額(萬)', 'nextMonthAmount'),
     ]:
         ws.append([label, c.get(key, 0)])
     ws.append(['未請佣金額(萬)', com['unclaimedAmount']])
