@@ -329,7 +329,42 @@ function clearForm() {
   document.getElementById('salesFormCard').classList.add('hidden');
 }
 
+function fmtNum(val) {
+  const n = Number(val || 0);
+  if (Number.isInteger(n)) return String(n);
+  return String(Math.round(n * 10000) / 10000);
+}
+
+function renderCommissionMatrix(summary) {
+  const el = document.getElementById('commissionMatrix');
+  if (!el) return;
+  const m = summary?.commissionMatrix;
+  if (!m) {
+    el.innerHTML = '<p class="hint">載入後顯示可請／已請／未請矩陣</p>';
+    return;
+  }
+  const cards = [
+    { key: 'claimable', title: '可請總金額' },
+    { key: 'claimed', title: '已請款金額' },
+    { key: 'unclaimed', title: '未請款總金額' },
+    { key: 'forecast', title: '預計本月可請' },
+  ];
+  el.innerHTML = cards.map((c) => {
+    const b = m[c.key] || {};
+    return `<div class="commission-matrix-card">
+      <h3>${escapeHtml(c.title)}</h3>
+      <div class="upc">${fmtNum(b.units)}戶／${fmtNum(b.parking)}車</div>
+      <dl>
+        <dt>4.85%</dt><dd>${fmtNum(b.claimable)} 萬</dd>
+        <dt>3%保留</dt><dd>${fmtNum(b.retention)} 萬</dd>
+        <dt>97%可請</dt><dd>${fmtNum(b.payable)} 萬</dd>
+      </dl>
+    </div>`;
+  }).join('');
+}
+
 function renderSummary(summary) {
+  renderCommissionMatrix(summary);
   if (!summary) {
     document.getElementById('salesSummaryGrid').innerHTML = '<p class="hint">載入後顯示彙總</p>';
     return;
@@ -342,16 +377,7 @@ function renderSummary(summary) {
     { label: '本週簽約', value: `${(summary.signings || {}).units}/${(summary.signings || {}).parking}/${(summary.signings || {}).amount}` },
     { label: '未報', value: `${(summary.unreported || {}).units}/${(summary.unreported || {}).parking}/${(summary.unreported || {}).amount}` },
     { label: '累積銷售(萬)', value: c.sellableAmount ?? 0 },
-    { label: '可請佣(萬)', value: c.claimableAmount ?? 0 },
-    { label: '本期可請97%(萬)', value: c.payableAmount ?? 0 },
-    { label: '保留款3%(萬)', value: c.retentionAmount ?? 0 },
-    { label: '已請佣(萬)', value: c.claimedAmount ?? 0 },
-    { label: '未請(萬)', value: c.unclaimedAmount ?? 0 },
     { label: '已入帳(萬)', value: c.bookedAmount ?? 0 },
-    {
-      label: '本月預計可請(戶/車/萬)',
-      value: `${c.nextMonthUnits ?? 0}/${c.nextMonthParking ?? 0}/${c.nextMonthAmount ?? 0}`,
-    },
   ];
   document.getElementById('salesSummaryGrid').innerHTML = items.map((it) => `
     <div class="stat-card">
@@ -359,6 +385,190 @@ function renderSummary(summary) {
       <div class="stat-value">${escapeHtml(String(it.value))}</div>
     </div>
   `).join('');
+}
+
+let commissionBatches = [];
+
+function renderBatchDeals(batch) {
+  const panel = document.getElementById('batchDealPanel');
+  const title = document.getElementById('batchDealTitle');
+  const tbody = document.querySelector('#batchDealTable tbody');
+  if (!batch) {
+    panel.classList.add('hidden');
+    return;
+  }
+  panel.classList.remove('hidden');
+  title.textContent = `該期戶別｜${batch.periodName}（${batch.dealCount || 0} 筆）`;
+  const deals = batch.deals || [];
+  if (!deals.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="empty-row">此期尚無對應銷售明細</td></tr>';
+    return;
+  }
+  tbody.innerHTML = deals.map((d) => `
+    <tr>
+      <td>${escapeHtml(d.unitNo)}</td>
+      <td>${escapeHtml(d.customerName)}</td>
+      <td>${escapeHtml(d.orderNo)}</td>
+      <td>${fmtNum(d.units)}／${fmtNum(d.parking)}</td>
+      <td>${fmtNum(d.payable)}</td>
+      <td>${escapeHtml(d.status)}</td>
+    </tr>
+  `).join('');
+}
+
+function renderCommissionBatches(batches) {
+  commissionBatches = batches || [];
+  const tbody = document.querySelector('#commissionBatchTable tbody');
+  if (!tbody) return;
+  if (!commissionBatches.length) {
+    tbody.innerHTML = '<tr><td colspan="10" class="empty-row">尚無期別。請在銷售明細填「請佣期別」後按重新同步，或按新增期別。</td></tr>';
+    return;
+  }
+  tbody.innerHTML = commissionBatches.map((b) => {
+    const rowClass = b.status === 'full' ? 'batch-row-full' : (b.status === 'partial' ? 'batch-row-partial' : '');
+    return `<tr class="${rowClass}" data-batch-id="${b.id}">
+      <td><input class="batch-inline-input" data-field="periodName" value="${escapeHtml(b.periodName || '')}"></td>
+      <td><input class="batch-inline-input" data-field="claimMonth" value="${escapeHtml(b.claimMonth || '')}" placeholder="例：115/03"></td>
+      <td><button type="button" class="btn-xs link-btn" data-show-deals="${b.id}">${fmtNum(b.units)}／${fmtNum(b.parking)}</button></td>
+      <td><input class="batch-inline-input" type="number" step="0.0001" data-field="amountPayable" value="${b.amountPayable ?? 0}" title="自動加總 ${b.autoPayable ?? 0}"></td>
+      <td><input class="batch-inline-input" type="number" step="0.0001" data-field="half1Amount" value="${b.half1Amount ?? 0}"></td>
+      <td><input class="batch-inline-input" type="date" data-field="depositDate1" value="${escapeHtml(b.depositDate1 || '')}"></td>
+      <td><input class="batch-inline-input" type="number" step="0.0001" data-field="half2Amount" value="${b.half2Amount ?? 0}"></td>
+      <td><input class="batch-inline-input" type="date" data-field="depositDate2" value="${escapeHtml(b.depositDate2 || '')}"></td>
+      <td><input class="batch-inline-input" data-field="deductionMemo" value="${escapeHtml(b.deductionMemo || '')}" placeholder="墊水電／折讓…"></td>
+      <td>
+        <button type="button" class="btn-xs" data-save-batch="${b.id}">儲存</button>
+        <button type="button" class="btn-xs link-btn" data-del-batch="${b.id}">刪</button>
+      </td>
+    </tr>`;
+  }).join('');
+
+  tbody.querySelectorAll('[data-show-deals]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const batch = commissionBatches.find((x) => String(x.id) === btn.dataset.showDeals);
+      renderBatchDeals(batch);
+    });
+  });
+  tbody.querySelectorAll('[data-save-batch]').forEach((btn) => {
+    btn.addEventListener('click', () => saveBatchRow(Number(btn.dataset.saveBatch)));
+  });
+  tbody.querySelectorAll('[data-del-batch]').forEach((btn) => {
+    btn.addEventListener('click', () => deleteBatch(Number(btn.dataset.delBatch)));
+  });
+}
+
+function collectBatchRow(batchId) {
+  const tr = document.querySelector(`#commissionBatchTable tr[data-batch-id="${batchId}"]`);
+  if (!tr) return null;
+  const get = (field) => tr.querySelector(`[data-field="${field}"]`)?.value;
+  return {
+    id: batchId,
+    siteId: document.getElementById('salesSite').value,
+    periodName: (get('periodName') || '').trim(),
+    claimMonth: (get('claimMonth') || '').trim(),
+    amountPayable: get('amountPayable'),
+    half1Amount: get('half1Amount'),
+    depositDate1: get('depositDate1') || null,
+    half2Amount: get('half2Amount'),
+    depositDate2: get('depositDate2') || null,
+    deductionMemo: (get('deductionMemo') || '').trim(),
+  };
+}
+
+async function loadCommissionBatches() {
+  const siteId = document.getElementById('salesSite').value;
+  if (!siteId) return;
+  try {
+    const res = await fetch(`/api/sales/commission/batches?siteId=${encodeURIComponent(siteId)}`);
+    const json = await res.json();
+    if (!res.ok) {
+      showToast(json.error || '載入期別失敗', 'error');
+      return;
+    }
+    renderCommissionBatches(json.batches || []);
+  } catch {
+    showToast('載入期別失敗', 'error');
+  }
+}
+
+async function saveBatchRow(batchId) {
+  const body = collectBatchRow(batchId);
+  if (!body?.periodName) {
+    showToast('請填期別名稱', 'error');
+    return;
+  }
+  try {
+    const res = await fetch('/api/sales/commission/batches', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const json = await res.json();
+    if (!res.ok) {
+      showToast(json.error || '儲存失敗', 'error');
+      return;
+    }
+    showToast('期別已儲存');
+    renderCommissionBatches(json.batches || []);
+  } catch {
+    showToast('儲存失敗', 'error');
+  }
+}
+
+async function deleteBatch(batchId) {
+  const siteId = document.getElementById('salesSite').value;
+  if (!siteId || !confirm('確定刪除此期別列？（不影響銷售明細）')) return;
+  try {
+    const res = await fetch(
+      `/api/sales/commission/batches/${batchId}?siteId=${encodeURIComponent(siteId)}`,
+      { method: 'DELETE' },
+    );
+    const json = await res.json();
+    if (!res.ok) {
+      showToast(json.error || '刪除失敗', 'error');
+      return;
+    }
+    showToast('已刪除期別');
+    renderCommissionBatches(json.batches || []);
+    document.getElementById('batchDealPanel').classList.add('hidden');
+  } catch {
+    showToast('刪除失敗', 'error');
+  }
+}
+
+async function addCommissionBatch() {
+  const siteId = document.getElementById('salesSite').value;
+  if (!siteId) {
+    showToast('請先選擇案場', 'error');
+    return;
+  }
+  const name = prompt('期別名稱（例：第17次服務費）');
+  if (!name || !name.trim()) return;
+  try {
+    const res = await fetch('/api/sales/commission/batches', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ siteId, periodName: name.trim() }),
+    });
+    const json = await res.json();
+    if (!res.ok) {
+      showToast(json.error || '新增失敗', 'error');
+      return;
+    }
+    showToast('已新增期別');
+    renderCommissionBatches(json.batches || []);
+  } catch {
+    showToast('新增失敗', 'error');
+  }
+}
+
+function exportCommissionOverview() {
+  const siteId = document.getElementById('salesSite').value;
+  if (!siteId) {
+    showToast('請先選擇案場', 'error');
+    return;
+  }
+  window.location.href = `/api/sales/commission/export.xlsx?siteId=${encodeURIComponent(siteId)}`;
 }
 
 function renderTable(rows) {
@@ -506,6 +716,7 @@ async function loadSales() {
     fillStaffSelects();
     renderTable(listJson.records || []);
     if (sumRes.ok) renderSummary(sumJson.summary);
+    await loadCommissionBatches();
     showToast(`已載入 ${listJson.total || 0} 筆`);
   } catch {
     showToast('載入失敗', 'error');
@@ -583,6 +794,9 @@ async function init() {
   document.getElementById('loadSalesBtn').addEventListener('click', loadSales);
   document.getElementById('exportSalesExcelBtn').addEventListener('click', () => exportSales('xlsx'));
   document.getElementById('exportSalesCsvBtn').addEventListener('click', () => exportSales('csv'));
+  document.getElementById('exportCommissionBtn')?.addEventListener('click', exportCommissionOverview);
+  document.getElementById('addBatchBtn')?.addEventListener('click', addCommissionBatch);
+  document.getElementById('reloadBatchesBtn')?.addEventListener('click', loadCommissionBatches);
   document.getElementById('importSalesBtn').addEventListener('click', () => {
     if (!document.getElementById('salesSite').value) {
       showToast('請先選擇案場', 'error');

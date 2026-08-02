@@ -45,8 +45,55 @@
     </section>
 
     <section class="card" id="salesSummaryCard">
-      <h2>彙總（供週報帶入）</h2>
-      <div id="salesSummaryGrid" class="stats-grid"></div>
+      <h2>請佣總覽（可請／已請／未請）</h2>
+      <p class="hint">由銷售明細自動彙總。已請＝已填請佣期別或請佣日期；預計本月可請＝單筆勾選「預計可於本月請款」合計。</p>
+      <div class="form-actions" style="margin-bottom:0.75rem;">
+        <button type="button" id="exportCommissionBtn" class="btn btn-secondary">匯出請佣 Excel</button>
+        <span class="hint">含「請佣摘要」「期別服務費」兩張表</span>
+      </div>
+      <div id="commissionMatrix" class="commission-matrix"></div>
+      <div id="salesSummaryGrid" class="stats-grid" style="margin-top:1rem;"></div>
+    </section>
+
+    <section class="card" id="commissionBatchCard">
+      <h2>期別服務費（拆半入帳）</h2>
+      <p class="hint">依銷售單「請佣期別」自動產生列。維護請款月、拆半 50%、兩次入帳日與墊款／折讓備註；入帳後列會自動上色（黃＝入一筆，綠＝兩筆都入）。點「戶別」可看該期明細。</p>
+      <div class="form-actions" style="margin-bottom:0.75rem;">
+        <button type="button" id="addBatchBtn" class="btn btn-secondary">新增期別</button>
+        <button type="button" id="reloadBatchesBtn" class="btn btn-outline">重新同步期別</button>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table" id="commissionBatchTable">
+          <thead>
+            <tr>
+              <th>請款期別</th>
+              <th>請款月份</th>
+              <th>戶／車</th>
+              <th>服務費97%</th>
+              <th>拆半1</th>
+              <th>入帳日1</th>
+              <th>拆半2</th>
+              <th>入帳日2</th>
+              <th>墊款／折讓</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div id="batchDealPanel" class="batch-deal-panel hidden">
+        <h3 class="section-title" id="batchDealTitle">該期戶別</h3>
+        <div class="table-wrap">
+          <table class="data-table" id="batchDealTable">
+            <thead>
+              <tr>
+                <th>戶別</th><th>客戶</th><th>訂單</th><th>戶／車</th><th>97%(萬)</th><th>狀態</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
     </section>
 
     <section class="card hidden" id="salesFormCard">

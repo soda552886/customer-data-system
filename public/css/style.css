@@ -254,6 +254,63 @@ td.is-deal-mode {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.8rem;
 }
+.commission-matrix {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+.commission-matrix-card {
+  border: 1px solid #d9e2ec;
+  border-radius: 10px;
+  background: #f8fafc;
+  padding: 0.85rem 1rem;
+}
+.commission-matrix-card h3 {
+  margin: 0 0 0.55rem;
+  font-size: 0.95rem;
+  color: #1a4d7c;
+}
+.commission-matrix-card .upc {
+  font-weight: 700;
+  font-size: 1.05rem;
+  margin-bottom: 0.45rem;
+}
+.commission-matrix-card dl {
+  margin: 0;
+  display: grid;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+  color: #334155;
+}
+.commission-matrix-card dt {
+  float: left;
+  clear: left;
+  width: 5.5rem;
+  color: #64748b;
+}
+.commission-matrix-card dd {
+  margin: 0 0 0 5.5rem;
+  font-variant-numeric: tabular-nums;
+}
+.batch-row-full {
+  background: #d5f5e3 !important;
+}
+.batch-row-partial {
+  background: #fcf3cf !important;
+}
+.batch-deal-panel {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #e2e8f0;
+}
+.batch-inline-input {
+  width: 100%;
+  min-width: 5.5rem;
+  padding: 0.25rem 0.4rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
 .deal-input-row {
   display: grid;
   grid-template-columns: 4.5rem repeat(3, minmax(0, 1fr));
@@ -274,8 +331,16 @@ td.is-deal-mode {
   font-size: 0.75rem;
   color: #64748b;
 }
+@media (max-width: 960px) {
+  .commission-matrix {
+    grid-template-columns: 1fr 1fr;
+  }
+}
 @media (max-width: 768px) {
   .commission-grid {
+    grid-template-columns: 1fr;
+  }
+  .commission-matrix {
     grid-template-columns: 1fr;
   }
   .deal-input-row {

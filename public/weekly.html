@@ -85,7 +85,8 @@
       </section>
 
       <section class="card">
-        <h2>每日來人（依選取）／來電・天氣（手填）</h2>
+        <h2>每日來人（依選取）／來電・天氣</h2>
+        <p class="hint">每日來電通數會依下方「來電明細」自動加總；天氣仍手填。</p>
         <div class="table-wrap">
           <table class="data-table" id="dailyTable">
             <thead>
@@ -100,36 +101,53 @@
       </section>
 
       <section class="card">
-        <h2>來人訴求分析（前期／本週／累計＋%）</h2>
-        <p class="hint">客資仍依實際區域細分登錄，報表預設只顯示「本週有來人」的列，避免 29 區全展開難讀。不建議把客資區域合併；若 PPT 要併列顯示，屬「版面分組」，與統計細項分開。</p>
+        <h2>來電明細（區域／媒體）</h2>
+        <p class="hint">每通來電填區域與媒體後，會與來人一起顯示在下方訴求分析表。可一次填多通。</p>
         <div class="form-actions" style="margin-bottom:0.75rem;">
-          <label class="hint" for="dimFilterMode">顯示範圍</label>
-          <select id="dimFilterMode" style="max-width:14rem;">
-            <option value="week" selected>僅本週有來人</option>
-            <option value="cum">累計有資料</option>
-            <option value="all">全部列出</option>
-          </select>
+          <button type="button" id="addPhoneCallBtn" class="btn btn-secondary">新增來電</button>
+          <span id="phoneDetailSummary" class="hint"></span>
         </div>
-        <div class="table-wrap" style="margin-bottom:1.25rem;">
-          <h3 class="section-title">區域（新客）</h3>
-          <table class="data-table" id="regionDimTable">
+        <div class="table-wrap">
+          <table class="data-table" id="phoneDetailTable">
             <thead>
               <tr>
-                <th>項目</th><th>前期累計</th><th>本週小計</th><th>目前累計</th>
-                <th>佔本週來人%</th><th>佔累計來人%</th>
-                <th>本週成交</th><th>佔本週成交%</th>
+                <th>日期</th><th>區域</th><th>媒體</th><th>通數</th><th>操作</th>
               </tr>
             </thead>
             <tbody></tbody>
           </table>
         </div>
+      </section>
+
+      <section class="card">
+        <h2>來人／來電訴求分析（前期／本週／累計＋%）</h2>
+        <p class="hint">區域、媒體表會同時顯示本週來人與本週來電。預設只顯示本週有資料的列，方便貼 PPT。</p>
+        <div class="form-actions" style="margin-bottom:0.75rem;">
+          <label class="hint" for="dimFilterMode">顯示範圍</label>
+          <select id="dimFilterMode" style="max-width:14rem;">
+            <option value="week" selected>僅本週有資料</option>
+            <option value="cum">累計有資料</option>
+            <option value="all">全部列出</option>
+          </select>
+        </div>
         <div class="table-wrap" style="margin-bottom:1.25rem;">
-          <h3 class="section-title">媒體（新客）</h3>
+          <h3 class="section-title">區域（新客＋來電）</h3>
+          <table class="data-table" id="regionDimTable">
+            <thead></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="table-wrap" style="margin-bottom:1.25rem;">
+          <h3 class="section-title">媒體（新客＋來電）</h3>
           <table class="data-table" id="mediaDimTable"><thead></thead><tbody></tbody></table>
         </div>
         <div class="table-wrap" style="margin-bottom:1.25rem;">
           <h3 class="section-title">來源（新客）</h3>
           <table class="data-table" id="sourceDimTable"><thead></thead><tbody></tbody></table>
+        </div>
+        <div class="table-wrap" style="margin-bottom:1.25rem;">
+          <h3 class="section-title">購屋型態（新客）</h3>
+          <table class="data-table" id="purposeDimTable"><thead></thead><tbody></tbody></table>
         </div>
         <div class="table-wrap" style="margin-bottom:1.25rem;">
           <h3 class="section-title">職業（新客）</h3>
@@ -160,23 +178,24 @@
 
       <section class="card">
         <h2>請佣摘要（可從銷售總表帶入）</h2>
-        <p class="hint">請先在銷售總表登錄請佣資料，再按下方按鈕更新本區數字。</p>
+        <p class="hint">請先在銷售總表登錄請佣資料，再按下方按鈕更新本區數字。矩陣與銷售總表「請佣總覽」同一套彙總。</p>
         <div class="form-actions" style="margin-bottom:0.75rem;">
           <button type="button" id="fillCommissionFromSalesBtn" class="btn btn-secondary">從銷售總表更新請佣</button>
           <span id="commissionSuggestHint" class="hint"></span>
         </div>
+        <div id="weeklyCommissionMatrix" class="commission-matrix" style="margin-bottom:1rem;"></div>
         <div class="commission-grid" id="commissionInputs"></div>
         <div id="commissionDerived" class="commission-grid" style="margin-top:1rem;"></div>
       </section>
 
       <section class="card">
         <h2>銷售成交比（客資自動）</h2>
-        <p class="hint">接客、成交與退戶僅統計新客，不含回訪。已離職人員請至「欄位選項 → 該案場 → 銷售人員（在職狀態）」取消勾選；取消後累計併入「前期銷售」。共同經營（勾選或填銷售2）組數／成交各算 0.5。</p>
+        <p class="hint">接客、成交與退戶僅統計新客，不含回訪。成交比＝累計接待÷累計成交（例如 18.2:1 代表接 18.2 組成交 1 組）。已離職人員請至「欄位選項 → 該案場 → 銷售人員（在職狀態）」取消勾選；取消後累計併入「前期銷售」。共同經營（勾選或填銷售2）組數／成交各算 0.5。</p>
         <div class="table-wrap">
           <table class="data-table" id="conversionTable">
             <thead>
               <tr>
-                <th>銷售人員</th><th>累計接待</th><th>累計成交</th><th>成交率</th>
+                <th>銷售人員</th><th>累計接待</th><th>累計成交</th><th>成交比</th>
                 <th>成交金額</th><th>退戶組數</th><th>退戶金額</th>
                 <th>本週接待</th><th>本週成交</th><th>本週金額</th>
               </tr>

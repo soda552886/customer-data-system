@@ -21,14 +21,16 @@ from audit import init_audit_table, log_operation, row_to_log_dict
 from config.sites import SITES as DEFAULT_SITES
 from weekly_reports import (
     build_auto_stats, build_weekly_excel, commission_summary, default_week_number,
-    empty_manual_payload, init_weekly_tables, inventory_summary, list_weekly_reports,
-    load_weekly_report, merge_manual, monday_of, roc_year, upsert_weekly_report,
+    empty_manual_payload, enrich_dims_with_phones, init_weekly_tables, inventory_summary,
+    list_weekly_reports, load_weekly_report, merge_manual, monday_of,
+    normalize_phone_calls_detail, phone_total_from_manual, roc_year, upsert_weekly_report,
     week_bounds,
 )
 from sales_ledger import (
-    RECORD_TYPES as SALES_RECORD_TYPES, aggregate_for_weekly, build_sales_excel,
-    commission_defaults_for_site, create_sales_deal, delete_sales_deal, get_sales_deal,
-    init_sales_tables, list_sales_deals, update_sales_deal,
+    RECORD_TYPES as SALES_RECORD_TYPES, aggregate_for_weekly, build_commission_overview_excel,
+    build_sales_excel, commission_defaults_for_site, create_sales_deal, delete_commission_batch,
+    delete_sales_deal, get_sales_deal, init_sales_tables, list_commission_batches,
+    list_sales_deals, update_sales_deal, upsert_commission_batch,
 )
 from field_options import (
     apply_site_field_options, apply_site_hidden_fields, build_site_field_config,
@@ -1194,7 +1196,7 @@ def weekly_summary():
     base = empty_manual_payload(start, end)
     manual = merge_manual(base, (saved or {}).get('data') if saved else None)
 
-    phone_sum = sum(float((d or {}).get('phoneCalls') or 0) for d in (manual.get('days') or []))
+    phone_sum = phone_total_from_manual(manual)
     active_staff = get_active_sales_staff(conn, site_id)
     auto = build_auto_stats(
         conn, site_id, start, end,
@@ -1202,6 +1204,7 @@ def weekly_summary():
         active_staff=active_staff,
         week_phone_total=phone_sum,
     )
+    auto = enrich_dims_with_phones(auto, manual.get('phoneCallsDetail'))
     suggested = aggregate_for_weekly(conn, site_id, start, end)
     history = list_weekly_reports(conn, site_id)
     conn.close()
@@ -1263,6 +1266,14 @@ def save_weekly_report():
     except (TypeError, ValueError):
         week_number = default_week_number(start)
     manual['weekNumber'] = week_number
+    manual['phoneCallsDetail'] = normalize_phone_calls_detail(manual.get('phoneCallsDetail'))
+    # 若有來電明細，每日來電通數改由明細加總，避免兩套數字不一致。
+    if manual['phoneCallsDetail']:
+        by_day = {}
+        for item in manual['phoneCallsDetail']:
+            by_day[item['date']] = by_day.get(item['date'], 0) + float(item['count'] or 0)
+        for day in manual.get('days') or []:
+            day['phoneCalls'] = round(by_day.get(day.get('date'), 0), 2)
 
     report_id = upsert_weekly_report(
         conn,
@@ -1322,13 +1333,14 @@ def export_weekly_csv():
     saved = load_weekly_report(conn, site_id, start.isoformat())
     base = empty_manual_payload(start, end)
     manual = merge_manual(base, (saved or {}).get('data') if saved else None)
-    phone_sum = sum(float((d or {}).get('phoneCalls') or 0) for d in (manual.get('days') or []))
+    phone_sum = phone_total_from_manual(manual)
     auto = build_auto_stats(
         conn, site_id, start, end,
         included_visitor_ids=manual.get('includedVisitorIds'),
         active_staff=get_active_sales_staff(conn, site_id),
         week_phone_total=phone_sum,
     )
+    auto = enrich_dims_with_phones(auto, manual.get('phoneCallsDetail'))
     conn.close()
 
     output = io.StringIO()
@@ -1347,6 +1359,12 @@ def export_weekly_csv():
     writer.writerow(['本週合計', '', t['new'], t['return'], t['deal'], t['total']])
     writer.writerow(['實際來人', t.get('actualTotal', ''), '納入週報', t.get('reportedTotal', '')])
     writer.writerow([])
+    writer.writerow(['【來電明細】'])
+    writer.writerow(['日期', '區域', '媒體', '通數'])
+    for item in normalize_phone_calls_detail(manual.get('phoneCallsDetail')):
+        writer.writerow([item.get('date'), item.get('region'), item.get('media'), item.get('count')])
+    writer.writerow(['本週來電合計', phone_sum])
+    writer.writerow([])
     writer.writerow(['【人工填寫：來電／天氣】'])
     writer.writerow(['日期', '星期', '天氣', '來電'])
     for day in manual.get('days') or []:
@@ -1362,18 +1380,20 @@ def export_weekly_csv():
     writer.writerow(['區域個案分析', manual.get('competitorNotes') or ''])
     writer.writerow(['備註', manual.get('memo') or ''])
     writer.writerow([])
-    writer.writerow(['【區域統計（新客）】', '本週', '前期', '累計', '佔本週%', '佔累計%'])
+    writer.writerow(['【區域統計（新客＋來電）】', '本週來人', '本週來電', '佔來人%', '佔來電%', '前期', '累計'])
     for row in auto['byRegion']:
         writer.writerow([
-            row['name'], row.get('weekVisits'), row.get('priorVisits'), row.get('cumVisits'),
-            f"{row.get('weekVisitPct', 0)}%", f"{row.get('cumVisitPct', 0)}%",
+            row['name'], row.get('weekVisits'), row.get('weekPhones', 0),
+            f"{row.get('weekVisitPct', 0)}%", f"{row.get('weekPhonePct', 0)}%",
+            row.get('priorVisits'), row.get('cumVisits'),
         ])
     writer.writerow([])
-    writer.writerow(['【媒體統計（新客）】', '本週', '前期', '累計', '佔本週%', '佔累計%'])
+    writer.writerow(['【媒體統計（新客＋來電）】', '本週來人', '本週來電', '佔來人%', '佔來電%', '前期', '累計'])
     for row in auto['byMedia']:
         writer.writerow([
-            row['name'], row.get('weekVisits'), row.get('priorVisits'), row.get('cumVisits'),
-            f"{row.get('weekVisitPct', 0)}%", f"{row.get('cumVisitPct', 0)}%",
+            row['name'], row.get('weekVisits'), row.get('weekPhones', 0),
+            f"{row.get('weekVisitPct', 0)}%", f"{row.get('weekPhonePct', 0)}%",
+            row.get('priorVisits'), row.get('cumVisits'),
         ])
     writer.writerow([])
     writer.writerow(['【職業（新客）】', '本週', '前期', '累計', '佔本週%', '佔累計%'])
@@ -1391,10 +1411,10 @@ def export_weekly_csv():
         ])
     writer.writerow([])
     writer.writerow(['【成交比】'])
-    writer.writerow(['銷售', '累計接待', '累計成交', '成交率%', '成交金額', '退戶', '本週接待', '本週成交'])
+    writer.writerow(['銷售', '累計接待', '累計成交', '成交比', '成交金額', '退戶', '本週接待', '本週成交'])
     for row in auto.get('conversion') or []:
         writer.writerow([
-            row['name'], row['visits'], row['deals'], f"{row['rate']}%", row.get('amount'),
+            row['name'], row['visits'], row['deals'], row.get('rate') or '—', row.get('amount'),
             row.get('refunds'), row['weekVisits'], row['weekDeals'],
         ])
     writer.writerow([])
@@ -1451,13 +1471,16 @@ def export_weekly_xlsx():
     saved = load_weekly_report(conn, site_id, start.isoformat())
     base = empty_manual_payload(start, end)
     manual = merge_manual(base, (saved or {}).get('data') if saved else None)
-    phone_sum = sum(float((d or {}).get('phoneCalls') or 0) for d in (manual.get('days') or []))
+    phone_sum = phone_total_from_manual(manual)
     auto = build_auto_stats(
         conn, site_id, start, end,
         included_visitor_ids=manual.get('includedVisitorIds'),
         active_staff=get_active_sales_staff(conn, site_id),
         week_phone_total=phone_sum,
     )
+    auto = enrich_dims_with_phones(auto, manual.get('phoneCallsDetail'))
+    sales_summary = aggregate_for_weekly(conn, site_id, start, end)
+    auto['commissionMatrix'] = sales_summary.get('commissionMatrix')
     conn.close()
 
     week_no = manual.get('weekNumber') or default_week_number(start)
@@ -2044,6 +2067,126 @@ def api_sales_summary():
         'weekEnd': end.isoformat(),
         'summary': summary,
     })
+
+
+@app.route('/api/sales/commission/batches')
+def api_list_commission_batches():
+    conn, user, err = auth_guard('manage_weekly_reports')
+    if err:
+        return err
+    site_id = (request.args.get('siteId') or '').strip()
+    if not site_id:
+        conn.close()
+        return jsonify({'error': '請提供案場'}), 400
+    denied = ensure_site_access(user, site_id)
+    if denied:
+        conn.close()
+        return denied
+    batches = list_commission_batches(conn, site_id)
+    conn.close()
+    return jsonify({'siteId': site_id, 'batches': batches})
+
+
+@app.route('/api/sales/commission/batches', methods=['POST'])
+def api_upsert_commission_batch():
+    conn, user, err = auth_guard('manage_weekly_reports')
+    if err:
+        return err
+    body = request.get_json(silent=True) or {}
+    site_id = (body.get('siteId') or request.args.get('siteId') or '').strip()
+    if not site_id:
+        conn.close()
+        return jsonify({'error': '請提供案場'}), 400
+    denied = ensure_site_access(user, site_id)
+    if denied:
+        conn.close()
+        return denied
+    try:
+        batch_id = upsert_commission_batch(conn, site_id, body)
+        conn.commit()
+    except ValueError as e:
+        conn.close()
+        return jsonify({'error': str(e)}), 400
+    batches = list_commission_batches(conn, site_id)
+    batch = next((b for b in batches if b['id'] == batch_id), None)
+    log_operation(
+        conn, user, 'upsert_commission_batch',
+        f'更新請佣期別：{body.get("periodName") or batch_id}',
+        entity_type='commission_batch', entity_id=str(batch_id),
+        site_id=site_id,
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True, 'batch': batch, 'batches': batches})
+
+
+@app.route('/api/sales/commission/batches/<int:batch_id>', methods=['DELETE'])
+def api_delete_commission_batch(batch_id):
+    conn, user, err = auth_guard('manage_weekly_reports')
+    if err:
+        return err
+    site_id = (request.args.get('siteId') or '').strip()
+    if not site_id:
+        conn.close()
+        return jsonify({'error': '請提供案場'}), 400
+    denied = ensure_site_access(user, site_id)
+    if denied:
+        conn.close()
+        return denied
+    ok = delete_commission_batch(conn, site_id, batch_id)
+    if not ok:
+        conn.close()
+        return jsonify({'error': '找不到此期別'}), 404
+    log_operation(
+        conn, user, 'delete_commission_batch',
+        f'刪除請佣期別 #{batch_id}',
+        entity_type='commission_batch', entity_id=str(batch_id),
+        site_id=site_id,
+    )
+    conn.commit()
+    batches = list_commission_batches(conn, site_id)
+    conn.close()
+    return jsonify({'success': True, 'batches': batches})
+
+
+@app.route('/api/sales/commission/export.xlsx')
+def api_export_commission_overview():
+    conn, user, err = auth_guard('manage_weekly_reports')
+    if err:
+        return err
+    site_id = (request.args.get('siteId') or '').strip()
+    if not site_id:
+        conn.close()
+        return jsonify({'error': '請提供案場'}), 400
+    denied = ensure_site_access(user, site_id)
+    if denied:
+        conn.close()
+        return denied
+    site = conn.execute('SELECT name FROM sites WHERE id = ?', (site_id,)).fetchone()
+    if not site:
+        conn.close()
+        return jsonify({'error': '找不到此案場'}), 404
+    today = datetime.now().date()
+    start, end = week_bounds(monday_of(today).isoformat())
+    summary = aggregate_for_weekly(conn, site_id, start, end)
+    batches = list_commission_batches(conn, site_id)
+    content = build_commission_overview_excel(
+        site['name'],
+        summary.get('commissionMatrix') or {},
+        batches,
+    )
+    conn.close()
+    from urllib.parse import quote
+    utf8_name = quote(f'{site["name"]}_請佣總覽.xlsx')
+    return Response(
+        content,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        headers={
+            'Content-Disposition': (
+                f"attachment; filename=\"commission_overview.xlsx\"; filename*=UTF-8''{utf8_name}"
+            ),
+        },
+    )
 
 
 @app.route('/api/fields')

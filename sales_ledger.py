@@ -207,6 +207,387 @@ def init_sales_tables(conn: sqlite3.Connection):
         if name not in existing:
             conn.execute(f'ALTER TABLE sales_deals ADD COLUMN {name} {definition}')
 
+    conn.executescript('''
+        CREATE TABLE IF NOT EXISTS commission_batches (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            site_id TEXT NOT NULL,
+            period_name TEXT NOT NULL,
+            claim_month TEXT NOT NULL DEFAULT '',
+            amount_payable REAL,
+            half1_amount REAL NOT NULL DEFAULT 0,
+            deposit_date1 TEXT,
+            half2_amount REAL NOT NULL DEFAULT 0,
+            deposit_date2 TEXT,
+            deduction_amount REAL NOT NULL DEFAULT 0,
+            deduction_memo TEXT NOT NULL DEFAULT '',
+            memo TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+            UNIQUE(site_id, period_name)
+        );
+        CREATE INDEX IF NOT EXISTS idx_commission_batches_site
+            ON commission_batches(site_id);
+    ''')
+
+
+def _comm_bucket():
+    return {
+        'units': 0.0,
+        'parking': 0.0,
+        'claimable': 0.0,   # 4.85%
+        'retention': 0.0,   # 3%
+        'payable': 0.0,     # 97%
+    }
+
+
+def _round_bucket(b: dict) -> dict:
+    return {
+        'units': round(b['units'], 2),
+        'parking': round(b['parking'], 2),
+        'claimable': round(b['claimable'], 4),
+        'retention': round(b['retention'], 4),
+        'payable': round(b['payable'], 4),
+    }
+
+
+def _add_to_bucket(bucket: dict, units, parking, claimable, retention, payable):
+    bucket['units'] += units
+    bucket['parking'] += parking
+    bucket['claimable'] += claimable
+    bucket['retention'] += retention
+    bucket['payable'] += payable
+
+
+def _batch_status(deposit1, deposit2) -> str:
+    d1 = bool(str(deposit1 or '').strip())
+    d2 = bool(str(deposit2 or '').strip())
+    if d1 and d2:
+        return 'full'
+    if d1 or d2:
+        return 'partial'
+    return 'none'
+
+
+def sync_commission_batches(conn: sqlite3.Connection, site_id: str):
+    """依銷售單的請佣期別自動建立／對齊批次列。"""
+    periods = conn.execute(
+        '''
+        SELECT DISTINCT TRIM(commission_period) AS period_name
+        FROM sales_deals
+        WHERE site_id = ?
+          AND record_type IN ('deal', 'signing', 'purchase', 'unreported')
+          AND TRIM(COALESCE(commission_period, '')) != ''
+        ''',
+        (site_id,),
+    ).fetchall()
+    for row in periods:
+        name = (row['period_name'] or '').strip()
+        if not name:
+            continue
+        exists = conn.execute(
+            'SELECT id FROM commission_batches WHERE site_id = ? AND period_name = ?',
+            (site_id, name),
+        ).fetchone()
+        if not exists:
+            conn.execute(
+                '''
+                INSERT INTO commission_batches (site_id, period_name)
+                VALUES (?, ?)
+                ''',
+                (site_id, name),
+            )
+
+
+def _period_deal_totals(conn: sqlite3.Connection, site_id: str, period_name: str) -> dict:
+    rows = conn.execute(
+        '''
+        SELECT units, parking_count, commission_payable, commission_claimable,
+               commission_retention, commission_booked, commission_claimed,
+               commission_period, commission_claim_date,
+               unit_no, customer_name, order_no, id
+        FROM sales_deals
+        WHERE site_id = ?
+          AND record_type IN ('deal', 'signing', 'purchase', 'unreported')
+          AND TRIM(COALESCE(commission_period, '')) = ?
+        ''',
+        (site_id, period_name),
+    ).fetchall()
+    payable = 0.0
+    claimable = 0.0
+    retention = 0.0
+    booked = 0.0
+    units = 0.0
+    parking = 0.0
+    deals = []
+    for r in rows:
+        p = _num(r['commission_payable'])
+        c = _num(r['commission_claimable'])
+        if p <= 0 and c > 0:
+            p = c * 0.97
+        ret = _num(r['commission_retention'])
+        if ret <= 0 and c > 0:
+            ret = c * 0.03
+        payable += p
+        claimable += c
+        retention += ret
+        booked += _num(r['commission_booked'])
+        units += _num(r['units'], 1)
+        parking += _num(r['parking_count'])
+        is_claimed = bool(
+            _num(r['commission_claimed']) > 0
+            or (r['commission_period'] or '').strip()
+            or r['commission_claim_date']
+        )
+        deals.append({
+            'id': r['id'],
+            'unitNo': r['unit_no'] or '',
+            'customerName': r['customer_name'] or '',
+            'orderNo': r['order_no'] or '',
+            'units': _num(r['units'], 1),
+            'parking': _num(r['parking_count']),
+            'payable': _round4(p),
+            'claimable': _round4(c),
+            'status': '已請' if is_claimed else '未請',
+        })
+    return {
+        'units': round(units, 2),
+        'parking': round(parking, 2),
+        'payable': _round4(payable),
+        'claimable': _round4(claimable),
+        'retention': _round4(retention),
+        'booked': _round4(booked),
+        'dealCount': len(deals),
+        'deals': deals,
+    }
+
+
+def list_commission_batches(conn: sqlite3.Connection, site_id: str) -> list[dict]:
+    sync_commission_batches(conn, site_id)
+    conn.commit()
+    rows = conn.execute(
+        '''
+        SELECT * FROM commission_batches
+        WHERE site_id = ?
+        ORDER BY claim_month ASC, period_name ASC, id ASC
+        ''',
+        (site_id,),
+    ).fetchall()
+    out = []
+    for row in rows:
+        totals = _period_deal_totals(conn, site_id, row['period_name'])
+        auto_payable = totals['payable']
+        amount = row['amount_payable']
+        if amount is None:
+            amount = auto_payable
+        else:
+            amount = _num(amount)
+        half1 = _num(row['half1_amount'])
+        half2 = _num(row['half2_amount'])
+        if half1 <= 0 and half2 <= 0 and amount > 0:
+            half1 = _round4(amount / 2)
+            half2 = _round4(amount - half1)
+        status = _batch_status(row['deposit_date1'], row['deposit_date2'])
+        booked_total = 0.0
+        if row['deposit_date1']:
+            booked_total += half1
+        if row['deposit_date2']:
+            booked_total += half2
+        out.append({
+            'id': row['id'],
+            'siteId': row['site_id'],
+            'periodName': row['period_name'],
+            'claimMonth': row['claim_month'] or '',
+            'amountPayable': _round4(amount),
+            'autoPayable': auto_payable,
+            'half1Amount': _round4(half1),
+            'depositDate1': row['deposit_date1'],
+            'half2Amount': _round4(half2),
+            'depositDate2': row['deposit_date2'],
+            'deductionAmount': _round4(row['deduction_amount']),
+            'deductionMemo': row['deduction_memo'] or '',
+            'memo': row['memo'] or '',
+            'status': status,
+            'bookedTotal': _round4(booked_total),
+            'units': totals['units'],
+            'parking': totals['parking'],
+            'dealCount': totals['dealCount'],
+            'deals': totals['deals'],
+            'updatedAt': row['updated_at'],
+        })
+    return out
+
+
+def upsert_commission_batch(conn: sqlite3.Connection, site_id: str, body: dict) -> int:
+    period_name = str(body.get('periodName') or body.get('period_name') or '').strip()
+    if not period_name:
+        raise ValueError('請填期別名稱')
+    claim_month = str(body.get('claimMonth') or body.get('claim_month') or '').strip()
+    amount_raw = body.get('amountPayable', body.get('amount_payable'))
+    amount_payable = None if amount_raw in (None, '') else _num(amount_raw)
+    half1 = _num(body.get('half1Amount', body.get('half1_amount')))
+    half2 = _num(body.get('half2Amount', body.get('half2_amount')))
+    deposit1 = _parse_date(body.get('depositDate1', body.get('deposit_date1')))
+    deposit2 = _parse_date(body.get('depositDate2', body.get('deposit_date2')))
+    deduction_amount = _num(body.get('deductionAmount', body.get('deduction_amount')))
+    deduction_memo = str(body.get('deductionMemo') or body.get('deduction_memo') or '').strip()
+    memo = str(body.get('memo') or '').strip()
+    batch_id = body.get('id')
+
+    if batch_id:
+        conn.execute(
+            '''
+            UPDATE commission_batches SET
+              period_name=?, claim_month=?, amount_payable=?,
+              half1_amount=?, deposit_date1=?, half2_amount=?, deposit_date2=?,
+              deduction_amount=?, deduction_memo=?, memo=?,
+              updated_at=datetime('now', 'localtime')
+            WHERE id=? AND site_id=?
+            ''',
+            (
+                period_name, claim_month, amount_payable,
+                half1, deposit1, half2, deposit2,
+                deduction_amount, deduction_memo, memo,
+                int(batch_id), site_id,
+            ),
+        )
+        return int(batch_id)
+
+    existing = conn.execute(
+        'SELECT id FROM commission_batches WHERE site_id=? AND period_name=?',
+        (site_id, period_name),
+    ).fetchone()
+    if existing:
+        conn.execute(
+            '''
+            UPDATE commission_batches SET
+              claim_month=?, amount_payable=?,
+              half1_amount=?, deposit_date1=?, half2_amount=?, deposit_date2=?,
+              deduction_amount=?, deduction_memo=?, memo=?,
+              updated_at=datetime('now', 'localtime')
+            WHERE id=?
+            ''',
+            (
+                claim_month, amount_payable,
+                half1, deposit1, half2, deposit2,
+                deduction_amount, deduction_memo, memo,
+                existing['id'],
+            ),
+        )
+        return int(existing['id'])
+
+    cur = conn.execute(
+        '''
+        INSERT INTO commission_batches (
+          site_id, period_name, claim_month, amount_payable,
+          half1_amount, deposit_date1, half2_amount, deposit_date2,
+          deduction_amount, deduction_memo, memo
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''',
+        (
+            site_id, period_name, claim_month, amount_payable,
+            half1, deposit1, half2, deposit2,
+            deduction_amount, deduction_memo, memo,
+        ),
+    )
+    return int(cur.lastrowid)
+
+
+def delete_commission_batch(conn: sqlite3.Connection, site_id: str, batch_id: int) -> bool:
+    cur = conn.execute(
+        'DELETE FROM commission_batches WHERE id=? AND site_id=?',
+        (batch_id, site_id),
+    )
+    return cur.rowcount > 0
+
+
+def build_commission_overview_excel(site_name: str, matrix: dict, batches: list[dict]) -> bytes:
+    """匯出請佣摘要＋期別服務費兩張表。"""
+    wb = Workbook()
+    font_name = '微軟正黑體'
+    header_fill = PatternFill('solid', fgColor='1A4D7C')
+    section_fill = PatternFill('solid', fgColor='D6EAF8')
+    full_fill = PatternFill('solid', fgColor='D5F5E3')
+    partial_fill = PatternFill('solid', fgColor='FCF3CF')
+
+    def style_header(ws, row):
+        for cell in ws[row]:
+            cell.font = Font(name=font_name, bold=True, color='FFFFFF', size=11)
+            cell.fill = header_fill
+            cell.alignment = Alignment(horizontal='center', wrap_text=True)
+
+    # —— 請佣摘要 ——
+    ws = wb.active
+    ws.title = '請佣摘要'
+    ws.append([f'{site_name}　請佣總覽（可請／已請／未請）'])
+    ws['A1'].font = Font(name=font_name, bold=True, size=16, color='1A4D7C')
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=5)
+    ws.append(['區塊', '戶／車', '4.85%可請(萬)', '3%保留款(萬)', '97%本期可請(萬)'])
+    style_header(ws, 2)
+    for key, label in (
+        ('claimable', '可請總金額'),
+        ('claimed', '已請款金額'),
+        ('unclaimed', '未請款總金額'),
+        ('forecast', '預計本月可請'),
+    ):
+        b = matrix.get(key) or {}
+        ws.append([
+            label,
+            f"{b.get('units', 0)}戶／{b.get('parking', 0)}車",
+            b.get('claimable', 0),
+            b.get('retention', 0),
+            b.get('payable', 0),
+        ])
+    ws.append([])
+    ws.append(['已入帳合計(萬)', (matrix.get('totals') or {}).get('bookedAmount', 0)])
+    for col in range(1, 6):
+        ws.column_dimensions[get_column_letter(col)].width = 18
+
+    # —— 期別服務費 ——
+    ws = wb.create_sheet('期別服務費')
+    ws.append([f'{site_name}　期別服務費（拆半入帳）'])
+    ws['A1'].font = Font(name=font_name, bold=True, size=16, color='1A4D7C')
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=10)
+    ws.append([
+        '請款期別', '請款月份', '戶／車', '服務費97%(萬)',
+        '拆半50%(萬)', '入帳日1', '拆半50%(萬)', '入帳日2',
+        '墊款／折讓', '備註',
+    ])
+    style_header(ws, 2)
+    for b in batches:
+        ws.append([
+            b.get('periodName'),
+            b.get('claimMonth'),
+            f"{b.get('units', 0)}戶／{b.get('parking', 0)}車",
+            b.get('amountPayable'),
+            b.get('half1Amount'),
+            b.get('depositDate1') or '',
+            b.get('half2Amount'),
+            b.get('depositDate2') or '',
+            b.get('deductionMemo') or (
+                f"墊／折 {_round4(b.get('deductionAmount') or 0)} 萬"
+                if b.get('deductionAmount') else ''
+            ),
+            b.get('memo') or '',
+        ])
+        fill = None
+        if b.get('status') == 'full':
+            fill = full_fill
+        elif b.get('status') == 'partial':
+            fill = partial_fill
+        if fill:
+            for cell in ws[ws.max_row]:
+                cell.fill = fill
+        for cell in ws[ws.max_row]:
+            cell.font = Font(name=font_name, size=11)
+    for col in range(1, 11):
+        ws.column_dimensions[get_column_letter(col)].width = 14
+    ws.column_dimensions['A'].width = 18
+    ws.column_dimensions['I'].width = 22
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
 
 def _parse_date(value) -> Optional[str]:
     if value is None or value == '':
@@ -646,6 +1027,11 @@ def aggregate_for_weekly(conn: sqlite3.Connection, site_id: str, start, end) -> 
     next_month_units = 0.0
     next_month_parking = 0.0
 
+    matrix_all = _comm_bucket()
+    matrix_claimed = _comm_bucket()
+    matrix_unclaimed = _comm_bucket()
+    matrix_forecast = _comm_bucket()
+
     sold_units = 0.0
     sold_parking = 0.0
     sold_amount = 0.0
@@ -698,33 +1084,53 @@ def aggregate_for_weekly(conn: sqlite3.Connection, site_id: str, start, end) -> 
                 elif pt:
                     residential_sold += units
 
-            claimable_amount += _num(row['commission_claimable'])
+            claimable = _num(row['commission_claimable'])
             payable = _num(row['commission_payable']) if 'commission_payable' in row.keys() else 0
             retention = _num(row['commission_retention']) if 'commission_retention' in row.keys() else 0
             claimed = _num(row['commission_claimed'])
+            period = str(row['commission_period'] if 'commission_period' in row.keys() else '')
+            claim_date = row['commission_claim_date'] if 'commission_claim_date' in row.keys() else None
+            is_claimed = bool(claimed > 0 or period.strip() or claim_date)
             unclaimed = (
                 _num(row['commission_unclaimed'])
                 if 'commission_unclaimed' in row.keys()
-                else max(_num(row['commission_claimable']) - claimed, 0)
+                else max(claimable - claimed, 0)
             )
-            if payable <= 0 and _num(row['commission_claimable']) > 0:
-                payable = _num(row['commission_claimable']) * 0.97
-            if retention <= 0 and _num(row['commission_claimable']) > 0:
-                retention = _num(row['commission_claimable']) * 0.03
+            if payable <= 0 and claimable > 0:
+                payable = claimable * 0.97
+            if retention <= 0 and claimable > 0:
+                retention = claimable * 0.03
             payable_amount += payable
             retention_amount += retention
+            claimable_amount += claimable
             claimed_amount += claimed
-            unclaimed_amount += unclaimed
             booked_amount += _num(row['commission_booked'])
-            if _num(row['commission_claimable']) > 0:
+            if claimable > 0:
                 claimable_units += units
                 claimable_parking += parking
-            if claimed > 0:
+                _add_to_bucket(matrix_all, units, parking, claimable, retention, payable)
+            if is_claimed:
                 claimed_units += units
                 claimed_parking += parking
-            next_month_amount += _num(row['next_month_claimable'])
-            next_month_units += _num(row['next_month_units'])
-            next_month_parking += _num(row['next_month_parking'])
+                _add_to_bucket(matrix_claimed, units, parking, claimable, retention, payable)
+            else:
+                unclaimed_amount += unclaimed if unclaimed else claimable
+                _add_to_bucket(matrix_unclaimed, units, parking, claimable, retention, payable)
+            nm_amt = _num(row['next_month_claimable'])
+            nm_u = _num(row['next_month_units'])
+            nm_p = _num(row['next_month_parking'])
+            next_month_amount += nm_amt
+            next_month_units += nm_u
+            next_month_parking += nm_p
+            if nm_amt or nm_u or nm_p:
+                _add_to_bucket(
+                    matrix_forecast,
+                    nm_u or units,
+                    nm_p or parking,
+                    0,
+                    0,
+                    nm_amt or payable,
+                )
 
         # 本週區塊
         def add(block, u, p, a):
@@ -752,6 +1158,23 @@ def aggregate_for_weekly(conn: sqlite3.Connection, site_id: str, start, end) -> 
             'amount': round(b['amount'], 2),
         }
 
+    unclaimed_units = max(claimable_units - claimed_units, 0)
+    unclaimed_parking = max(claimable_parking - claimed_parking, 0)
+    # 若未請金額未從「未請列」累加到（相容舊資料），用矩陣 payable 補
+    if unclaimed_amount <= 0 and matrix_unclaimed['payable'] > 0:
+        unclaimed_amount = matrix_unclaimed['payable']
+
+    commission_matrix = {
+        'claimable': _round_bucket(matrix_all),
+        'claimed': _round_bucket(matrix_claimed),
+        'unclaimed': _round_bucket(matrix_unclaimed),
+        'forecast': _round_bucket(matrix_forecast),
+        'totals': {
+            'bookedAmount': round(booked_amount, 4),
+            'sellableAmount': round(sellable_amount, 4),
+        },
+    }
+
     return {
         'deals': round_block(deals),
         'signings': round_block(signings),
@@ -772,10 +1195,13 @@ def aggregate_for_weekly(conn: sqlite3.Connection, site_id: str, start, end) -> 
             'claimableParking': round(claimable_parking, 2),
             'claimedUnits': round(claimed_units, 2),
             'claimedParking': round(claimed_parking, 2),
+            'unclaimedUnits': round(unclaimed_units, 2),
+            'unclaimedParking': round(unclaimed_parking, 2),
             'nextMonthUnits': round(next_month_units, 2),
             'nextMonthParking': round(next_month_parking, 2),
             'nextMonthAmount': round(next_month_amount, 4),
         },
+        'commissionMatrix': commission_matrix,
         'inventory': {
             'soldUnits': round(max(sold_units, 0), 2),
             'soldParking': round(max(sold_parking, 0), 2),
@@ -805,11 +1231,11 @@ def build_sales_excel(site_name: str, rows: list[dict]) -> bytes:
     ]
     ws.append([f'{site_name} 銷售總表'])
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(headers))
-    ws['A1'].font = Font(bold=True, size=16, color='1A4D7C')
+    ws['A1'].font = Font(name='微軟正黑體', bold=True, size=16, color='1A4D7C')
     ws.append(headers)
     header_fill = PatternFill('solid', fgColor='1A4D7C')
     for cell in ws[2]:
-        cell.font = Font(bold=True, color='FFFFFF')
+        cell.font = Font(name='微軟正黑體', bold=True, color='FFFFFF', size=11)
         cell.fill = header_fill
         cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
 
@@ -853,7 +1279,7 @@ def build_sales_excel(site_name: str, rows: list[dict]) -> bytes:
     ws.append(total_values)
     total_row = ws.max_row
     for cell in ws[total_row]:
-        cell.font = Font(bold=True)
+        cell.font = Font(name='微軟正黑體', bold=True, size=11)
         cell.fill = PatternFill('solid', fgColor='E8F1F8')
 
     thin = Border(
@@ -862,10 +1288,19 @@ def build_sales_excel(site_name: str, rows: list[dict]) -> bytes:
         top=Side(style='thin', color='D9E2EC'),
         bottom=Side(style='thin', color='D9E2EC'),
     )
-    for row in ws.iter_rows(min_row=2):
+    for row in ws.iter_rows(min_row=1):
         for cell in row:
+            if cell.value is not None or cell.font:
+                f = cell.font
+                cell.font = Font(
+                    name='微軟正黑體',
+                    size=f.size or 11,
+                    bold=bool(f.bold),
+                    color=f.color,
+                )
             cell.border = thin
             cell.alignment = Alignment(vertical='center', wrap_text=True)
+    # 標題列不加資料區邊框過密：上面已統一；維持欄寬
     for col in range(1, len(headers) + 1):
         ws.column_dimensions[get_column_letter(col)].width = 15
     ws.column_dimensions['D'].width = 18

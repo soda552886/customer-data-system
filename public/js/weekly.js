@@ -1,7 +1,17 @@
 let sites = [];
 let current = null;
+let regionOptions = [];
+let mediaOptions = [];
 
 const DIM_HEADERS = `
+  <tr>
+    <th>項目</th><th>前期累計</th><th>本週來人</th><th>目前累計</th>
+    <th>佔本週來人%</th><th>佔累計來人%</th>
+    <th>本週來電</th><th>佔本週來電%</th>
+    <th>本週成交</th><th>佔本週成交%</th>
+  </tr>`;
+
+const DIM_HEADERS_BASIC = `
   <tr>
     <th>項目</th><th>前期累計</th><th>本週小計</th><th>目前累計</th>
     <th>佔本週來人%</th><th>佔累計來人%</th>
@@ -81,6 +91,23 @@ async function loadMeta() {
   } catch { /* ignore */ }
 }
 
+async function loadFieldOptions(siteId) {
+  if (!siteId) return;
+  try {
+    const res = await fetch(`/api/fields?siteId=${encodeURIComponent(siteId)}`);
+    if (!res.ok) return;
+    const json = await res.json();
+    const options = {};
+    (json.sections || []).forEach((sec) => {
+      (sec.fields || []).forEach((field) => {
+        if (field.key && Array.isArray(field.options)) options[field.key] = field.options;
+      });
+    });
+    regionOptions = options.region || regionOptions;
+    mediaOptions = options.media1 || options.media || mediaOptions;
+  } catch { /* ignore */ }
+}
+
 function collectManualFromForm(baseManual) {
   const manual = JSON.parse(JSON.stringify(baseManual || {}));
   manual.weekNumber = Number(document.getElementById('weekNumber').value) || manual.weekNumber || null;
@@ -94,6 +121,26 @@ function collectManualFromForm(baseManual) {
     if (weather) days[idx].weather = weather.value.trim();
   });
   manual.days = days;
+
+  const phoneRows = [];
+  document.querySelectorAll('#phoneDetailTable tbody tr[data-phone-row]').forEach((tr) => {
+    const date = tr.querySelector('[data-field="date"]')?.value || '';
+    const region = tr.querySelector('[data-field="region"]')?.value || '';
+    const media = tr.querySelector('[data-field="media"]')?.value || '';
+    const count = Number(tr.querySelector('[data-field="count"]')?.value) || 0;
+    if (!count) return;
+    phoneRows.push({ date, region, media, count });
+  });
+  manual.phoneCallsDetail = phoneRows;
+  if (phoneRows.length) {
+    const byDay = {};
+    phoneRows.forEach((item) => {
+      byDay[item.date] = (byDay[item.date] || 0) + Number(item.count || 0);
+    });
+    (manual.days || []).forEach((day) => {
+      day.phoneCalls = byDay[day.date] || 0;
+    });
+  }
 
   ['deals', 'signings', 'purchases', 'unreported'].forEach((key) => {
     manual[key] = manual[key] || { units: 0, parking: 0, amount: 0 };
@@ -163,9 +210,9 @@ function calcCommissionDerived(c) {
   const n = (k) => Number(c[k]) || 0;
   const round4 = (x) => Math.round(x * 10000) / 10000;
   return {
-    unclaimedAmount: round4(Math.max(n('claimableAmount') - n('claimedAmount'), 0)),
-    unclaimedUnits: Math.max(n('claimableUnits') - n('claimedUnits'), 0),
-    unclaimedParking: Math.max(n('claimableParking') - n('claimedParking'), 0),
+    unclaimedAmount: round4(n('unclaimedAmount') || Math.max(n('claimableAmount') - n('claimedAmount'), 0)),
+    unclaimedUnits: n('unclaimedUnits') || Math.max(n('claimableUnits') - n('claimedUnits'), 0),
+    unclaimedParking: n('unclaimedParking') || Math.max(n('claimableParking') - n('claimedParking'), 0),
     payableAmount: round4(n('payableAmount')),
     retentionAmount: round4(n('retentionAmount')),
     bookedAmount: round4(n('bookedAmount')),
@@ -190,6 +237,8 @@ function renderKpi(auto, manual) {
   const t = auto.totals || {};
   const p = auto.period || {};
   const phoneSum = (manual.days || []).reduce((s, d) => s + (Number(d.phoneCalls) || 0), 0);
+  const phoneDetailSum = (manual.phoneCallsDetail || []).reduce((s, d) => s + (Number(d.count) || 0), 0);
+  const phoneDisplay = phoneDetailSum || phoneSum;
   const deals = manual.deals || {};
   const mw = p.month || {};
   const yw = p.year || {};
@@ -197,7 +246,7 @@ function renderKpi(auto, manual) {
     { label: '實際來人', value: `${t.actualTotal ?? t.total ?? 0} 組` },
     { label: '納入週報', value: `${t.reportedTotal ?? t.total ?? 0} 組` },
     { label: '新客／回訪', value: `${t.new || 0} / ${t.return || 0}` },
-    { label: '本週來電', value: `${phoneSum} 通` },
+    { label: '本週來電', value: `${phoneDisplay} 通` },
     { label: '客資成交', value: `${t.deal || 0} 筆` },
     { label: '手填成交', value: `${deals.units || 0} 戶／${deals.parking || 0} 車` },
     { label: '成交金額', value: `${deals.amount || 0} 萬` },
@@ -212,12 +261,27 @@ function renderKpi(auto, manual) {
   `).join('');
 }
 
+function phoneCountByDay(manual, fallback = {}) {
+  const detail = manual?.phoneCallsDetail || [];
+  if (!detail.length) return { ...fallback };
+  const by = {};
+  detail.forEach((item) => {
+    if (!item.date) return;
+    by[item.date] = (by[item.date] || 0) + (Number(item.count) || 0);
+  });
+  return by;
+}
+
 function renderDaily(auto, manual) {
   const byDay = auto.byDay || [];
   const days = manual.days || [];
+  const phoneByDay = phoneCountByDay(manual, auto.phoneByDay || {});
   const tbody = document.querySelector('#dailyTable tbody');
   tbody.innerHTML = byDay.map((d, i) => {
     const m = days[i] || {};
+    const phones = phoneByDay[d.date] != null
+      ? phoneByDay[d.date]
+      : (Number(m.phoneCalls) || 0);
     return `<tr>
       <td class="cell-date">${escapeHtml(d.date)}</td>
       <td>${escapeHtml(d.weekday)}</td>
@@ -225,10 +289,85 @@ function renderDaily(auto, manual) {
       <td>${d.return}</td>
       <td><strong>${d.total}</strong></td>
       <td>${d.deal}</td>
-      <td><input type="number" min="0" class="table-input" data-field="phoneCalls" value="${Number(m.phoneCalls) || 0}"></td>
+      <td><strong>${phones}</strong></td>
       <td><input type="text" class="table-input" data-field="weather" value="${escapeHtml(m.weather || '')}" placeholder="晴／陰／雨"></td>
     </tr>`;
   }).join('');
+}
+
+function optionHtml(options, selected) {
+  const list = [...options];
+  if (selected && !list.includes(selected)) list.unshift(selected);
+  return ['<option value="">未填</option>']
+    .concat(list.map((opt) => `<option value="${escapeHtml(opt)}"${opt === selected ? ' selected' : ''}>${escapeHtml(opt)}</option>`))
+    .join('');
+}
+
+function renderPhoneDetail(manual) {
+  const tbody = document.querySelector('#phoneDetailTable tbody');
+  if (!tbody) return;
+  const rows = manual.phoneCallsDetail || [];
+  const weekDates = (manual.days || []).map((d) => d.date);
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="5" class="empty-row">尚無來電明細，請按「新增來電」</td></tr>';
+  } else {
+    tbody.innerHTML = rows.map((item, idx) => `
+      <tr data-phone-row="${idx}">
+        <td>
+          <select data-field="date">
+            ${weekDates.map((d) => `<option value="${d}"${d === item.date ? ' selected' : ''}>${d}</option>`).join('')}
+          </select>
+        </td>
+        <td><select data-field="region">${optionHtml(regionOptions, item.region)}</select></td>
+        <td><select data-field="media">${optionHtml(mediaOptions, item.media)}</select></td>
+        <td><input type="number" min="1" step="1" data-field="count" value="${Number(item.count) || 1}"></td>
+        <td><button type="button" class="btn-xs link-btn" data-del-phone="${idx}">刪除</button></td>
+      </tr>
+    `).join('');
+  }
+  const total = rows.reduce((s, r) => s + (Number(r.count) || 0), 0);
+  const summary = document.getElementById('phoneDetailSummary');
+  if (summary) summary.textContent = total ? `本週來電明細合計 ${total} 通` : '';
+  tbody.querySelectorAll('[data-del-phone]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      if (!current) return;
+      const manualData = collectManualFromForm(current.manual);
+      manualData.phoneCallsDetail.splice(Number(btn.dataset.delPhone), 1);
+      current.manual = manualData;
+      renderPhoneDetail(manualData);
+      renderDaily(current.auto || {}, manualData);
+      renderKpi(current.auto || {}, manualData);
+    });
+  });
+  tbody.querySelectorAll('select, input').forEach((el) => {
+    el.addEventListener('change', () => {
+      if (!current) return;
+      const manualData = collectManualFromForm(current.manual);
+      current.manual = manualData;
+      renderDaily(current.auto || {}, manualData);
+      renderKpi(current.auto || {}, manualData);
+      const total = (manualData.phoneCallsDetail || []).reduce((s, r) => s + (Number(r.count) || 0), 0);
+      const summary = document.getElementById('phoneDetailSummary');
+      if (summary) summary.textContent = total ? `本週來電明細合計 ${total} 通` : '';
+    });
+  });
+}
+
+function addPhoneCallRow() {
+  if (!current) {
+    showToast('請先載入本週資料', 'error');
+    return;
+  }
+  const manual = collectManualFromForm(current.manual);
+  manual.phoneCallsDetail = manual.phoneCallsDetail || [];
+  manual.phoneCallsDetail.push({
+    date: (manual.days || [])[0]?.date || current.weekStart,
+    region: '',
+    media: '',
+    count: 1,
+  });
+  current.manual = manual;
+  renderPhoneDetail(manual);
 }
 
 function renderDealInputs(manual) {
@@ -289,6 +428,39 @@ function renderInventory(manual, derived) {
   });
 }
 
+function fmtWeekNum(val) {
+  const n = Number(val || 0);
+  if (Number.isInteger(n)) return String(n);
+  return String(Math.round(n * 10000) / 10000);
+}
+
+function renderWeeklyCommissionMatrix(matrix) {
+  const el = document.getElementById('weeklyCommissionMatrix');
+  if (!el) return;
+  if (!matrix) {
+    el.innerHTML = '<p class="hint">從銷售總表更新後，會顯示可請／已請／未請矩陣</p>';
+    return;
+  }
+  const cards = [
+    { key: 'claimable', title: '可請總金額' },
+    { key: 'claimed', title: '已請款金額' },
+    { key: 'unclaimed', title: '未請款總金額' },
+    { key: 'forecast', title: '預計本月可請' },
+  ];
+  el.innerHTML = cards.map((c) => {
+    const b = matrix[c.key] || {};
+    return `<div class="commission-matrix-card">
+      <h3>${escapeHtml(c.title)}</h3>
+      <div class="upc">${fmtWeekNum(b.units)}戶／${fmtWeekNum(b.parking)}車</div>
+      <dl>
+        <dt>4.85%</dt><dd>${fmtWeekNum(b.claimable)} 萬</dd>
+        <dt>3%保留</dt><dd>${fmtWeekNum(b.retention)} 萬</dd>
+        <dt>97%可請</dt><dd>${fmtWeekNum(b.payable)} 萬</dd>
+      </dl>
+    </div>`;
+  }).join('');
+}
+
 function renderCommission(manual, derived) {
   const c = manual.commission || {};
   const fields = [
@@ -322,6 +494,7 @@ function renderCommission(manual, derived) {
     { label: '已入帳(萬)', value: `${d.bookedAmount}` },
     { label: '本月預計可請(戶/車/萬)', value: `${d.nextMonthUnits} / ${d.nextMonthParking} / ${d.nextMonthAmount}` },
   ]);
+  renderWeeklyCommissionMatrix(current?.commissionMatrix || current?.suggested?.commissionMatrix);
   document.querySelectorAll('[data-block="commission"]').forEach((el) => {
     el.addEventListener('input', refreshDerivedFromForm);
   });
@@ -365,7 +538,7 @@ function renderConversion(auto) {
       <td>${name}</td>
       <td>${r.visits}</td>
       <td>${r.deals}</td>
-      <td><strong>${r.rate}%</strong></td>
+      <td><strong>${escapeHtml(r.rate ?? '—')}</strong></td>
       <td>${r.amount ?? 0}</td>
       <td>${r.refunds ?? 0}</td>
       <td>${r.refundAmount ?? 0}</td>
@@ -381,29 +554,47 @@ function filterDimRows(rows, mode) {
   const dataRows = rows.filter((r) => r.name !== '合計');
   let shown = dataRows;
   if (mode === 'week') {
-    shown = dataRows.filter((r) => Number(r.weekVisits || r.count || 0) > 0);
+    shown = dataRows.filter((r) =>
+      Number(r.weekVisits || r.count || 0) > 0 || Number(r.weekPhones || 0) > 0);
   } else if (mode === 'cum') {
-    shown = dataRows.filter((r) => Number(r.cumVisits || 0) > 0 || Number(r.weekVisits || 0) > 0);
+    shown = dataRows.filter((r) =>
+      Number(r.cumVisits || 0) > 0
+      || Number(r.weekVisits || 0) > 0
+      || Number(r.weekPhones || 0) > 0);
   }
   const totalRow = rows.find((r) => r.name === '合計');
   return totalRow ? [...shown, totalRow] : shown;
 }
 
-function renderDimTable(tableId, rows) {
+function renderDimTable(tableId, rows, withPhones = false) {
   const table = document.getElementById(tableId);
   if (!table) return;
   const thead = table.querySelector('thead');
-  if (thead && !thead.innerHTML.trim()) thead.innerHTML = DIM_HEADERS;
-  if (tableId === 'regionDimTable' && thead) thead.innerHTML = DIM_HEADERS;
+  if (thead) thead.innerHTML = withPhones ? DIM_HEADERS : DIM_HEADERS_BASIC;
   const tbody = table.querySelector('tbody');
   const mode = document.getElementById('dimFilterMode')?.value || 'week';
   const filtered = filterDimRows(rows, mode);
+  const colSpan = withPhones ? 10 : 8;
   if (!filtered.length) {
-    tbody.innerHTML = '<tr><td colspan="8" class="empty-row">尚無資料</td></tr>';
+    tbody.innerHTML = `<tr><td colspan="${colSpan}" class="empty-row">尚無資料</td></tr>`;
     return;
   }
   tbody.innerHTML = filtered.map((r) => {
     const name = r.name === '合計' ? `<strong>${escapeHtml(r.name)}</strong>` : escapeHtml(r.name);
+    if (withPhones) {
+      return `<tr>
+        <td>${name}</td>
+        <td>${r.priorVisits ?? 0}</td>
+        <td>${r.weekVisits ?? r.count ?? 0}</td>
+        <td><strong>${r.cumVisits ?? 0}</strong></td>
+        <td>${r.weekVisitPct ?? 0}%</td>
+        <td>${r.cumVisitPct ?? 0}%</td>
+        <td><strong>${r.weekPhones ?? 0}</strong></td>
+        <td>${r.weekPhonePct ?? 0}%</td>
+        <td>${r.weekDeals ?? 0}</td>
+        <td>${r.weekDealPct ?? 0}%</td>
+      </tr>`;
+    }
     return `<tr>
     <td>${name}</td>
     <td>${r.priorVisits ?? 0}</td>
@@ -420,11 +611,12 @@ function renderDimTable(tableId, rows) {
 function renderAllDimTables() {
   if (!current?.auto) return;
   const auto = current.auto;
-  renderDimTable('regionDimTable', auto.byRegion);
-  renderDimTable('mediaDimTable', auto.byMedia);
-  renderDimTable('sourceDimTable', auto.bySource);
-  renderDimTable('occupationDimTable', auto.byOccupation);
-  renderDimTable('ageDimTable', auto.byAge);
+  renderDimTable('regionDimTable', auto.byRegion, true);
+  renderDimTable('mediaDimTable', auto.byMedia, true);
+  renderDimTable('sourceDimTable', auto.bySource, false);
+  renderDimTable('purposeDimTable', auto.byPurpose, false);
+  renderDimTable('occupationDimTable', auto.byOccupation, false);
+  renderDimTable('ageDimTable', auto.byAge, false);
 }
 
 function renderVisitorMini(elId, rows, emptyText) {
@@ -547,6 +739,7 @@ function applySuggestedFromSales() {
     manual.inventory = { ...manual.inventory, ...s.inventory };
   }
   current.manual = manual;
+  current.commissionMatrix = s.commissionMatrix || null;
   renderDealInputs(manual);
   renderInventory(manual, null);
   renderCommission(manual, null);
@@ -587,6 +780,8 @@ async function applyCommissionFromSales() {
   const manual = collectManualFromForm(current.manual);
   manual.commission = { ...manual.commission, ...(s.commission || {}) };
   current.manual = manual;
+  current.commissionMatrix = s.commissionMatrix || null;
+  current.suggested = s;
   renderCommission(manual, null);
   document.getElementById('commissionSuggestHint').textContent =
     `已帶入銷售總表 ${s.totalRecords} 筆請佣資料`;
@@ -607,9 +802,11 @@ function renderAll(payload) {
   const auto = payload.auto || {};
   const derived = payload.derived || {};
   const suggested = payload.suggested || {};
+  current.commissionMatrix = suggested.commissionMatrix || payload.commissionMatrix || null;
   renderKpi(auto, manual);
   renderVisitorSelect(auto, manual);
   renderDaily(auto, manual);
+  renderPhoneDetail(manual);
   renderAllDimTables();
   renderDealInputs(manual);
   renderInventory(manual, derived.inventory);
@@ -644,6 +841,7 @@ async function loadWeek() {
     return;
   }
   updateRangeLabel();
+  await loadFieldOptions(siteId);
   try {
     const params = new URLSearchParams({ siteId, weekStart: document.getElementById('weekStart').value });
     const res = await fetch(`/api/weekly/summary?${params}`);
@@ -735,6 +933,7 @@ async function init() {
 
   await loadSites();
   await loadMeta();
+  await loadFieldOptions(document.getElementById('weekSite').value);
 
   document.getElementById('weekStart').addEventListener('change', updateRangeLabel);
   document.getElementById('loadWeekBtn').addEventListener('click', loadWeek);
@@ -752,6 +951,7 @@ async function init() {
   document.getElementById('applyVisitorsBtn').addEventListener('click', applyVisitorSelection);
   document.getElementById('fillFromSalesBtn').addEventListener('click', applySuggestedFromSales);
   document.getElementById('fillCommissionFromSalesBtn').addEventListener('click', applyCommissionFromSales);
+  document.getElementById('addPhoneCallBtn')?.addEventListener('click', addPhoneCallRow);
   document.getElementById('dimFilterMode')?.addEventListener('change', renderAllDimTables);
   document.getElementById('exportWeekBtn').addEventListener('click', async () => {
     if (!current) {

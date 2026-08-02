@@ -17,6 +17,105 @@ from openpyxl.utils import get_column_letter
 WEEKDAY_LABELS = ['一', '二', '三', '四', '五', '六', '日']
 HOPE_SINCERITY = {'A', 'A+', 'A-', 'B', 'B+', '有望', '高'}
 FORMER_SALES_LABEL = '前期銷售'
+COMMISSION_RATE_DEFAULT = 0.0485
+# 公司習慣字體；貼到 PPT／Word 時較少再手動改
+EXCEL_FONT_NAME = '微軟正黑體'
+EXCEL_FONT_SIZE = 11
+
+
+def _font(**kwargs):
+    kwargs.setdefault('name', EXCEL_FONT_NAME)
+    kwargs.setdefault('size', EXCEL_FONT_SIZE)
+    return Font(**kwargs)
+
+
+def _conversion_ratio_label(visits, deals) -> str:
+    """接待組數 ÷ 成交組數，呈現如 18.2:1（接 18.2 組成交 1 組）。"""
+    v = _num(visits)
+    d = _num(deals)
+    if d <= 0:
+        return '—'
+    return f'{round(v / d, 1)}:1'
+
+
+def _apply_sheet_font(ws, name=EXCEL_FONT_NAME, size=EXCEL_FONT_SIZE):
+    """整張工作表統一為微軟正黑體（保留粗體／顏色／原字級）。"""
+    for row in ws.iter_rows():
+        for cell in row:
+            f = cell.font
+            cell.font = Font(
+                name=name,
+                size=f.size or size,
+                bold=bool(f.bold),
+                italic=bool(f.italic),
+                color=f.color,
+                strike=bool(f.strike),
+                underline=f.underline,
+            )
+
+
+def _finalize_workbook_fonts(wb):
+    for ws in wb.worksheets:
+        _apply_sheet_font(ws)
+
+
+def _to_zh_int(n: int) -> str:
+    """把正整數轉成中文數字（供週次標題，如 86 → 八十六）。"""
+    digits = '零一二三四五六七八九'
+    n = int(n or 0)
+    if n < 0:
+        return str(n)
+    if n < 10:
+        return digits[n]
+    if n < 20:
+        return '十' + (digits[n - 10] if n > 10 else '')
+    if n < 100:
+        tens, ones = divmod(n, 10)
+        return digits[tens] + '十' + (digits[ones] if ones else '')
+    if n < 1000:
+        hundreds, rest = divmod(n, 100)
+        if rest == 0:
+            return digits[hundreds] + '百'
+        if rest < 10:
+            return digits[hundreds] + '百零' + digits[rest]
+        return digits[hundreds] + '百' + _to_zh_int(rest)
+    return str(n)
+
+
+def _fmt_num(val) -> str:
+    try:
+        x = float(val or 0)
+    except (TypeError, ValueError):
+        return str(val or 0)
+    if abs(x - round(x)) < 1e-9:
+        return f'{int(round(x)):,}'
+    return f'{x:,.4f}'.rstrip('0').rstrip('.')
+
+
+def _fmt_upc(units=0, parking=0, amount=0) -> str:
+    return f'{_fmt_num(units)}戶／{_fmt_num(parking)}車／{_fmt_num(amount)}萬'
+
+
+def _star_counts(rows, value_key='weekVisits') -> str:
+    parts = []
+    for r in rows or []:
+        name = r.get('name')
+        if not name or name == '合計':
+            continue
+        val = _num(r.get(value_key))
+        if not val:
+            continue
+        parts.append(f'{name}*{_fmt_num(val)}')
+    return '、'.join(parts) if parts else '—'
+
+
+def _phone_star_counts(bucket: dict) -> str:
+    parts = []
+    for name, val in sorted((bucket or {}).items(), key=lambda x: (-x[1], x[0])):
+        if not name or not val:
+            continue
+        parts.append(f'{name}*{_fmt_num(val)}')
+    return '、'.join(parts) if parts else '—'
 
 
 def init_weekly_tables(conn: sqlite3.Connection):
@@ -121,6 +220,7 @@ def empty_manual_payload(start, end, week_number=None):
             'officeTotal': 42,
             'officeSold': 0,
         },
+        'phoneCallsDetail': [],
         'reviewNotes': '',
         'competitorNotes': '',
         'memo': '',
@@ -306,14 +406,16 @@ def build_auto_stats(
         'occupation': defaultdict(_dim_bucket),
         'age': defaultdict(_dim_bucket),
         'source': defaultdict(_dim_bucket),
+        'purpose': defaultdict(_dim_bucket),
     }
-    # 新客專用（區域／媒體／來源／職業／年齡報表）
+    # 新客專用（區域／媒體／來源／職業／年齡／購屋用途報表）
     dim_new = {
         'region': defaultdict(_dim_bucket),
         'media': defaultdict(_dim_bucket),
         'source': defaultdict(_dim_bucket),
         'occupation': defaultdict(_dim_bucket),
         'age': defaultdict(_dim_bucket),
+        'purpose': defaultdict(_dim_bucket),
     }
 
     visitors_all_week = []
@@ -380,6 +482,9 @@ def build_auto_stats(
         occupation = str(data.get('occupation') or '未填').strip() or '未填'
         age = str(data.get('age') or '未填').strip() or '未填'
         source = str(data.get('customerSource') or '未填').strip() or '未填'
+        purpose = str(
+            data.get('purchasePurpose') or data.get('purchaseMotive') or data.get('purchaseNeed') or '未填'
+        ).strip() or '未填'
         sincerity = str(data.get('sincerity') or '').strip()
 
         in_week = bool(d and start <= d <= end)
@@ -408,6 +513,7 @@ def build_auto_stats(
             'occupation': occupation,
             'age': age,
             'source': source,
+            'purpose': purpose,
             'sincerity': sincerity,
             'salesperson1': staff1,
             'salesperson2': staff2,
@@ -473,6 +579,7 @@ def build_auto_stats(
         for dim_key, dim_val in (
             ('region', region), ('media', media),
             ('occupation', occupation), ('age', age), ('source', source),
+            ('purpose', purpose),
         ):
             add_dim(dim_all[dim_key], dim_val, 1.0, is_deal and not is_refund, amount, use_week, in_prior)
             if is_new and dim_key in dim_new:
@@ -544,7 +651,8 @@ def build_auto_stats(
             'amount': round(st['amount'], 2),
             'refunds': round(st['refunds'], 2),
             'refundAmount': round(st['refundAmount'], 2),
-            'rate': round((deal_n / visits * 100), 1) if visits else 0,
+            'rate': _conversion_ratio_label(visits, deal_n),
+            'ratio': round(visits / deal_n, 1) if deal_n else None,
             'weekVisits': round(st['weekVisits'], 2),
             'weekDeals': round(st['weekDeals'], 2),
             'weekAmount': round(st['weekAmount'], 2),
@@ -568,7 +676,8 @@ def build_auto_stats(
             'weekAmount': round(sum(x['weekAmount'] for x in conversion), 2),
             'weekRefunds': round(sum(x['weekRefunds'] for x in conversion), 2),
         }
-        tot['rate'] = round((tot['deals'] / tot['visits'] * 100), 1) if tot['visits'] else 0
+        tot['rate'] = _conversion_ratio_label(tot['visits'], tot['deals'])
+        tot['ratio'] = round(tot['visits'] / tot['deals'], 1) if tot['deals'] else None
         conversion.append(tot)
 
     all_dims = dims_pack(dim_all, week_visits, week_deals, cum_visits, cum_deals)
@@ -594,6 +703,7 @@ def build_auto_stats(
         'bySource': new_dims['source'],
         'byOccupation': new_dims['occupation'],
         'byAge': new_dims['age'],
+        'byPurpose': new_dims['purpose'],
         'dimensions': {
             'all': all_dims,
             'newOnly': new_dims,
@@ -644,10 +754,19 @@ def commission_summary(manual: dict) -> dict:
     claimed_u = _num(c.get('claimedUnits'))
     claimable_p = _num(c.get('claimableParking'))
     claimed_p = _num(c.get('claimedParking'))
+    unclaimed_amt = _num(c.get('unclaimedAmount'))
+    if not unclaimed_amt:
+        unclaimed_amt = round(max(claimable_amt - claimed_amt, 0), 4)
+    unclaimed_u = _num(c.get('unclaimedUnits'))
+    if not unclaimed_u:
+        unclaimed_u = max(claimable_u - claimed_u, 0)
+    unclaimed_p = _num(c.get('unclaimedParking'))
+    if not unclaimed_p:
+        unclaimed_p = max(claimable_p - claimed_p, 0)
     return {
-        'unclaimedAmount': round(max(claimable_amt - claimed_amt, 0), 4),
-        'unclaimedUnits': max(claimable_u - claimed_u, 0),
-        'unclaimedParking': max(claimable_p - claimed_p, 0),
+        'unclaimedAmount': round(unclaimed_amt, 4),
+        'unclaimedUnits': unclaimed_u,
+        'unclaimedParking': unclaimed_p,
         'payableAmount': round(_num(c.get('payableAmount')), 4),
         'retentionAmount': round(_num(c.get('retentionAmount')), 4),
         'bookedAmount': round(_num(c.get('bookedAmount')), 4),
@@ -737,7 +856,7 @@ def list_weekly_reports(conn: sqlite3.Connection, site_id: str, limit: int = 30)
 
 
 def _style_header(ws, row=1):
-    header_font = Font(bold=True, color='FFFFFF')
+    header_font = _font(bold=True, color='FFFFFF')
     header_fill = PatternFill('solid', fgColor='1A4D7C')
     for cell in ws[row]:
         cell.font = header_font
@@ -745,15 +864,101 @@ def _style_header(ws, row=1):
         cell.alignment = Alignment(horizontal='center', wrap_text=True)
 
 
-def _append_dim_table(ws, title, rows, *, week_only=True):
+def normalize_phone_calls_detail(items) -> list:
+    """來電明細：日期／區域／媒體／通數。"""
+    out = []
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        count = max(_num(item.get('count'), 1), 0)
+        if count <= 0:
+            continue
+        region = str(item.get('region') or '').strip() or '未填'
+        media = str(item.get('media') or '').strip() or '未填'
+        date_s = parse_ymd(item.get('date'))
+        out.append({
+            'date': date_s.isoformat() if date_s else str(item.get('date') or '').strip()[:10],
+            'region': region,
+            'media': media,
+            'count': round(count, 2),
+        })
+    return out
+
+
+def phone_total_from_manual(manual: dict) -> float:
+    detail = normalize_phone_calls_detail(manual.get('phoneCallsDetail'))
+    if detail:
+        return round(sum(_num(x.get('count')) for x in detail), 2)
+    return round(sum(_num(d.get('phoneCalls')) for d in (manual.get('days') or [])), 2)
+
+
+def enrich_dims_with_phones(auto: dict, phone_details) -> dict:
+    """把來電明細併入區域／媒體表，與來人同表呈現。"""
+    detail = normalize_phone_calls_detail(phone_details)
+    by_region = defaultdict(float)
+    by_media = defaultdict(float)
+    by_day = defaultdict(float)
+    total = 0.0
+    for item in detail:
+        count = _num(item.get('count'))
+        by_region[item['region']] += count
+        by_media[item['media']] += count
+        if item.get('date'):
+            by_day[item['date']] += count
+        total += count
+
+    def patch(rows, bucket):
+        rows = [dict(r) for r in (rows or [])]
+        existing = {r.get('name') for r in rows}
+        insert_at = len(rows) - 1 if rows and rows[-1].get('name') == '合計' else len(rows)
+        for name, phones in sorted(bucket.items(), key=lambda x: (-x[1], x[0])):
+            if name in existing:
+                continue
+            rows.insert(insert_at, {
+                'name': name,
+                'priorVisits': 0, 'weekVisits': 0, 'cumVisits': 0,
+                'priorDeals': 0, 'weekDeals': 0, 'cumDeals': 0,
+                'priorAmount': 0, 'weekAmount': 0, 'cumAmount': 0,
+                'weekVisitPct': 0, 'cumVisitPct': 0,
+                'weekDealPct': 0, 'cumDealPct': 0,
+                'count': 0,
+            })
+            insert_at += 1
+            existing.add(name)
+        for r in rows:
+            if r.get('name') == '合計':
+                phones = total
+            else:
+                phones = bucket.get(r.get('name'), 0)
+            r['weekPhones'] = round(phones, 2)
+            r['weekPhonePct'] = _pct(phones, total)
+        return rows
+
+    auto = dict(auto or {})
+    auto['byRegion'] = patch(auto.get('byRegion'), by_region)
+    auto['byMedia'] = patch(auto.get('byMedia'), by_media)
+    auto['phoneTotal'] = round(total, 2)
+    auto['phoneByDay'] = {k: round(v, 2) for k, v in by_day.items()}
+    auto['phoneByRegion'] = {k: round(v, 2) for k, v in by_region.items()}
+    auto['phoneByMedia'] = {k: round(v, 2) for k, v in by_media.items()}
+    return auto
+
+
+def _append_dim_table(ws, title, rows, *, week_only=True, with_phones=False):
     if title:
         ws.append([title])
-    ws.append([
-        '項目', '前期累計(來人)', '本週小計(來人)', '目前累計(來人)',
-        '佔本週來人%', '佔累計來人%',
-        '前期成交', '本週成交', '累計成交',
-        '佔本週成交%', '佔累計成交%',
-    ])
+    if with_phones:
+        ws.append([
+            '項目', '本週來人', '佔本週來人%', '本週來電', '佔本週來電%',
+            '本週成交', '佔本週成交%', '前期來人', '累計來人',
+        ])
+    else:
+        ws.append([
+            '項目', '前期累計(來人)', '本週小計(來人)', '目前累計(來人)',
+            '佔本週來人%', '佔累計來人%',
+            '前期成交', '本週成交', '累計成交',
+            '佔本週成交%', '佔累計成交%',
+        ])
     _style_header(ws, ws.max_row)
     total_row = None
     shown = 0
@@ -761,29 +966,87 @@ def _append_dim_table(ws, title, rows, *, week_only=True):
         if r.get('name') == '合計':
             total_row = r
             continue
-        if week_only and not float(r.get('weekVisits') or 0):
+        has_week = float(r.get('weekVisits') or 0) or float(r.get('weekPhones') or 0)
+        if week_only and not has_week:
             continue
-        ws.append([
-            r.get('name'), r.get('priorVisits'), r.get('weekVisits'), r.get('cumVisits'),
-            r.get('weekVisitPct'), r.get('cumVisitPct'),
-            r.get('priorDeals'), r.get('weekDeals'), r.get('cumDeals'),
-            r.get('weekDealPct'), r.get('cumDealPct'),
-        ])
-        for col in (5, 6, 10, 11):
-            ws.cell(ws.max_row, col).number_format = '0.##"%"'
+        if with_phones:
+            ws.append([
+                r.get('name'), r.get('weekVisits'), r.get('weekVisitPct'),
+                r.get('weekPhones', 0), r.get('weekPhonePct', 0),
+                r.get('weekDeals'), r.get('weekDealPct'),
+                r.get('priorVisits'), r.get('cumVisits'),
+            ])
+            for col in (3, 5, 7):
+                ws.cell(ws.max_row, col).number_format = '0.##"%"'
+        else:
+            ws.append([
+                r.get('name'), r.get('priorVisits'), r.get('weekVisits'), r.get('cumVisits'),
+                r.get('weekVisitPct'), r.get('cumVisitPct'),
+                r.get('priorDeals'), r.get('weekDeals'), r.get('cumDeals'),
+                r.get('weekDealPct'), r.get('cumDealPct'),
+            ])
+            for col in (5, 6, 10, 11):
+                ws.cell(ws.max_row, col).number_format = '0.##"%"'
         shown += 1
     if total_row:
-        ws.append([
-            total_row.get('name'), total_row.get('priorVisits'), total_row.get('weekVisits'),
-            total_row.get('cumVisits'), total_row.get('weekVisitPct'), total_row.get('cumVisitPct'),
-            total_row.get('priorDeals'), total_row.get('weekDeals'), total_row.get('cumDeals'),
-            total_row.get('weekDealPct'), total_row.get('cumDealPct'),
-        ])
-        for col in (5, 6, 10, 11):
-            ws.cell(ws.max_row, col).number_format = '0.##"%"'
+        if with_phones:
+            ws.append([
+                total_row.get('name'), total_row.get('weekVisits'), total_row.get('weekVisitPct'),
+                total_row.get('weekPhones', 0), total_row.get('weekPhonePct', 0),
+                total_row.get('weekDeals'), total_row.get('weekDealPct'),
+                total_row.get('priorVisits'), total_row.get('cumVisits'),
+            ])
+            for col in (3, 5, 7):
+                ws.cell(ws.max_row, col).number_format = '0.##"%"'
+        else:
+            ws.append([
+                total_row.get('name'), total_row.get('priorVisits'), total_row.get('weekVisits'),
+                total_row.get('cumVisits'), total_row.get('weekVisitPct'), total_row.get('cumVisitPct'),
+                total_row.get('priorDeals'), total_row.get('weekDeals'), total_row.get('cumDeals'),
+                total_row.get('weekDealPct'), total_row.get('cumDealPct'),
+            ])
+            for col in (5, 6, 10, 11):
+                ws.cell(ws.max_row, col).number_format = '0.##"%"'
     if week_only and shown == 0 and not total_row:
         ws.append(['（本週無資料）'])
     ws.append([])
+
+
+def _append_ppt_dim_rows(ws, rows):
+    """PPT 摘要用：區域／媒體列，來人與來電同表。"""
+    shown = 0
+    total_row = None
+    for r in rows or []:
+        if r.get('name') == '合計':
+            total_row = r
+            continue
+        visits = _num(r.get('weekVisits'))
+        phones = _num(r.get('weekPhones'))
+        deals = _num(r.get('weekDeals'))
+        if not visits and not phones and not deals:
+            continue
+        ws.append([
+            r.get('name'),
+            visits,
+            phones,
+            deals,
+            f"{r.get('weekVisitPct', 0)}%",
+            f"{r.get('weekPhonePct', 0)}%",
+        ])
+        shown += 1
+    if total_row:
+        ws.append([
+            total_row.get('name'),
+            total_row.get('weekVisits', 0),
+            total_row.get('weekPhones', 0),
+            total_row.get('weekDeals', 0),
+            f"{total_row.get('weekVisitPct', 0)}%",
+            f"{total_row.get('weekPhonePct', 0)}%",
+        ])
+        for col in range(1, 7):
+            ws.cell(ws.max_row, col).font = _font(bold=True)
+    elif shown == 0:
+        ws.append(['（本週無資料）', '', '', '', '', ''])
 
 
 def build_weekly_excel(site_name: str, start, end, week_number, manual: dict, auto: dict) -> bytes:
@@ -797,18 +1060,171 @@ def build_weekly_excel(site_name: str, start, end, week_number, manual: dict, au
         bottom=Side(style='thin', color='CCCCCC'),
     )
 
-    # —— 週報一覽（接近 PPT 閱讀順序，單頁）——
-    ws = wb.active
-    ws.title = '週報一覽'
     t = auto.get('totals') or {}
     p = auto.get('period') or {}
-    phone_sum = sum(_num(d.get('phoneCalls')) for d in (manual.get('days') or []))
+    phone_sum = phone_total_from_manual(manual)
     deals = manual.get('deals') or {}
     signings = manual.get('signings') or {}
     purchases = manual.get('purchases') or {}
+    unreported = manual.get('unreported') or {}
 
-    ws.append([f'{site_name}　第{week_number}週週報告'])
-    ws['A1'].font = Font(bold=True, size=16, color='1A4D7C')
+    # —— PPT摘要（對齊既有週報投影片首頁：來人成交／請佣／客況）——
+    ws = wb.active
+    ws.title = 'PPT摘要'
+    title_fill = PatternFill('solid', fgColor='1A4D7C')
+    section_fill = PatternFill('solid', fgColor='D6EAF8')
+    soft_fill = PatternFill('solid', fgColor='F8FBFE')
+    c = manual.get('commission') or {}
+    week_title = f'第{_to_zh_int(int(week_number or 0))}週　{start.year}/{start.month}/{start.day}～{end.year}/{end.month}/{end.day}'
+    ws.append([week_title])
+    ws['A1'].font = _font(bold=True, size=18, color='FFFFFF')
+    ws['A1'].fill = title_fill
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=6)
+    ws.append([site_name])
+    ws['A2'].font = _font(bold=True, size=12, color='1A4D7C')
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=6)
+    ws.append([])
+
+    # 一、本週來人成交狀況
+    ws.append(['一、本週來人成交狀況'])
+    ws['A' + str(ws.max_row)].font = _font(bold=True, size=12, color='1A4D7C')
+    ws['A' + str(ws.max_row)].fill = section_fill
+    ws.merge_cells(start_row=ws.max_row, start_column=1, end_row=ws.max_row, end_column=6)
+    ws.append(['項目', '數值', '本週', '戶／車／萬', '累計', '戶／車／萬'])
+    _style_header(ws, ws.max_row)
+    visit_total = t.get('reportedTotal', t.get('total', 0))
+    return_total = t.get('return', 0)
+    inv_raw = manual.get('inventory') or {}
+    cum_units = _num(c.get('sellableUnits')) or _num(inv_raw.get('soldUnits'))
+    cum_parking = _num(c.get('sellableParking')) or _num(inv_raw.get('soldParking'))
+    cum_amount = _num(c.get('sellableAmount')) or _num(inv_raw.get('soldAmount'))
+    rate = COMMISSION_RATE_DEFAULT
+    claimable_amt = _num(c.get('claimableAmount'))
+    claimed_amt = _num(c.get('claimedAmount'))
+    booked_amt = _num(c.get('bookedAmount'))
+    retention_amt = _num(c.get('retentionAmount')) or com.get('retentionAmount')
+    unclaimed_amt = _num(c.get('unclaimedAmount')) or com.get('unclaimedAmount')
+    unclaimed_units = _num(c.get('unclaimedUnits'), com.get('unclaimedUnits'))
+    # 若手填沒給未請戶數，用可請−已請
+    if not unclaimed_units:
+        unclaimed_units = com.get('unclaimedUnits')
+    unclaimed_parking = _num(c.get('unclaimedParking'), com.get('unclaimedParking'))
+    if not unclaimed_parking:
+        unclaimed_parking = com.get('unclaimedParking')
+    comm_sales_amount = round(claimable_amt / rate, 4) if claimable_amt else cum_amount
+    unclaimed_sales = round(unclaimed_amt / rate, 4) if unclaimed_amt else 0
+    claimed_commission_total = round(claimed_amt + retention_amt, 4) if (claimed_amt or retention_amt) else claimable_amt
+    currently_claimed = booked_amt if booked_amt else claimed_amt
+    for row in [
+        ('來人', f'{_fmt_num(visit_total)} 組', '本週成交', _fmt_upc(deals.get('units'), deals.get('parking'), deals.get('amount')),
+         '累計成交', _fmt_upc(cum_units, cum_parking, cum_amount)),
+        ('來電', f'{_fmt_num(phone_sum)} 通', '本週簽約', _fmt_upc(signings.get('units'), signings.get('parking'), signings.get('amount')),
+         '累計簽約', _fmt_upc(cum_units, cum_parking, cum_amount)),
+        ('回籠', f'{_fmt_num(return_total)} 組', '本週買進', _fmt_upc(purchases.get('units'), purchases.get('parking'), purchases.get('amount')),
+         '', ''),
+    ]:
+        ws.append(list(row))
+        for col in range(1, 7):
+            ws.cell(ws.max_row, col).fill = soft_fill
+    ws.append([])
+
+    # 二、累積銷售金額戶數及可請佣金
+    ws.append(['二、累積銷售金額　戶數及可請佣金'])
+    ws['A' + str(ws.max_row)].font = _font(bold=True, size=12, color='1A4D7C')
+    ws['A' + str(ws.max_row)].fill = section_fill
+    ws.merge_cells(start_row=ws.max_row, start_column=1, end_row=ws.max_row, end_column=6)
+    matrix = auto.get('commissionMatrix') or {}
+    if matrix:
+        ws.append(['區塊', '戶／車', '4.85%可請(萬)', '3%保留(萬)', '97%可請(萬)', '補充'])
+        _style_header(ws, ws.max_row)
+        for key, label, extra in (
+            ('claimable', '可請總金額', ''),
+            ('claimed', '已請款金額', f'目前已請 {_fmt_num(currently_claimed)}　應放未放 {_fmt_num(retention_amt)}'),
+            ('unclaimed', '未請款總金額', ''),
+            ('forecast', '預計本月可請', ''),
+        ):
+            b = matrix.get(key) or {}
+            ws.append([
+                label,
+                f"{_fmt_num(b.get('units'))}戶／{_fmt_num(b.get('parking'))}車",
+                b.get('claimable', 0),
+                b.get('retention', 0),
+                b.get('payable', 0),
+                extra,
+            ])
+            for col in range(1, 7):
+                ws.cell(ws.max_row, col).fill = soft_fill
+    else:
+        ws.append(['項目', '戶／車／萬', '補充', '', '', ''])
+        _style_header(ws, ws.max_row)
+        for label, main, extra in [
+            ('累積銷售金額', _fmt_upc(cum_units, cum_parking, cum_amount), ''),
+            ('請佣銷售金額', _fmt_upc(
+                _num(c.get('claimableUnits')) or cum_units,
+                _num(c.get('claimableParking')) or cum_parking,
+                comm_sales_amount,
+            ), ''),
+            ('可請佣戶數車位',
+             f"{_fmt_num(_num(c.get('claimableUnits')))}戶／{_fmt_num(_num(c.get('claimableParking')))}車／{_fmt_num(claimable_amt)}萬",
+             ''),
+            ('已請佣金戶數車位',
+             f"{_fmt_num(_num(c.get('claimedUnits')))}戶／{_fmt_num(_num(c.get('claimedParking')))}車／{_fmt_num(claimed_commission_total)}萬",
+             f'4.85%　目前已請 {_fmt_num(currently_claimed)} 萬　應放未放 {_fmt_num(retention_amt)} 萬'),
+            ('未請佣金戶數車位',
+             f"{_fmt_num(unclaimed_units)}戶／{_fmt_num(unclaimed_parking)}車",
+             f'未請銷售金額 {_fmt_num(unclaimed_sales)} 萬　未請佣金 {_fmt_num(unclaimed_amt)} 萬'),
+        ]:
+            ws.append([label, main, extra, '', '', ''])
+            ws.merge_cells(start_row=ws.max_row, start_column=3, end_row=ws.max_row, end_column=6)
+            for col in range(1, 7):
+                ws.cell(ws.max_row, col).fill = soft_fill
+    ws.append([])
+
+    # 三、區域／媒體（來人＋來電並陳）
+    ws.append(['三、區域／媒體（來人與來電並陳）'])
+    ws['A' + str(ws.max_row)].font = _font(bold=True, size=12, color='1A4D7C')
+    ws['A' + str(ws.max_row)].fill = section_fill
+    ws.merge_cells(start_row=ws.max_row, start_column=1, end_row=ws.max_row, end_column=6)
+    ws.append(['區域', '本週來人', '本週來電', '本週成交', '佔來人%', '佔來電%'])
+    _style_header(ws, ws.max_row)
+    _append_ppt_dim_rows(ws, auto.get('byRegion') or [])
+    ws.append([])
+    ws.append(['媒體', '本週來人', '本週來電', '本週成交', '佔來人%', '佔來電%'])
+    _style_header(ws, ws.max_row)
+    _append_ppt_dim_rows(ws, auto.get('byMedia') or [])
+    ws.append([])
+
+    # 四、本週客況（文字，方便直接貼投影片）
+    hope_n = len(auto.get('hopeCustomers') or [])
+    new_n = t.get('new', 0)
+    ws.append(['四、本週客況'])
+    ws['A' + str(ws.max_row)].font = _font(bold=True, size=12, color='1A4D7C')
+    ws['A' + str(ws.max_row)].fill = section_fill
+    ws.merge_cells(start_row=ws.max_row, start_column=1, end_row=ws.max_row, end_column=6)
+    situation_lines = [
+        f'來人 {_fmt_num(visit_total)} 組（新客 {_fmt_num(new_n)}、回籠 {_fmt_num(return_total)}、有望 {_fmt_num(hope_n)}）',
+        f'來電 {_fmt_num(phone_sum)} 通',
+        f'來人區域：{_star_counts(auto.get("byRegion") or [])}',
+        f'來電區域：{_phone_star_counts(auto.get("phoneByRegion") or {})}',
+        f'來人媒體：{_star_counts(auto.get("byMedia") or [])}',
+        f'來電媒體：{_phone_star_counts(auto.get("phoneByMedia") or {})}',
+        f'購屋型態：{_star_counts(auto.get("byPurpose") or [])}',
+    ]
+    if manual.get('reviewNotes'):
+        situation_lines.append(f'成交檢討：{manual.get("reviewNotes")}')
+    if manual.get('memo'):
+        situation_lines.append(f'備註：{manual.get("memo")}')
+    for line in situation_lines:
+        ws.append([line])
+        ws.merge_cells(start_row=ws.max_row, start_column=1, end_row=ws.max_row, end_column=6)
+        ws.cell(ws.max_row, 1).alignment = Alignment(wrap_text=True, vertical='top')
+    for col, width in enumerate([18, 22, 22, 14, 12, 12], start=1):
+        ws.column_dimensions[get_column_letter(col)].width = width
+
+    # —— 週報一覽（完整資料）——
+    ws = wb.create_sheet('週報一覽')
+    ws.append([f'{site_name}　第{week_number}週週報告（完整）'])
+    ws['A1'].font = _font(bold=True, size=16, color='1A4D7C')
     ws.append([f'區間：{start.isoformat()} ～ {end.isoformat()}'])
     ws.append([])
     ws.append(['一、本週來人成交狀況'])
@@ -842,7 +1258,7 @@ def build_weekly_excel(site_name: str, start, end, week_number, manual: dict, au
     ws.append(['備註', manual.get('memo') or ''])
     ws.append([])
     ws.append(['四、銷售成交比'])
-    ws.append(['銷售人員', '累計接待', '累計成交', '成交率%', '成交金額', '退戶組數', '退戶金額',
+    ws.append(['銷售人員', '累計接待', '累計成交', '成交比', '成交金額', '退戶組數', '退戶金額',
                '本週接待', '本週成交', '本週金額'])
     _style_header(ws, ws.max_row)
     for row in auto.get('conversion') or []:
@@ -851,19 +1267,14 @@ def build_weekly_excel(site_name: str, start, end, week_number, manual: dict, au
             row.get('amount'), row.get('refunds'), row.get('refundAmount'),
             row.get('weekVisits'), row.get('weekDeals'), row.get('weekAmount'),
         ])
-        ws.cell(ws.max_row, 4).number_format = '0.##"%"'
     ws.append([])
-    ws.append(['五、來人區域分析（新客）'])
-    _append_dim_table(ws, '', auto.get('byRegion') or [])
-    # _append_dim_table already added header; fix by writing region inline without duplicate title
-    # Actually _append_dim_table adds title then header - for section we already have title. OK.
-
-    ws.append(['六、來人媒體分析（新客）'])
-    _append_dim_table(ws, '', auto.get('byMedia') or [])
+    ws.append(['五、區域分析（來人／來電並陳）'])
+    _append_dim_table(ws, '', auto.get('byRegion') or [], with_phones=True)
+    ws.append(['六、媒體分析（來人／來電並陳）'])
+    _append_dim_table(ws, '', auto.get('byMedia') or [], with_phones=True)
     ws.append(['七、職業／年齡分析（新客）'])
     _append_dim_table(ws, '職業（新客）', auto.get('byOccupation') or [])
     _append_dim_table(ws, '年齡（新客）', auto.get('byAge') or [])
-
     for col in range(1, 12):
         ws.column_dimensions[get_column_letter(col)].width = 14
     ws.column_dimensions['A'].width = 22
@@ -873,16 +1284,29 @@ def build_weekly_excel(site_name: str, start, end, week_number, manual: dict, au
     ws.append(['日期', '星期', '新客', '回訪', '合計', '成交', '來電', '天氣'])
     _style_header(ws)
     days = manual.get('days') or []
+    phone_by_day = auto.get('phoneByDay') or {}
     for i, d in enumerate(auto.get('byDay') or []):
         m = days[i] if i < len(days) else {}
+        day_phones = phone_by_day.get(d.get('date'), m.get('phoneCalls', 0))
         ws.append([
             d.get('date'), d.get('weekday'), d.get('new'), d.get('return'),
-            d.get('total'), d.get('deal'), m.get('phoneCalls', 0), m.get('weather', ''),
+            d.get('total'), d.get('deal'), day_phones, m.get('weather', ''),
         ])
+
+    # —— 來電明細 ——
+    ws = wb.create_sheet('來電明細')
+    ws.append(['日期', '區域', '媒體', '通數'])
+    _style_header(ws)
+    phone_detail = normalize_phone_calls_detail(manual.get('phoneCallsDetail'))
+    if phone_detail:
+        for item in phone_detail:
+            ws.append([item.get('date'), item.get('region'), item.get('media'), item.get('count')])
+    else:
+        ws.append(['（尚無來電明細）'])
 
     # —— 成交比 ——
     ws = wb.create_sheet('成交比')
-    ws.append(['銷售人員', '累計接待', '累計成交', '成交率%', '成交金額', '退戶組數', '退戶金額',
+    ws.append(['銷售人員', '累計接待', '累計成交', '成交比', '成交金額', '退戶組數', '退戶金額',
                '本週接待', '本週成交', '本週金額', '本週退戶'])
     _style_header(ws)
     for row in auto.get('conversion') or []:
@@ -891,7 +1315,6 @@ def build_weekly_excel(site_name: str, start, end, week_number, manual: dict, au
             row.get('amount'), row.get('refunds'), row.get('refundAmount'),
             row.get('weekVisits'), row.get('weekDeals'), row.get('weekAmount'), row.get('weekRefunds'),
         ])
-        ws.cell(ws.max_row, 4).number_format = '0.##"%"'
 
     # —— 去化／請佣 ——
     ws = wb.create_sheet('去化與請佣')
@@ -916,6 +1339,26 @@ def build_weekly_excel(site_name: str, start, end, week_number, manual: dict, au
     ws.append(['請佣項目', '數值'])
     _style_header(ws, ws.max_row)
     c = manual.get('commission') or {}
+    matrix = auto.get('commissionMatrix') or {}
+    if matrix:
+        ws.append(['【可請／已請／未請矩陣】'])
+        ws.append(['區塊', '戶／車', '4.85%(萬)', '3%保留(萬)', '97%可請(萬)'])
+        _style_header(ws, ws.max_row)
+        for key, label in (
+            ('claimable', '可請總金額'),
+            ('claimed', '已請款金額'),
+            ('unclaimed', '未請款總金額'),
+            ('forecast', '預計本月可請'),
+        ):
+            b = matrix.get(key) or {}
+            ws.append([
+                label,
+                f"{b.get('units', 0)}戶／{b.get('parking', 0)}車",
+                b.get('claimable', 0),
+                b.get('retention', 0),
+                b.get('payable', 0),
+            ])
+        ws.append([])
     for label, key in [
         ('累積銷售戶數', 'sellableUnits'),
         ('累積銷售車位', 'sellableParking'),
@@ -927,25 +1370,29 @@ def build_weekly_excel(site_name: str, start, end, week_number, manual: dict, au
         ('已請佣戶數', 'claimedUnits'),
         ('可請佣車位', 'claimableParking'),
         ('已請佣車位', 'claimedParking'),
+        ('未請佣戶數', 'unclaimedUnits'),
+        ('未請佣車位', 'unclaimedParking'),
         ('預計本月可請戶數', 'nextMonthUnits'),
         ('預計本月可請車位', 'nextMonthParking'),
         ('預計本月可請金額(萬)', 'nextMonthAmount'),
     ]:
         ws.append([label, c.get(key, 0)])
     ws.append(['未請佣金額(萬)', com['unclaimedAmount']])
-    ws.append(['未請佣戶數', com['unclaimedUnits']])
-    ws.append(['未請佣車位', com['unclaimedParking']])
+    if not c.get('unclaimedUnits'):
+        ws.append(['未請佣戶數', com['unclaimedUnits']])
+        ws.append(['未請佣車位', com['unclaimedParking']])
 
     # —— 維度詳表 ——
     ws = wb.create_sheet('區域媒體職業年齡')
-    for title, rows in [
-        ('區域（新客）', auto.get('byRegion')),
-        ('媒體（新客）', auto.get('byMedia')),
-        ('來源（新客）', auto.get('bySource')),
-        ('職業（新客）', auto.get('byOccupation')),
-        ('年齡（新客）', auto.get('byAge')),
+    for title, rows, with_phones in [
+        ('區域（新客＋來電）', auto.get('byRegion'), True),
+        ('媒體（新客＋來電）', auto.get('byMedia'), True),
+        ('來源（新客）', auto.get('bySource'), False),
+        ('購屋型態（新客）', auto.get('byPurpose'), False),
+        ('職業（新客）', auto.get('byOccupation'), False),
+        ('年齡（新客）', auto.get('byAge'), False),
     ]:
-        _append_dim_table(ws, title, rows, week_only=False)
+        _append_dim_table(ws, title, rows, week_only=False, with_phones=with_phones)
 
     # —— 客況（僅納入週報者）——
     ws = wb.create_sheet('本週客況')
@@ -977,13 +1424,13 @@ def build_weekly_excel(site_name: str, start, end, week_number, manual: dict, au
         ws.append([v.get('date'), v.get('visitType'), v.get('customerName'), v.get('phone'),
                    v.get('region'), v.get('sincerity'), v.get('salesperson1')])
 
-    # 套用細邊框於一覽表數值區（輕量）
     for sheet in wb.worksheets:
-        for row in sheet.iter_rows(min_row=1, max_row=min(sheet.max_row, 80), max_col=min(sheet.max_column, 12)):
+        for row in sheet.iter_rows(min_row=1, max_row=min(sheet.max_row, 80), max_col=min(sheet.max_column, 18)):
             for cell in row:
                 if cell.value is not None:
                     cell.border = thin
 
+    _finalize_workbook_fonts(wb)
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
