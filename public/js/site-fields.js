@@ -98,8 +98,8 @@ function renderFieldCard(field) {
         <strong>${escapeHtml(isStaff ? '銷售人員（在職狀態）' : field.label)}</strong>
         <span class="hint field-options-count" data-count-for="${escapeHtml(field.key)}">${isStaff ? `在職 ${count}` : `${count}`} / ${total} 項</span>
         <button type="button" class="btn-sm" data-add-option="${escapeHtml(field.key)}">${isStaff ? '新增人員' : '新增選項'}</button>
-        <button type="button" class="btn-sm" data-select-all="${escapeHtml(field.key)}">全選在職</button>
-        <button type="button" class="btn-sm" data-select-none="${escapeHtml(field.key)}">全部離職</button>
+        <button type="button" class="btn-sm" data-select-all="${escapeHtml(field.key)}">${isStaff ? '全選在職' : '全選'}</button>
+        <button type="button" class="btn-sm" data-select-none="${escapeHtml(field.key)}">${isStaff ? '全部離職' : '全不選'}</button>
       </div>
       ${staffHint}
       <div class="checkbox-grid field-options-grid">${checks || '<p class="hint">尚無選項，請按「新增選項」</p>'}</div>
