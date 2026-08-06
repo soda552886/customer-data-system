@@ -90,6 +90,24 @@ def compute_commission(
     claimed = payable if is_claimed else 0.0
     unclaimed = max(claimable - claimed, 0)
 
+    # 請佣總表匯入：若檔案已有可請／已請／未請實數，優先採用（期別仍決定已請狀態）
+    extra = body.get('extra') if isinstance(body.get('extra'), dict) else {}
+    if extra.get('importClaimable') not in (None, ''):
+        claimable = max(_num(extra.get('importClaimable')), 0)
+        payable = claimable * payable_ratio
+        retention = claimable * retention_ratio
+        claimed = payable if is_claimed else 0.0
+        unclaimed = max(claimable - claimed, 0)
+    if extra.get('importPayable') not in (None, ''):
+        payable = max(_num(extra.get('importPayable')), 0)
+    if extra.get('importClaimed') not in (None, ''):
+        claimed = max(_num(extra.get('importClaimed')), 0)
+        is_claimed = is_claimed or claimed > 0
+    if extra.get('importUnclaimed') not in (None, ''):
+        unclaimed = max(_num(extra.get('importUnclaimed')), 0)
+    else:
+        unclaimed = max(claimable - claimed, 0)
+
     return {
         'commission_base_mode': mode,
         'commission_sales_amount': _round4(sales_amount),

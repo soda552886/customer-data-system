@@ -1049,6 +1049,260 @@ def _append_ppt_dim_rows(ws, rows):
         ws.append(['（本週無資料）', '', '', '', '', ''])
 
 
+def _ppt_fill_row(ws, values, fill, end_col=None):
+    ws.append(list(values))
+    last = end_col or len(values)
+    for col in range(1, last + 1):
+        cell = ws.cell(ws.max_row, col)
+        cell.fill = fill
+        cell.alignment = Alignment(vertical='center', wrap_text=True)
+
+
+def _ppt_section_title(ws, title, fill, end_col=10):
+    ws.append([title])
+    cell = ws.cell(ws.max_row, 1)
+    cell.font = _font(bold=True, size=12, color='1A4D7C')
+    cell.fill = fill
+    ws.merge_cells(start_row=ws.max_row, start_column=1, end_row=ws.max_row, end_column=end_col)
+
+
+def _build_ppt_summary_sheet(ws, *, site_name, start, end, week_number, manual, auto):
+    """對齊既有週報 PPT 首頁：來人成交｜累計請佣｜客況備註。"""
+    title_fill = PatternFill('solid', fgColor='1A4D7C')
+    section_fill = PatternFill('solid', fgColor='D6EAF8')
+    soft_fill = PatternFill('solid', fgColor='F8FBFE')
+    label_fill = PatternFill('solid', fgColor='EEF4FA')
+    thin = Border(
+        left=Side(style='thin', color='B0BEC5'),
+        right=Side(style='thin', color='B0BEC5'),
+        top=Side(style='thin', color='B0BEC5'),
+        bottom=Side(style='thin', color='B0BEC5'),
+    )
+
+    t = auto.get('totals') or {}
+    phone_sum = phone_total_from_manual(manual)
+    deals = manual.get('deals') or {}
+    signings = manual.get('signings') or {}
+    purchases = manual.get('purchases') or {}
+    c = manual.get('commission') or {}
+    com = commission_summary(manual)
+    matrix = auto.get('commissionMatrix') or {}
+    inv_raw = manual.get('inventory') or {}
+
+    visit_total = t.get('reportedTotal', t.get('total', 0))
+    return_total = t.get('return', 0)
+    cum_units = _num(c.get('sellableUnits')) or _num(inv_raw.get('soldUnits'))
+    cum_parking = _num(c.get('sellableParking')) or _num(inv_raw.get('soldParking'))
+    cum_amount = _num(c.get('sellableAmount')) or _num(inv_raw.get('soldAmount'))
+    rate = COMMISSION_RATE_DEFAULT
+    claimable_amt = _num(c.get('claimableAmount'))
+    claimed_amt = _num(c.get('claimedAmount'))
+    booked_amt = _num(c.get('bookedAmount'))
+    retention_amt = _num(c.get('retentionAmount')) or com.get('retentionAmount')
+    unclaimed_amt = _num(c.get('unclaimedAmount')) or com.get('unclaimedAmount')
+    unclaimed_units = _num(c.get('unclaimedUnits')) or com.get('unclaimedUnits')
+    unclaimed_parking = _num(c.get('unclaimedParking')) or com.get('unclaimedParking')
+    claimable_units = _num(c.get('claimableUnits')) or cum_units
+    claimable_parking = _num(c.get('claimableParking')) or cum_parking
+    claimed_units = _num(c.get('claimedUnits'))
+    claimed_parking = _num(c.get('claimedParking'))
+
+    # 優先用銷售總表矩陣（與請佣總覽同一套）
+    m_claim = matrix.get('claimable') or {}
+    m_claimed = matrix.get('claimed') or {}
+    m_unclaimed = matrix.get('unclaimed') or {}
+    if m_claim:
+        claimable_units = _num(m_claim.get('units'), claimable_units)
+        claimable_parking = _num(m_claim.get('parking'), claimable_parking)
+        claimable_amt = _num(m_claim.get('claimable'), claimable_amt)
+        retention_amt = _num(m_claim.get('retention'), retention_amt) or retention_amt
+    if m_claimed:
+        claimed_units = _num(m_claimed.get('units'), claimed_units)
+        claimed_parking = _num(m_claimed.get('parking'), claimed_parking)
+        claimed_amt = _num(m_claimed.get('payable'), claimed_amt) or claimed_amt
+        claimed_total_485 = _num(m_claimed.get('claimable')) or round(claimed_amt + retention_amt, 4)
+        claimed_retention = _num(m_claimed.get('retention'), retention_amt)
+    else:
+        claimed_total_485 = round(claimed_amt + retention_amt, 4) if (claimed_amt or retention_amt) else claimable_amt
+        claimed_retention = retention_amt
+    if m_unclaimed:
+        unclaimed_units = _num(m_unclaimed.get('units'), unclaimed_units)
+        unclaimed_parking = _num(m_unclaimed.get('parking'), unclaimed_parking)
+        # PPT「未請佣金額」對的是 4.85% 可請，不是 97%
+        unclaimed_amt = (
+            _num(m_unclaimed.get('claimable'))
+            or _num(m_unclaimed.get('payable'), unclaimed_amt)
+            or unclaimed_amt
+        )
+
+    comm_sales_amount = round(claimable_amt / rate, 4) if claimable_amt else cum_amount
+    unclaimed_sales = round(unclaimed_amt / rate, 4) if unclaimed_amt else 0
+    currently_claimed = booked_amt if booked_amt else claimed_amt
+
+    week_title = (
+        f'第{_to_zh_int(int(week_number or 0))}週　'
+        f'{start.year}/{start.month}/{start.day}～{end.year}/{end.month}/{end.day}'
+    )
+    cols = 11
+    ws.append([week_title])
+    ws['A1'].font = _font(bold=True, size=18, color='FFFFFF')
+    ws['A1'].fill = title_fill
+    ws['A1'].alignment = Alignment(vertical='center')
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=cols)
+    ws.row_dimensions[1].height = 28
+
+    ws.append([site_name, '', '', '', '貼到 PPT 首頁用（戶／車／萬已分欄）'])
+    ws['A2'].font = _font(bold=True, size=12, color='1A4D7C')
+    ws['E2'].font = _font(size=10, color='607D8B')
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=4)
+    ws.merge_cells(start_row=2, start_column=5, end_row=2, end_column=cols)
+    ws.append([])
+
+    # —— 一、本週來人成交狀況（左來人｜中本週｜右累計）——
+    _ppt_section_title(ws, '一、本週來人成交狀況', section_fill, cols)
+    ws.append([
+        '來人資訊', '數值', '單位',
+        '本週', '戶', '車', '萬',
+        '累計', '戶', '車', '萬',
+    ])
+    _style_header(ws, ws.max_row)
+    for col in range(1, cols + 1):
+        ws.cell(ws.max_row, col).border = thin
+
+    visit_rows = [
+        (
+            '來人', visit_total, '組',
+            '本週成交', deals.get('units'), deals.get('parking'), deals.get('amount'),
+            '累計成交', cum_units, cum_parking, cum_amount,
+        ),
+        (
+            '來電', phone_sum, '通',
+            '本週簽約', signings.get('units'), signings.get('parking'), signings.get('amount'),
+            '累計簽約', cum_units, cum_parking, cum_amount,
+        ),
+        (
+            '回訪', return_total, '組',
+            '本週實進', purchases.get('units'), purchases.get('parking'), purchases.get('amount'),
+            '', '', '', '',
+        ),
+    ]
+    for row in visit_rows:
+        values = [
+            row[0], _fmt_num(row[1]), row[2],
+            row[3],
+            _fmt_num(row[4]) if row[3] else '',
+            _fmt_num(row[5]) if row[3] else '',
+            _fmt_num(row[6]) if row[3] else '',
+            row[7],
+            _fmt_num(row[8]) if row[7] else '',
+            _fmt_num(row[9]) if row[7] else '',
+            _fmt_num(row[10]) if row[7] else '',
+        ]
+        _ppt_fill_row(ws, values, soft_fill, cols)
+        for col in range(1, cols + 1):
+            ws.cell(ws.max_row, col).border = thin
+        for col in (1, 4, 8):
+            ws.cell(ws.max_row, col).fill = label_fill
+            ws.cell(ws.max_row, col).font = _font(bold=True)
+
+    ws.append([])
+
+    # —— 二、累積銷售／請佣（對齊 PPT 五列）——
+    _ppt_section_title(ws, '二、累積銷售金額　戶數及可請佣金', section_fill, cols)
+    ws.append(['項目', '戶', '車', '金額(萬)', '補充（可直接貼 PPT）', '', '', '', '', '', ''])
+    _style_header(ws, ws.max_row)
+    ws.merge_cells(start_row=ws.max_row, start_column=5, end_row=ws.max_row, end_column=cols)
+    for col in range(1, cols + 1):
+        ws.cell(ws.max_row, col).border = thin
+
+    commission_rows = [
+        ('累積銷售金額', cum_units, cum_parking, cum_amount, ''),
+        ('請佣銷售金額', claimable_units, claimable_parking, comm_sales_amount, ''),
+        ('可請佣戶數車位', claimable_units, claimable_parking, claimable_amt, ''),
+        (
+            '已請佣金戶數車位',
+            claimed_units,
+            claimed_parking,
+            claimed_total_485,
+            (
+                f'總4.85% {_fmt_num(claimed_total_485)}　'
+                f'月底已請 {_fmt_num(currently_claimed)}　'
+                f'尾款未請 {_fmt_num(claimed_retention)}'
+            ),
+        ),
+        (
+            '未請佣金戶數車位',
+            unclaimed_units,
+            unclaimed_parking,
+            unclaimed_amt,
+            (
+                f'未請銷售金額 {_fmt_num(unclaimed_sales)}　'
+                f'未請佣金額 {_fmt_num(unclaimed_amt)}'
+            ),
+        ),
+    ]
+    for label, units, parking, amount, note in commission_rows:
+        _ppt_fill_row(ws, [
+            label, _fmt_num(units), _fmt_num(parking), _fmt_num(amount), note,
+            '', '', '', '', '', '',
+        ], soft_fill, cols)
+        ws.merge_cells(start_row=ws.max_row, start_column=5, end_row=ws.max_row, end_column=cols)
+        for col in range(1, cols + 1):
+            ws.cell(ws.max_row, col).border = thin
+        ws.cell(ws.max_row, 1).fill = label_fill
+        ws.cell(ws.max_row, 1).font = _font(bold=True)
+
+    ws.append([])
+
+    # —— 三、本週客況（備註文字）——
+    hope_n = len(auto.get('hopeCustomers') or [])
+    new_n = t.get('new', 0)
+    _ppt_section_title(ws, '三、本週客況（備註）', section_fill, cols)
+    situation_lines = [
+        f'1. 來人 {_fmt_num(visit_total)} 組（新客 {_fmt_num(new_n)}、回訪 {_fmt_num(return_total)}、有望 {_fmt_num(hope_n)}）',
+        f'2. 來人區域：{_star_counts(auto.get("byRegion") or [])}',
+        f'3. 來人媒體：{_star_counts(auto.get("byMedia") or [])}',
+        f'4. 購屋型態：{_star_counts(auto.get("byPurpose") or [])}',
+    ]
+    if phone_sum:
+        situation_lines.insert(
+            1,
+            f'   來電 {_fmt_num(phone_sum)} 通；來電區域：{_phone_star_counts(auto.get("phoneByRegion") or {})}',
+        )
+    if manual.get('reviewNotes'):
+        situation_lines.append(f'成交檢討：{manual.get("reviewNotes")}')
+    if manual.get('memo'):
+        situation_lines.append(f'備註：{manual.get("memo")}')
+    for line in situation_lines:
+        ws.append([line])
+        ws.merge_cells(start_row=ws.max_row, start_column=1, end_row=ws.max_row, end_column=cols)
+        ws.cell(ws.max_row, 1).alignment = Alignment(wrap_text=True, vertical='top')
+        ws.cell(ws.max_row, 1).fill = soft_fill
+        ws.row_dimensions[ws.max_row].height = 22
+
+    widths = [18, 10, 8, 12, 10, 10, 12, 12, 10, 10, 12]
+    for col, width in enumerate(widths, start=1):
+        ws.column_dimensions[get_column_letter(col)].width = width
+
+
+def _build_ppt_region_media_sheet(ws, auto):
+    """PPT 第二頁素材：區域／媒體（來人＋來電）。"""
+    section_fill = PatternFill('solid', fgColor='D6EAF8')
+    ws.append(['區域／媒體（貼 PPT 客況或分析頁用）'])
+    ws['A1'].font = _font(bold=True, size=14, color='1A4D7C')
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=6)
+    ws.append([])
+    ws.append(['區域', '本週來人', '本週來電', '本週成交', '佔來人%', '佔來電%'])
+    _style_header(ws, ws.max_row)
+    _append_ppt_dim_rows(ws, auto.get('byRegion') or [])
+    ws.append([])
+    ws.append(['媒體', '本週來人', '本週來電', '本週成交', '佔來人%', '佔來電%'])
+    _style_header(ws, ws.max_row)
+    _append_ppt_dim_rows(ws, auto.get('byMedia') or [])
+    for col, width in enumerate([14, 12, 12, 12, 10, 10], start=1):
+        ws.column_dimensions[get_column_letter(col)].width = width
+
+
 def build_weekly_excel(site_name: str, start, end, week_number, manual: dict, auto: dict) -> bytes:
     wb = Workbook()
     inv = inventory_summary(manual)
@@ -1068,158 +1322,22 @@ def build_weekly_excel(site_name: str, start, end, week_number, manual: dict, au
     purchases = manual.get('purchases') or {}
     unreported = manual.get('unreported') or {}
 
-    # —— PPT摘要（對齊既有週報投影片首頁：來人成交／請佣／客況）——
+    # —— PPT摘要（對齊既有週報投影片首頁）——
     ws = wb.active
     ws.title = 'PPT摘要'
-    title_fill = PatternFill('solid', fgColor='1A4D7C')
-    section_fill = PatternFill('solid', fgColor='D6EAF8')
-    soft_fill = PatternFill('solid', fgColor='F8FBFE')
-    c = manual.get('commission') or {}
-    week_title = f'第{_to_zh_int(int(week_number or 0))}週　{start.year}/{start.month}/{start.day}～{end.year}/{end.month}/{end.day}'
-    ws.append([week_title])
-    ws['A1'].font = _font(bold=True, size=18, color='FFFFFF')
-    ws['A1'].fill = title_fill
-    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=6)
-    ws.append([site_name])
-    ws['A2'].font = _font(bold=True, size=12, color='1A4D7C')
-    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=6)
-    ws.append([])
+    _build_ppt_summary_sheet(
+        ws,
+        site_name=site_name,
+        start=start,
+        end=end,
+        week_number=week_number,
+        manual=manual,
+        auto=auto,
+    )
 
-    # 一、本週來人成交狀況
-    ws.append(['一、本週來人成交狀況'])
-    ws['A' + str(ws.max_row)].font = _font(bold=True, size=12, color='1A4D7C')
-    ws['A' + str(ws.max_row)].fill = section_fill
-    ws.merge_cells(start_row=ws.max_row, start_column=1, end_row=ws.max_row, end_column=6)
-    ws.append(['項目', '數值', '本週', '戶／車／萬', '累計', '戶／車／萬'])
-    _style_header(ws, ws.max_row)
-    visit_total = t.get('reportedTotal', t.get('total', 0))
-    return_total = t.get('return', 0)
-    inv_raw = manual.get('inventory') or {}
-    cum_units = _num(c.get('sellableUnits')) or _num(inv_raw.get('soldUnits'))
-    cum_parking = _num(c.get('sellableParking')) or _num(inv_raw.get('soldParking'))
-    cum_amount = _num(c.get('sellableAmount')) or _num(inv_raw.get('soldAmount'))
-    rate = COMMISSION_RATE_DEFAULT
-    claimable_amt = _num(c.get('claimableAmount'))
-    claimed_amt = _num(c.get('claimedAmount'))
-    booked_amt = _num(c.get('bookedAmount'))
-    retention_amt = _num(c.get('retentionAmount')) or com.get('retentionAmount')
-    unclaimed_amt = _num(c.get('unclaimedAmount')) or com.get('unclaimedAmount')
-    unclaimed_units = _num(c.get('unclaimedUnits'), com.get('unclaimedUnits'))
-    # 若手填沒給未請戶數，用可請−已請
-    if not unclaimed_units:
-        unclaimed_units = com.get('unclaimedUnits')
-    unclaimed_parking = _num(c.get('unclaimedParking'), com.get('unclaimedParking'))
-    if not unclaimed_parking:
-        unclaimed_parking = com.get('unclaimedParking')
-    comm_sales_amount = round(claimable_amt / rate, 4) if claimable_amt else cum_amount
-    unclaimed_sales = round(unclaimed_amt / rate, 4) if unclaimed_amt else 0
-    claimed_commission_total = round(claimed_amt + retention_amt, 4) if (claimed_amt or retention_amt) else claimable_amt
-    currently_claimed = booked_amt if booked_amt else claimed_amt
-    for row in [
-        ('來人', f'{_fmt_num(visit_total)} 組', '本週成交', _fmt_upc(deals.get('units'), deals.get('parking'), deals.get('amount')),
-         '累計成交', _fmt_upc(cum_units, cum_parking, cum_amount)),
-        ('來電', f'{_fmt_num(phone_sum)} 通', '本週簽約', _fmt_upc(signings.get('units'), signings.get('parking'), signings.get('amount')),
-         '累計簽約', _fmt_upc(cum_units, cum_parking, cum_amount)),
-        ('回籠', f'{_fmt_num(return_total)} 組', '本週買進', _fmt_upc(purchases.get('units'), purchases.get('parking'), purchases.get('amount')),
-         '', ''),
-    ]:
-        ws.append(list(row))
-        for col in range(1, 7):
-            ws.cell(ws.max_row, col).fill = soft_fill
-    ws.append([])
-
-    # 二、累積銷售金額戶數及可請佣金
-    ws.append(['二、累積銷售金額　戶數及可請佣金'])
-    ws['A' + str(ws.max_row)].font = _font(bold=True, size=12, color='1A4D7C')
-    ws['A' + str(ws.max_row)].fill = section_fill
-    ws.merge_cells(start_row=ws.max_row, start_column=1, end_row=ws.max_row, end_column=6)
-    matrix = auto.get('commissionMatrix') or {}
-    if matrix:
-        ws.append(['區塊', '戶／車', '4.85%可請(萬)', '3%保留(萬)', '97%可請(萬)', '補充'])
-        _style_header(ws, ws.max_row)
-        for key, label, extra in (
-            ('claimable', '可請總金額', ''),
-            ('claimed', '已請款金額', f'目前已請 {_fmt_num(currently_claimed)}　應放未放 {_fmt_num(retention_amt)}'),
-            ('unclaimed', '未請款總金額', ''),
-            ('forecast', '預計本月可請', ''),
-        ):
-            b = matrix.get(key) or {}
-            ws.append([
-                label,
-                f"{_fmt_num(b.get('units'))}戶／{_fmt_num(b.get('parking'))}車",
-                b.get('claimable', 0),
-                b.get('retention', 0),
-                b.get('payable', 0),
-                extra,
-            ])
-            for col in range(1, 7):
-                ws.cell(ws.max_row, col).fill = soft_fill
-    else:
-        ws.append(['項目', '戶／車／萬', '補充', '', '', ''])
-        _style_header(ws, ws.max_row)
-        for label, main, extra in [
-            ('累積銷售金額', _fmt_upc(cum_units, cum_parking, cum_amount), ''),
-            ('請佣銷售金額', _fmt_upc(
-                _num(c.get('claimableUnits')) or cum_units,
-                _num(c.get('claimableParking')) or cum_parking,
-                comm_sales_amount,
-            ), ''),
-            ('可請佣戶數車位',
-             f"{_fmt_num(_num(c.get('claimableUnits')))}戶／{_fmt_num(_num(c.get('claimableParking')))}車／{_fmt_num(claimable_amt)}萬",
-             ''),
-            ('已請佣金戶數車位',
-             f"{_fmt_num(_num(c.get('claimedUnits')))}戶／{_fmt_num(_num(c.get('claimedParking')))}車／{_fmt_num(claimed_commission_total)}萬",
-             f'4.85%　目前已請 {_fmt_num(currently_claimed)} 萬　應放未放 {_fmt_num(retention_amt)} 萬'),
-            ('未請佣金戶數車位',
-             f"{_fmt_num(unclaimed_units)}戶／{_fmt_num(unclaimed_parking)}車",
-             f'未請銷售金額 {_fmt_num(unclaimed_sales)} 萬　未請佣金 {_fmt_num(unclaimed_amt)} 萬'),
-        ]:
-            ws.append([label, main, extra, '', '', ''])
-            ws.merge_cells(start_row=ws.max_row, start_column=3, end_row=ws.max_row, end_column=6)
-            for col in range(1, 7):
-                ws.cell(ws.max_row, col).fill = soft_fill
-    ws.append([])
-
-    # 三、區域／媒體（來人＋來電並陳）
-    ws.append(['三、區域／媒體（來人與來電並陳）'])
-    ws['A' + str(ws.max_row)].font = _font(bold=True, size=12, color='1A4D7C')
-    ws['A' + str(ws.max_row)].fill = section_fill
-    ws.merge_cells(start_row=ws.max_row, start_column=1, end_row=ws.max_row, end_column=6)
-    ws.append(['區域', '本週來人', '本週來電', '本週成交', '佔來人%', '佔來電%'])
-    _style_header(ws, ws.max_row)
-    _append_ppt_dim_rows(ws, auto.get('byRegion') or [])
-    ws.append([])
-    ws.append(['媒體', '本週來人', '本週來電', '本週成交', '佔來人%', '佔來電%'])
-    _style_header(ws, ws.max_row)
-    _append_ppt_dim_rows(ws, auto.get('byMedia') or [])
-    ws.append([])
-
-    # 四、本週客況（文字，方便直接貼投影片）
-    hope_n = len(auto.get('hopeCustomers') or [])
-    new_n = t.get('new', 0)
-    ws.append(['四、本週客況'])
-    ws['A' + str(ws.max_row)].font = _font(bold=True, size=12, color='1A4D7C')
-    ws['A' + str(ws.max_row)].fill = section_fill
-    ws.merge_cells(start_row=ws.max_row, start_column=1, end_row=ws.max_row, end_column=6)
-    situation_lines = [
-        f'來人 {_fmt_num(visit_total)} 組（新客 {_fmt_num(new_n)}、回籠 {_fmt_num(return_total)}、有望 {_fmt_num(hope_n)}）',
-        f'來電 {_fmt_num(phone_sum)} 通',
-        f'來人區域：{_star_counts(auto.get("byRegion") or [])}',
-        f'來電區域：{_phone_star_counts(auto.get("phoneByRegion") or {})}',
-        f'來人媒體：{_star_counts(auto.get("byMedia") or [])}',
-        f'來電媒體：{_phone_star_counts(auto.get("phoneByMedia") or {})}',
-        f'購屋型態：{_star_counts(auto.get("byPurpose") or [])}',
-    ]
-    if manual.get('reviewNotes'):
-        situation_lines.append(f'成交檢討：{manual.get("reviewNotes")}')
-    if manual.get('memo'):
-        situation_lines.append(f'備註：{manual.get("memo")}')
-    for line in situation_lines:
-        ws.append([line])
-        ws.merge_cells(start_row=ws.max_row, start_column=1, end_row=ws.max_row, end_column=6)
-        ws.cell(ws.max_row, 1).alignment = Alignment(wrap_text=True, vertical='top')
-    for col, width in enumerate([18, 22, 22, 14, 12, 12], start=1):
-        ws.column_dimensions[get_column_letter(col)].width = width
+    # —— PPT區域媒體（第二頁素材）——
+    ws_dim = wb.create_sheet('PPT區域媒體')
+    _build_ppt_region_media_sheet(ws_dim, auto)
 
     # —— 週報一覽（完整資料）——
     ws = wb.create_sheet('週報一覽')

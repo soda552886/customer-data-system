@@ -1555,54 +1555,83 @@ def _sales_export_rows(conn, site_id):
 
 
 def _sales_import_header(value):
-    return re.sub(r'[\s\u3000（）()]', '', str(value or '')).lower()
+    # 去掉空白、括號、斜線，讓「銷售日/(業主)」「合約銷售/總價」能對到別名
+    return re.sub(r'[\s\u3000（）()/／]', '', str(value or '')).lower()
+
+
+# 請佣總表常見重複欄名：取最後一次（合約區／底價區通常在右側）
+_SALES_HEADER_KEEP_LAST = {
+    _sales_import_header(x) for x in (
+        '房售價', '車售價', '房底', '車底', '房底價', '車底價',
+        '房車總底', '房車總底價', '房單價', '房底單價',
+    )
+}
 
 
 SALES_IMPORT_ALIASES = {
     'recordType': ['類型', '狀態', '銷售階段'],
-    'orderNo': ['訂單編號', '訂單', 'no', '編號'],
-    'unitNo': ['戶別', '戶號'],
+    'orderNo': ['訂單編號', '訂單'],
+    'unitNo': ['戶別', '戶號', '戶別樓層'],
     'customerName': ['客戶', '客戶姓名', '姓名'],
     'phone': ['電話', '手機'],
-    'productType': ['產品類型', '產品', '用途'],
-    'areaPing': ['坪數', '建物坪數'],
-    'parkingNo1': ['車位1', '車位號碼1'],
-    'parkingNo2': ['車位2', '車位號碼2'],
+    'productType': ['產品類型', '產品', '用途', '建物型態'],
+    'areaPing': ['坪數', '建物坪數', '戶別坪數'],
+    'parkingNo1': ['車位1', '車位號碼1', '車位編號1', '編號1', '汽車1'],
+    'parkingNo2': ['車位2', '車位號碼2', '車位編號2', '編號2', '汽車2'],
     'parkingNos': ['車位號碼', '車位'],
-    'houseSalePrice': ['房售價', '房屋成交價', '房售價未含其他費用'],
+    'houseSalePrice': ['房售價', '房屋成交價', '房售價未含其他費用', '實際房價'],
     'parkingSalePrice': ['車售價', '車位售價'],
-    'totalPrice': ['合約總價萬', '合約總價', '房車總價未含其他費用', '房車總價'],
-    'actualTotalPrice': ['實際成交總價萬', '實際成交總價'],
+    'totalPrice': [
+        '合約總價萬', '合約總價', '合約銷售總價',
+        '房車總價未含其他費用', '房車總價', '實際合約金額總價',
+    ],
+    'actualTotalPrice': [
+        '實際成交總價萬', '實際成交總價',
+        '房車售價未含附加及其他費用', '房車售價',
+    ],
     'houseBasePrice': ['房底價', '房底'],
     'parkingBasePrice': ['車底價', '車底'],
-    'basePrice': ['底總萬', '底總', '總底價'],
-    'surcharge': ['附加費'],
-    'applianceGift': ['家電禮券'],
+    'basePrice': ['底總萬', '底總', '總底價', '房車總底', '房車總底價'],
+    'surcharge': ['附加費', '其它費用', '其他費用'],
+    'applianceGift': ['家電禮券', '家電禮'],
     'pickupVoucher': ['提貨券'],
     'decoration': ['裝潢'],
-    'companyLoanInterest': ['公司貸利息'],
-    'depositDate': ['訂金日期', '下訂日', '銷售日期', '日期'],
+    'companyLoanInterest': ['公司貸利息', '公司貸利息'],
+    'depositDate': [
+        '訂金日期', '下訂日', '銷售日期', '銷售日業主', '銷售日',
+        '回報下定日', '成交日期',
+    ],
     'supplementDate': ['補足日', '補足日期'],
-    'signDate': ['簽約日', '簽約日期'],
-    'ownerSaleReportDate': ['業主報售日', '報售日'],
-    'ownerSignReportDate': ['業主報簽日', '報簽日'],
-    'salesperson1': ['銷售人員1', '銷售1', '銷售人員', '銷售'],
+    'signDate': ['簽約日', '簽約日期', '簽約日業主', '回報簽約日'],
+    'ownerSaleReportDate': ['業主報售日', '報售日', '銷售日業主'],
+    'ownerSignReportDate': ['業主報簽日', '報簽日', '簽約日業主'],
+    'salesperson1': ['銷售人員1', '銷售1', '銷售人員'],
     'salesperson2': ['銷售人員2', '銷售2'],
     'commissionBaseMode': ['請佣計價方式', '請佣方式'],
-    'commissionSalesAmount': ['請佣銷售金額萬', '請佣銷售金額'],
-    'commissionClaimable': ['可請佣萬', '可請佣'],
-    'commissionPayable': ['本期可請97%萬', '本期可請97%'],
-    'commissionRetention': ['保留款3%萬', '保留款3%'],
-    'commissionClaimed': ['已請萬', '已請佣金額萬', '已請佣金額'],
-    'commissionUnclaimed': ['未請萬', '未請金額萬', '未請金額'],
-    'commissionStatus': ['請佣狀態'],
+    'commissionSalesAmount': [
+        '請佣銷售金額萬', '請佣銷售金額', '請佣$', '請佣銷售金額$',
+    ],
+    'commissionClaimable': ['可請佣萬', '可請佣', '可請佣金', '可請4.85%'],
+    'commissionPayable': ['本期可請97%萬', '本期可請97%', '可請實際請款', '可請97%'],
+    'commissionRetention': ['保留款3%萬', '保留款3%', '可請保留款'],
+    'commissionClaimed': [
+        '已請萬', '已請佣金額萬', '已請佣金額', '已請實際請款',
+        '已請佣金', '已請97%',
+    ],
+    'commissionUnclaimed': [
+        '未請萬', '未請金額萬', '未請金額', '未請實際請款',
+        '未請佣金', '未請97%',
+    ],
+    'commissionStatus': ['請佣狀態', '請佣狀況'],
     'commissionPeriod': ['請佣期別'],
+    'commissionClaimMonth': ['請佣月份', '請款月份'],
     'commissionClaimDate': ['請佣日期'],
     'commissionBooked': ['已入帳金額萬', '已入帳金額'],
     'nextMonthUnits': ['預計本月可請戶數', '預計可於本月請款戶數'],
     'nextMonthParking': ['預計本月可請車位', '預計可於本月請款車位'],
     'nextMonthClaimable': ['預計本月可請金額萬', '預計本月可請金額'],
-    'memo': ['備註'],
+    'memo': ['備註', '狀況備註'],
+    'excessPrice': ['執底超價', '超價', '溢價'],
 }
 
 
@@ -1657,7 +1686,8 @@ def _sales_import_payload(row, normalized_headers, sheet_name=''):
         if key not in {
             'recordType', 'parkingNos', 'actualTotalPrice', 'commissionClaimable',
             'commissionPayable', 'commissionRetention', 'commissionClaimed',
-            'commissionUnclaimed', 'commissionStatus',
+            'commissionUnclaimed', 'commissionStatus', 'commissionClaimMonth',
+            'excessPrice',
         }
     }
     payload['recordType'] = _sales_record_type(get('recordType'), sheet_name)
@@ -1680,15 +1710,53 @@ def _sales_import_payload(row, normalized_headers, sheet_name=''):
             for k in ('surcharge', 'applianceGift', 'pickupVoucher', 'decoration', 'companyLoanInterest')
         ):
             payload['surcharge'] = contract - actual
+    if not payload.get('houseSalePrice') and actual and not payload.get('parkingSalePrice'):
+        # 房車售價合計 → 先放入房售價，車售價另欄若有再拆
+        payload['houseSalePrice'] = actual
     if not payload.get('houseBasePrice') and get('basePrice'):
         payload['basePrice'] = get('basePrice')
+    if get('excessPrice') not in (None, ''):
+        payload['extra'] = {'excessPrice': _sales_import_num(get('excessPrice'))}
 
     mode = str(payload.get('commissionBaseMode') or '').strip()
     payload['commissionBaseMode'] = 'deal' if '成交' in mode or mode == 'deal' else 'base'
     sales_amount = _sales_import_num(payload.get('commissionSalesAmount'))
     claimable = _sales_import_num(get('commissionClaimable'))
+    payable = _sales_import_num(get('commissionPayable'))
+    claimed = _sales_import_num(get('commissionClaimed'))
+    unclaimed = _sales_import_num(get('commissionUnclaimed'))
     if sales_amount and claimable:
-        payload['commissionDeduction'] = max(sales_amount * 0.0485 - claimable, 0)
+        payload['commissionDeduction'] = round(max(sales_amount * 0.0485 - claimable, 0), 4)
+
+    # 請佣期別：數字 2 → 第2次服務費（對齊期別批次）
+    period = str(get('commissionPeriod') or payload.get('commissionPeriod') or '').strip()
+    claim_month = str(get('commissionClaimMonth') or '').strip()
+    if period.isdigit():
+        period = f'第{int(period)}次服務費'
+    if period:
+        payload['commissionPeriod'] = period
+    # 已請有金額但沒期別 → 標成已請
+    if claimed > 0 and not period:
+        payload['commissionPeriod'] = claim_month or '已請'
+    if claim_month and not payload.get('commissionClaimDate'):
+        # 保留月份資訊於備註，避免誤解析成西元日期
+        memo = str(payload.get('memo') or '').strip()
+        note = f'請佣月份 {claim_month}'
+        payload['memo'] = f'{memo}；{note}'.strip('；') if memo else note
+
+    # 若檔案有明確可請／已請／未請金額，帶入 extra 供後續覆寫（compute 後再套）
+    if claimable or payable or claimed or unclaimed:
+        extra = payload.get('extra') if isinstance(payload.get('extra'), dict) else {}
+        if claimable:
+            extra['importClaimable'] = claimable
+        if payable:
+            extra['importPayable'] = payable
+        if claimed:
+            extra['importClaimed'] = claimed
+        if unclaimed:
+            extra['importUnclaimed'] = unclaimed
+        payload['extra'] = extra
+
     for key in (
         'areaPing', 'houseSalePrice', 'parkingSalePrice', 'totalPrice',
         'houseBasePrice', 'parkingBasePrice', 'basePrice',
@@ -1699,6 +1767,130 @@ def _sales_import_payload(row, normalized_headers, sheet_name=''):
         if payload.get(key) not in (None, ''):
             payload[key] = _sales_import_num(payload[key])
     return payload
+
+
+def _merge_header_labels(parent_row, child_row):
+    """合併請佣總表雙列表頭：可請+佣金 → 可請佣金；其它欄位用子表頭原名。"""
+    claim_groups = {'可請', '已請', '未請'}
+    ambiguous = {'佣金', '保留款', '實際請款'}
+    n = max(len(parent_row or []), len(child_row or []))
+    current_group = ''
+    merged = []
+    for i in range(n):
+        p = parent_row[i] if parent_row and i < len(parent_row) else None
+        c = child_row[i] if child_row and i < len(child_row) else None
+        if p not in (None, ''):
+            current_group = re.sub(r'[\s\u3000]+', '', str(p)).strip()
+        child = '' if c in (None, '') else re.sub(r'[\s\u3000]+', '', str(c)).strip()
+        group = current_group
+        if group in claim_groups and child in ambiguous:
+            label = f'{group}{child}'
+        elif group in claim_groups and not child:
+            label = group
+        elif '銷售金額' in group and (not child or child == '$'):
+            label = '請佣銷售金額'
+        elif child:
+            label = child
+        else:
+            label = ''
+        merged.append(label or None)
+    return merged
+
+
+def _header_map_from_row(row):
+    normalized = {}
+    for col, value in enumerate(row or []):
+        if value in (None, ''):
+            continue
+        key = _sales_import_header(value)
+        if not key:
+            continue
+        if key not in normalized or key in _SALES_HEADER_KEEP_LAST:
+            normalized[key] = col
+    return normalized
+
+
+def _absorb_sales_subheader(rows, header_idx, normalized):
+    """吸收請佣總表比率列／車位編號列（編號1、編號2、$、0.0485…）。"""
+    nxt = header_idx + 1
+    if nxt >= len(rows):
+        return header_idx, normalized
+    row = rows[nxt]
+    labels = [
+        _sales_import_header(v) for v in (row or [])
+        if v not in (None, '')
+    ]
+    rate_like = sum(
+        1 for v in (row or [])
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and 0 < float(v) < 1
+    )
+    is_sub = (
+        any(t in ('編號1', '編號2', '$') for t in labels)
+        or rate_like >= 3
+    )
+    if not is_sub:
+        return header_idx, normalized
+    for col, value in enumerate(row or []):
+        if value in (None, ''):
+            continue
+        label = _sales_import_header(value)
+        if label in ('編號1', '車位編號1'):
+            normalized[_sales_import_header('車位1')] = col
+        elif label in ('編號2', '車位編號2'):
+            normalized[_sales_import_header('車位2')] = col
+        elif label in ('$', '請佣$'):
+            normalized[_sales_import_header('請佣銷售金額')] = col
+    return nxt, normalized
+
+
+def _find_sales_header(rows):
+    for idx, row in enumerate(rows[:60]):
+        # 優先：雙列表頭（上一列是群組：可請／已請／未請／請佣銷售金額）
+        if idx > 0:
+            parent = rows[idx - 1]
+            parent_text = ' '.join(str(v) for v in (parent or []) if v not in (None, ''))
+            if any(token in parent_text for token in ('可請', '已請', '未請', '請佣', '合約銷售', '銷售基本')):
+                merged = _merge_header_labels(parent, row)
+                normalized = _header_map_from_row(merged)
+                keys = set(normalized)
+                has_unit = any(_sales_import_header(x) in keys for x in SALES_IMPORT_ALIASES['unitNo'])
+                has_name = any(_sales_import_header(x) in keys for x in SALES_IMPORT_ALIASES['customerName'])
+                if has_unit and has_name:
+                    header_idx, normalized = _absorb_sales_subheader(rows, idx, normalized)
+                    return header_idx, normalized
+
+        normalized = _header_map_from_row(row)
+        keys = set(normalized)
+        has_unit = any(_sales_import_header(x) in keys for x in SALES_IMPORT_ALIASES['unitNo'])
+        has_name = any(_sales_import_header(x) in keys for x in SALES_IMPORT_ALIASES['customerName'])
+        has_order = _sales_import_header('訂單編號') in keys
+        if has_unit and (has_name or has_order):
+            header_idx, normalized = _absorb_sales_subheader(rows, idx, normalized)
+            return header_idx, normalized
+    return None, None
+
+
+def _is_sales_import_sheet(sheet_name: str, headers: dict) -> bool:
+    name = str(sheet_name or '')
+    # 請佣總表內的期別申請／摘要頁略過，改吃「累計銷售分析」
+    skip_tokens = ('請佣no', '請佣no.', '已請未請', '折讓', '週報告', '請佣總表')
+    lowered = name.replace(' ', '').lower()
+    if any(tok.replace(' ', '') in lowered for tok in skip_tokens):
+        if '累計銷售' not in name:
+            return False
+    if any(tok in name for tok in (
+        '銷售總表', '未報明細', '已報明細', '退換戶明細', '累計銷售分析',
+    )):
+        return True
+    if _sales_import_header('類型') in headers:
+        return True
+    if (
+        _sales_import_header('訂單編號') in headers
+        and any(_sales_import_header(x) in headers for x in SALES_IMPORT_ALIASES['unitNo'])
+        and any(_sales_import_header(x) in headers for x in SALES_IMPORT_ALIASES['customerName'])
+    ):
+        return True
+    return False
 
 
 def _sales_import_tables(raw: bytes, filename: str):
@@ -1722,21 +1914,6 @@ def _sales_import_tables(raw: bytes, filename: str):
         (ws.title, [list(row) for row in ws.iter_rows(values_only=True)])
         for ws in wb.worksheets
     ]
-
-
-def _find_sales_header(rows):
-    for idx, row in enumerate(rows[:60]):
-        normalized = {
-            _sales_import_header(value): col
-            for col, value in enumerate(row)
-            if value not in (None, '')
-        }
-        keys = set(normalized)
-        has_unit = any(_sales_import_header(x) in keys for x in SALES_IMPORT_ALIASES['unitNo'])
-        has_name = any(_sales_import_header(x) in keys for x in SALES_IMPORT_ALIASES['customerName'])
-        if has_unit and has_name:
-            return idx, normalized
-    return None, None
 
 
 @app.route('/api/sales/export.xlsx')
@@ -1868,15 +2045,18 @@ def api_import_sales():
     recognized_sheets = []
     try:
         tables = _sales_import_tables(file.read(), file.filename)
+        sheet_titles = [name for name, _ in tables]
+        prefer_cumulative = any('累計銷售分析' in name for name in sheet_titles)
         for sheet_name, rows in tables:
             header_idx, headers = _find_sales_header(rows)
-            if header_idx is None:
+            if header_idx is None or not headers:
                 continue
-            normalized_type_header = _sales_import_header('類型') in headers
-            relevant_sheet = any(
-                name in sheet_name for name in ('銷售總表', '未報明細', '已報明細', '退換戶明細')
-            )
-            if not normalized_type_header and not relevant_sheet:
+            if prefer_cumulative and any(
+                token in sheet_name for token in ('已報明細', '未報明細', '退換戶明細')
+            ):
+                # 同一本請佣總表已有累計銷售分析時，略過已報／未報避免重複
+                continue
+            if not _is_sales_import_sheet(sheet_name, headers):
                 continue
             recognized_sheets.append(sheet_name)
             for row_no, row in enumerate(rows[header_idx + 1:], start=header_idx + 2):
@@ -1916,7 +2096,7 @@ def api_import_sales():
         if not recognized_sheets:
             conn.rollback()
             return jsonify({
-                'error': '找不到可匯入的銷售明細表頭；請使用系統匯出的檔案，或包含戶別、客戶欄位的銷售明細',
+                'error': '找不到可匯入的銷售明細；請使用系統匯出檔，或請佣總表的「累計銷售分析」（含戶別、姓名／客戶）',
             }), 400
         log_operation(
             conn, user, 'sales_import',
