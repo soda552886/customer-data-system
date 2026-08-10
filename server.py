@@ -1662,6 +1662,29 @@ def _sales_import_value(row, normalized_headers, key):
     return None
 
 
+def _normalize_import_order_no(value) -> str:
+    """Excel 訂單編號常為數字或 1120149.0，統一成可比對的字串。"""
+    if value is None or value == '':
+        return ''
+    if isinstance(value, bool):
+        return str(value).strip()
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        if value == int(value):
+            return str(int(value))
+        return str(value).strip().rstrip('0').rstrip('.')
+    text = str(value).strip().replace(',', '').replace('，', '')
+    if re.fullmatch(r'\d+\.0+', text):
+        return text.split('.', 1)[0]
+    return text
+
+
+def _normalize_import_key_text(value) -> str:
+    """戶別／客戶比對用：去空白與全形空白。"""
+    return re.sub(r'[\s\u3000]+', '', str(value or '').strip())
+
+
 def _sales_import_num(value):
     if value in (None, ''):
         return 0.0
@@ -1708,6 +1731,7 @@ def _sales_import_payload(row, normalized_headers, sheet_name=''):
     payload['recordType'] = _sales_record_type(get('recordType'), sheet_name)
     payload['unitNo'] = unit_no
     payload['customerName'] = customer_name
+    payload['orderNo'] = _normalize_import_order_no(get('orderNo') or payload.get('orderNo'))
 
     parking_nos = str(get('parkingNos') or '').strip()
     if parking_nos and not payload.get('parkingNo1'):
@@ -2117,11 +2141,31 @@ def api_import_sales():
     imported = 0
     skipped = 0
     errors = []
+    skipped_rows = []
     recognized_sheets = []
     try:
         tables = _sales_import_tables(file.read(), file.filename)
         sheet_titles = [name for name, _ in tables]
         prefer_cumulative = any('累計銷售分析' in name for name in sheet_titles)
+        existing_rows = conn.execute(
+            '''
+            SELECT id, order_no, unit_no, customer_name
+            FROM sales_deals WHERE site_id=?
+            ''',
+            (site_id,),
+        ).fetchall()
+        existing_orders = {}
+        existing_unit_customer = {}
+        for row in existing_rows:
+            norm_order = _normalize_import_order_no(row['order_no'])
+            if norm_order:
+                existing_orders[norm_order] = row
+            unit_key = _normalize_import_key_text(row['unit_no'])
+            name_key = _normalize_import_key_text(row['customer_name'])
+            if unit_key or name_key:
+                existing_unit_customer[(unit_key, name_key)] = row
+        seen_orders = {}
+        seen_unit_customer = {}
         for sheet_name, rows in tables:
             header_idx, headers = _find_sales_header(rows)
             if header_idx is None or not headers:
@@ -2139,30 +2183,66 @@ def api_import_sales():
                     payload = _sales_import_payload(row, headers, sheet_name)
                     if not payload:
                         continue
-                    order_no = str(payload.get('orderNo') or '').strip()
+                    order_no = _normalize_import_order_no(payload.get('orderNo'))
                     unit_no = str(payload.get('unitNo') or '').strip()
                     customer_name = str(payload.get('customerName') or '').strip()
+                    unit_key = _normalize_import_key_text(unit_no)
+                    name_key = _normalize_import_key_text(customer_name)
+                    payload['orderNo'] = order_no
+                    row_ref = f'{sheet_name}!{row_no}'
+                    duplicate = None
+                    skip_reason = ''
                     if order_no:
-                        duplicate = conn.execute(
-                            'SELECT id FROM sales_deals WHERE site_id=? AND order_no=?',
-                            (site_id, order_no),
-                        ).fetchone()
-                    else:
-                        duplicate = conn.execute(
-                            '''
-                            SELECT id FROM sales_deals
-                            WHERE site_id=? AND unit_no=? AND customer_name=?
-                            ''',
-                            (site_id, unit_no, customer_name),
-                        ).fetchone()
+                        if order_no in seen_orders:
+                            duplicate = seen_orders[order_no]
+                            skip_reason = '檔案內訂單編號重複'
+                        elif order_no in existing_orders:
+                            duplicate = existing_orders[order_no]
+                            skip_reason = '訂單編號已存在於系統'
+                    elif unit_key or name_key:
+                        pair_key = (unit_key, name_key)
+                        if pair_key in seen_unit_customer:
+                            duplicate = seen_unit_customer[pair_key]
+                            skip_reason = '檔案內相同戶別＋客戶重複'
+                        elif pair_key in existing_unit_customer:
+                            duplicate = existing_unit_customer[pair_key]
+                            skip_reason = '相同戶別＋客戶已存在於系統'
                     if duplicate:
                         skipped += 1
+                        entry = {
+                            'row': row_ref,
+                            'orderNo': order_no,
+                            'unitNo': unit_no,
+                            'customerName': customer_name,
+                            'reason': skip_reason,
+                        }
+                        if skip_reason.startswith('檔案內'):
+                            entry['matchRow'] = duplicate if isinstance(duplicate, str) else None
+                        else:
+                            entry['existingId'] = duplicate['id']
+                            entry['existingOrderNo'] = duplicate['order_no']
+                            entry['existingUnitNo'] = duplicate['unit_no']
+                            entry['existingCustomerName'] = duplicate['customer_name']
+                        skipped_rows.append(entry)
                         continue
-                    create_sales_deal(
+                    new_id = create_sales_deal(
                         conn, site_id, payload,
                         user_id=user.get('id') if user else None,
                     )
                     imported += 1
+                    new_row = {
+                        'id': new_id,
+                        'order_no': order_no,
+                        'unit_no': unit_no,
+                        'customer_name': customer_name,
+                    }
+                    if order_no:
+                        seen_orders[order_no] = row_ref
+                        existing_orders[order_no] = new_row
+                    elif unit_key or name_key:
+                        pair_key = (unit_key, name_key)
+                        seen_unit_customer[pair_key] = row_ref
+                        existing_unit_customer[pair_key] = new_row
                 except Exception as exc:
                     errors.append({
                         'row': f'{sheet_name}!{row_no}',
@@ -2189,6 +2269,7 @@ def api_import_sales():
             'success': True,
             'imported': imported,
             'skipped': skipped,
+            'skippedRows': skipped_rows[:50],
             'failed': len(errors),
             'errors': errors[:50],
             'sheets': recognized_sheets,

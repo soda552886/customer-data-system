@@ -399,6 +399,7 @@ function renderBatchDeals(batch) {
   }
   panel.classList.remove('hidden');
   title.textContent = `該期戶別｜${batch.periodName}（${batch.dealCount || 0} 筆）`;
+  panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   const deals = batch.deals || [];
   if (!deals.length) {
     tbody.innerHTML = '<tr><td colspan="6" class="empty-row">此期尚無對應銷售明細</td></tr>';
@@ -429,7 +430,7 @@ function renderCommissionBatches(batches) {
     return `<tr class="${rowClass}" data-batch-id="${b.id}">
       <td><input class="batch-inline-input" data-field="periodName" value="${escapeHtml(b.periodName || '')}"></td>
       <td><input class="batch-inline-input" data-field="claimMonth" value="${escapeHtml(b.claimMonth || '')}" placeholder="例：115/03"></td>
-      <td><button type="button" class="btn-xs link-btn" data-show-deals="${b.id}">${fmtNum(b.units)}／${fmtNum(b.parking)}</button></td>
+      <td><button type="button" class="btn-xs link-btn batch-deals-btn" data-show-deals="${b.id}" title="點擊查看該期戶別明細">${fmtNum(b.units)}／${fmtNum(b.parking)}</button></td>
       <td><input class="batch-inline-input" type="number" step="0.0001" data-field="amountPayable" value="${b.amountPayable ?? 0}" title="自動加總 ${b.autoPayable ?? 0}"></td>
       <td><input class="batch-inline-input" type="number" step="0.0001" data-field="half1Amount" value="${b.half1Amount ?? 0}"></td>
       <td><input class="batch-inline-input" type="date" data-field="depositDate1" value="${escapeHtml(b.depositDate1 || '')}"></td>
@@ -645,6 +646,19 @@ function exportSales(format) {
   window.location.href = `/api/sales/export.${format}?${params}`;
 }
 
+function formatSkippedImportRows(rows) {
+  if (!rows?.length) return '';
+  return rows.slice(0, 5).map((item) => {
+    const who = [item.orderNo, item.unitNo, item.customerName].filter(Boolean).join('／');
+    const extra = item.reason?.startsWith('檔案內')
+      ? (item.matchRow ? `↔ ${item.matchRow}` : '')
+      : (item.existingOrderNo || item.existingUnitNo
+        ? `（系統已有：${[item.existingOrderNo, item.existingUnitNo, item.existingCustomerName].filter(Boolean).join('／')}）`
+        : '');
+    return `${item.row} ${who}：${item.reason}${extra}`;
+  }).join('\n');
+}
+
 async function importSales(file) {
   const siteId = document.getElementById('salesSite').value;
   if (!siteId) {
@@ -674,8 +688,13 @@ async function importSales(file) {
     const errorText = json.failed
       ? `；失敗 ${json.failed} 筆：${(json.errors || []).slice(0, 3).map((e) => `${e.row} ${e.message}`).join('、')}`
       : '';
+    const skippedDetail = formatSkippedImportRows(json.skippedRows);
     showToast(`新增 ${json.imported} 筆，略過重複 ${json.skipped} 筆${sheetText}${errorText}`,
       json.failed ? 'error' : 'success');
+    if (skippedDetail) {
+      console.info('匯入略過明細：\n' + skippedDetail);
+      alert(`以下 ${json.skipped} 筆被略過（多為訂單編號或戶別＋客戶已存在）：\n\n${skippedDetail}${json.skipped > 5 ? '\n…其餘請看瀏覽器主控台' : ''}`);
+    }
     await loadSales();
   } catch {
     showToast('匯入失敗，請稍後再試', 'error');
