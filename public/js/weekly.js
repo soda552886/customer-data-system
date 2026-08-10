@@ -2,6 +2,10 @@ let sites = [];
 let current = null;
 let regionOptions = [];
 let mediaOptions = [];
+let draftSaveTimer = null;
+
+const WEEKLY_CTX_KEY = 'weekly_report_ctx';
+const WEEKLY_DRAFT_KEY = 'weekly_report_draft';
 
 const DIM_HEADERS = `
   <tr>
@@ -66,6 +70,85 @@ function updateRangeLabel() {
   label.textContent = `${toYmd(start)} ～ ${toYmd(end)}`;
 }
 
+function saveWeeklyContext() {
+  try {
+    sessionStorage.setItem(WEEKLY_CTX_KEY, JSON.stringify({
+      siteId: document.getElementById('weekSite')?.value || '',
+      weekStart: document.getElementById('weekStart')?.value || '',
+      weekNumber: document.getElementById('weekNumber')?.value || '',
+    }));
+  } catch { /* ignore */ }
+}
+
+function restoreWeeklyContext() {
+  try {
+    const raw = sessionStorage.getItem(WEEKLY_CTX_KEY);
+    if (!raw) return false;
+    const ctx = JSON.parse(raw);
+    if (ctx.siteId) document.getElementById('weekSite').value = ctx.siteId;
+    if (ctx.weekStart) document.getElementById('weekStart').value = ctx.weekStart;
+    if (ctx.weekNumber) document.getElementById('weekNumber').value = ctx.weekNumber;
+    updateRangeLabel();
+    return Boolean(ctx.siteId && ctx.weekStart);
+  } catch {
+    return false;
+  }
+}
+
+function saveWeeklyDraft() {
+  if (!current) return;
+  const siteId = current.siteId || document.getElementById('weekSite')?.value;
+  const weekStart = current.weekStart || document.getElementById('weekStart')?.value;
+  if (!siteId || !weekStart) return;
+  const manual = collectManualFromForm(current.manual);
+  current.manual = manual;
+  try {
+    sessionStorage.setItem(WEEKLY_DRAFT_KEY, JSON.stringify({
+      siteId,
+      weekStart,
+      serverUpdatedAt: current.updatedAt || null,
+      savedAt: new Date().toISOString(),
+      manual,
+    }));
+    saveWeeklyContext();
+  } catch { /* ignore quota */ }
+}
+
+function scheduleWeeklyDraftSave() {
+  if (draftSaveTimer) clearTimeout(draftSaveTimer);
+  draftSaveTimer = setTimeout(saveWeeklyDraft, 300);
+}
+
+function loadWeeklyDraft(siteId, weekStart) {
+  try {
+    const raw = sessionStorage.getItem(WEEKLY_DRAFT_KEY);
+    if (!raw) return null;
+    const draft = JSON.parse(raw);
+    if (draft.siteId !== siteId || draft.weekStart !== weekStart) return null;
+    return draft;
+  } catch {
+    return null;
+  }
+}
+
+function clearWeeklyDraft() {
+  try {
+    sessionStorage.removeItem(WEEKLY_DRAFT_KEY);
+  } catch { /* ignore */ }
+}
+
+function mergeWeeklyDraft(payload) {
+  const draft = loadWeeklyDraft(payload.siteId, payload.weekStart);
+  if (!draft?.manual) return { payload, restored: false };
+  return {
+    payload: {
+      ...payload,
+      manual: { ...(payload.manual || {}), ...draft.manual },
+    },
+    restored: true,
+  };
+}
+
 async function loadSites() {
   const res = await fetch('/api/sites');
   sites = await res.json();
@@ -127,9 +210,10 @@ function collectManualFromForm(baseManual) {
     const date = tr.querySelector('[data-field="date"]')?.value || '';
     const region = tr.querySelector('[data-field="region"]')?.value || '';
     const media = tr.querySelector('[data-field="media"]')?.value || '';
-    const count = Number(tr.querySelector('[data-field="count"]')?.value) || 0;
-    if (!count) return;
-    phoneRows.push({ date, region, media, count });
+    const countRaw = tr.querySelector('[data-field="count"]')?.value;
+    const count = countRaw === '' || countRaw == null ? 0 : Number(countRaw) || 0;
+    if (!date && !region && !media && !count) return;
+    phoneRows.push({ date, region, media, count: count || 1 });
   });
   manual.phoneCallsDetail = phoneRows;
   if (phoneRows.length) {
@@ -337,10 +421,11 @@ function renderPhoneDetail(manual) {
       renderPhoneDetail(manualData);
       renderDaily(current.auto || {}, manualData);
       renderKpi(current.auto || {}, manualData);
+      scheduleWeeklyDraftSave();
     });
   });
   tbody.querySelectorAll('select, input').forEach((el) => {
-    el.addEventListener('change', () => {
+    const sync = () => {
       if (!current) return;
       const manualData = collectManualFromForm(current.manual);
       current.manual = manualData;
@@ -349,7 +434,10 @@ function renderPhoneDetail(manual) {
       const total = (manualData.phoneCallsDetail || []).reduce((s, r) => s + (Number(r.count) || 0), 0);
       const summary = document.getElementById('phoneDetailSummary');
       if (summary) summary.textContent = total ? `本週來電明細合計 ${total} 通` : '';
-    });
+      scheduleWeeklyDraftSave();
+    };
+    el.addEventListener('change', sync);
+    el.addEventListener('input', sync);
   });
 }
 
@@ -368,6 +456,7 @@ function addPhoneCallRow() {
   });
   current.manual = manual;
   renderPhoneDetail(manual);
+  scheduleWeeklyDraftSave();
 }
 
 function renderDealInputs(manual) {
@@ -853,8 +942,14 @@ async function loadWeek() {
     if (!document.getElementById('weekNumber').value) {
       document.getElementById('weekNumber').value = json.weekNumber || '';
     }
-    renderAll(json);
-    showToast('已載入本週資料');
+    saveWeeklyContext();
+    const { payload, restored } = mergeWeeklyDraft(json);
+    renderAll(payload);
+    if (restored) {
+      showToast('已還原離開頁面前未儲存的編輯');
+    } else {
+      showToast('已載入本週資料');
+    }
   } catch {
     showToast('載入失敗', 'error');
   }
@@ -881,6 +976,7 @@ async function saveWeek() {
       showToast(json.error || '儲存失敗', 'error');
       return;
     }
+    clearWeeklyDraft();
     showToast('週報已儲存');
     await loadWeek();
   } catch {
@@ -956,9 +1052,18 @@ async function init() {
 
   await loadSites();
   await loadMeta();
+  const shouldAutoLoad = restoreWeeklyContext();
   await loadFieldOptions(document.getElementById('weekSite').value);
 
-  document.getElementById('weekStart').addEventListener('change', updateRangeLabel);
+  document.getElementById('weekStart').addEventListener('change', () => {
+    updateRangeLabel();
+    saveWeeklyContext();
+  });
+  document.getElementById('weekSite').addEventListener('change', () => {
+    saveWeeklyContext();
+    loadFieldOptions(document.getElementById('weekSite').value);
+  });
+  document.getElementById('weekNumber').addEventListener('input', saveWeeklyContext);
   document.getElementById('loadWeekBtn').addEventListener('click', loadWeek);
   document.getElementById('prevWeekBtn').addEventListener('click', () => shiftWeek(-1));
   document.getElementById('nextWeekBtn').addEventListener('click', () => shiftWeek(1));
@@ -974,6 +1079,7 @@ async function init() {
   document.getElementById('applyVisitorsBtn').addEventListener('click', applyVisitorSelection);
   document.getElementById('fillFromSalesBtn').addEventListener('click', applySuggestedFromSales);
   document.getElementById('fillCommissionFromSalesBtn').addEventListener('click', applyCommissionFromSales);
+  document.getElementById('openSalesFromWeekly')?.addEventListener('click', saveWeeklyDraft);
   document.getElementById('addPhoneCallBtn')?.addEventListener('click', addPhoneCallRow);
   document.getElementById('dimFilterMode')?.addEventListener('change', renderAllDimTables);
   document.getElementById('exportWeekBtn').addEventListener('click', async () => {
@@ -992,6 +1098,14 @@ async function init() {
     await saveWeek();
     exportWeek('csv');
   });
+
+  document.getElementById('weekWorkspace')?.addEventListener('input', scheduleWeeklyDraftSave);
+  document.getElementById('weekWorkspace')?.addEventListener('change', scheduleWeeklyDraftSave);
+  window.addEventListener('pagehide', saveWeeklyDraft);
+
+  if (shouldAutoLoad) {
+    await loadWeek();
+  }
 }
 
 if (document.readyState === 'loading') {

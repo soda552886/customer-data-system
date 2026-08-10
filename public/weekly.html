@@ -102,7 +102,7 @@
 
       <section class="card">
         <h2>來電明細（區域／媒體）</h2>
-        <p class="hint">每通來電填區域與媒體後，會與來人一起顯示在下方訴求分析表。可一次填多通。</p>
+        <p class="hint">每通來電填區域與媒體後，會與來人一起顯示在下方訴求分析表。可一次填多通。編輯中若切換至銷售總表等頁面，返回後會自動還原未儲存的來電明細（請記得完成後按「儲存週報」）。</p>
         <div class="form-actions" style="margin-bottom:0.75rem;">
           <button type="button" id="addPhoneCallBtn" class="btn btn-secondary">新增來電</button>
           <span id="phoneDetailSummary" class="hint"></span>
@@ -164,7 +164,7 @@
         <p class="hint">可手填，或按「從銷售總表帶入」自動帶入。成交／簽約／買進金額＝實際房價＋車售；未報金額＝合約總價。</p>
         <div class="form-actions" style="margin-bottom:0.75rem;">
           <button type="button" id="fillFromSalesBtn" class="btn btn-secondary">從銷售總表帶入</button>
-          <a class="btn btn-outline" href="/sales.html">開啟銷售總表</a>
+          <a class="btn btn-outline" href="/sales.html" id="openSalesFromWeekly">開啟銷售總表</a>
           <span id="salesSuggestHint" class="hint"></span>
         </div>
         <div class="deal-input-list" id="dealInputs"></div>
