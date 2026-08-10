@@ -25,7 +25,7 @@ from weekly_reports import (
     empty_manual_payload, enrich_dims_with_phones, init_weekly_tables, inventory_summary,
     list_weekly_reports, load_weekly_report, merge_manual, monday_of,
     normalize_phone_calls_detail, phone_total_from_manual, roc_year, upsert_weekly_report,
-    week_bounds,
+    week_bounds, safe_week_number,
 )
 from sales_ledger import (
     RECORD_TYPES as SALES_RECORD_TYPES, aggregate_for_weekly, build_commission_overview_excel,
@@ -1491,8 +1491,12 @@ def export_weekly_xlsx():
     auto['commissionMatrix'] = sales_summary.get('commissionMatrix')
     conn.close()
 
-    week_no = manual.get('weekNumber') or default_week_number(start)
-    content = build_weekly_excel(site['name'], start, end, week_no, manual, auto)
+    week_no = safe_week_number(manual.get('weekNumber'), start)
+    try:
+        content = build_weekly_excel(site['name'], start, end, week_no, manual, auto)
+    except Exception as exc:
+        app.logger.exception('weekly export.xlsx failed site=%s week=%s', site_id, week_start)
+        return jsonify({'error': f'匯出 Excel 失敗：{exc}'}), 500
     utf8_name = quote(f'{site["name"]}_第{week_no}週週報_{start.isoformat()}.xlsx')
     return Response(
         content,

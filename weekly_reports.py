@@ -170,6 +170,31 @@ def default_week_number(start) -> int:
     return int(start.isocalendar()[1])
 
 
+def safe_week_number(week_number, start) -> int:
+    if week_number in (None, ''):
+        return default_week_number(start)
+    try:
+        return int(float(week_number))
+    except (TypeError, ValueError):
+        return default_week_number(start)
+
+
+def _parse_included_visitor_ids(raw) -> Optional[set]:
+    """將週報儲存的 includedVisitorIds 轉成 int 集合；格式異常則略過。"""
+    if raw is None:
+        return None
+    if not isinstance(raw, (list, tuple, set)):
+        return set()
+    out = set()
+    for x in raw:
+        try:
+            if x not in (None, ''):
+                out.add(int(x))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
 def empty_manual_payload(start, end, week_number=None):
     days = []
     for i in range(7):
@@ -393,9 +418,7 @@ def build_auto_stats(
     ).fetchall()
 
     active_set = set(active_staff) if active_staff is not None else None
-    include_set = None
-    if included_visitor_ids is not None:
-        include_set = {int(x) for x in included_visitor_ids}
+    include_set = _parse_included_visitor_ids(included_visitor_ids)
 
     day_keys = [(start + timedelta(days=i)).isoformat() for i in range(7)]
     by_day = {k: {'new': 0.0, 'return': 0.0, 'deal': 0.0, 'total': 0.0} for k in day_keys}
@@ -1140,7 +1163,7 @@ def _build_ppt_summary_sheet(ws, *, site_name, start, end, week_number, manual, 
     currently_claimed = booked_amt if booked_amt else claimed_amt
 
     week_title = (
-        f'第{_to_zh_int(int(week_number or 0))}週　'
+        f'第{_to_zh_int(safe_week_number(week_number, start))}週　'
         f'{start.year}/{start.month}/{start.day}～{end.year}/{end.month}/{end.day}'
     )
     cols = 11
@@ -1400,7 +1423,7 @@ def build_weekly_excel(site_name: str, start, end, week_number, manual: dict, au
     # —— 每日 ——
     ws = wb.create_sheet('每日統計')
     ws.append(['日期', '星期', '新客', '回訪', '合計', '成交', '來電', '天氣'])
-    _style_header(ws)
+    _style_header(ws, ws.max_row)
     days = manual.get('days') or []
     phone_by_day = auto.get('phoneByDay') or {}
     for i, d in enumerate(auto.get('byDay') or []):

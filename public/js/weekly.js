@@ -903,7 +903,30 @@ function exportWeek(format) {
     weekStart: current.weekStart,
   });
   const path = format === 'csv' ? '/api/weekly/export.csv' : '/api/weekly/export.xlsx';
-  window.location.href = `${path}?${params}`;
+  fetch(`${path}?${params}`)
+    .then(async (res) => {
+      if (!res.ok) {
+        let msg = '匯出失敗';
+        try {
+          const json = await res.json();
+          msg = json.error || msg;
+        } catch {
+          msg = `匯出失敗（${res.status}）`;
+        }
+        showToast(msg, 'error');
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const ext = format === 'csv' ? 'csv' : 'xlsx';
+      a.download = `weekly_${current.weekStart}.${ext}`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast(format === 'csv' ? 'CSV 已下載' : 'Excel 已下載');
+    })
+    .catch(() => showToast('匯出失敗，請稍後再試', 'error'));
 }
 
 function shiftWeek(delta) {
