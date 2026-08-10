@@ -539,6 +539,27 @@ td.is-deal-mode {
 
 .table-wrap { overflow-x: auto; }
 
+.results-table-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.table-wrap-scroll {
+  max-height: min(58vh, calc(100vh - 320px));
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.table-wrap-scroll .data-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.12);
+}
+
 .data-table {
   width: 100%;
   border-collapse: collapse;
@@ -611,6 +632,28 @@ td.is-deal-mode {
   justify-content: center;
   gap: 0.5rem;
   margin-top: 1rem;
+}
+
+.pagination-bar {
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
+.pagination-summary {
+  font-size: 0.875rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.pagination-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: flex-end;
 }
 
 .pagination button {

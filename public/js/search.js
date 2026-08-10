@@ -38,10 +38,11 @@ function applyPermissionUI() {
   }
   const detailEditBtn = document.getElementById('detailEditBtn');
   if (detailEditBtn) {
-    detailEditBtn.classList.toggle('hidden', !userCan('edit_customers'));
+    detailEditBtn.classList.toggle('hidden', !(userCan('edit_customers')));
   }
   const detailDeleteBtn = document.getElementById('detailDeleteBtn');
   if (detailDeleteBtn) {
+    // 詳情內刪除按鈕在 showDetail 依 canDelete 再更新
     detailDeleteBtn.classList.toggle('hidden', !userCan('delete_customers'));
   }
 }
@@ -403,6 +404,13 @@ function getSearchParams(extraLimit) {
   return params;
 }
 
+function setPaginationVisible(visible) {
+  ['paginationTop', 'pagination'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.classList.toggle('hidden', !visible);
+  });
+}
+
 function renderResults(data) {
   const cols = getSelectedColumns();
   const thead = document.getElementById('resultsHead');
@@ -414,14 +422,14 @@ function renderResults(data) {
   if (cols.length === 0) {
     thead.innerHTML = '<tr><th>請至少選擇一個報表欄位</th></tr>';
     tbody.innerHTML = '<tr><td class="empty-row">請在上方「報表欄位設定」勾選要顯示的欄位</td></tr>';
-    document.getElementById('pagination').classList.add('hidden');
+    setPaginationVisible(false);
     return;
   }
 
   if (data.records.length === 0) {
     thead.innerHTML = `<tr>${cols.map((c) => `<th>${c.label}</th>`).join('')}<th>操作</th></tr>`;
     tbody.innerHTML = `<tr><td colspan="${cols.length + 1}" class="empty-row">查無符合條件的資料</td></tr>`;
-    document.getElementById('pagination').classList.add('hidden');
+    setPaginationVisible(false);
     return;
   }
 
@@ -433,10 +441,10 @@ function renderResults(data) {
       const cls = cellClassForKey(c.key);
       return `<td${cls ? ` class="${cls}"` : ''}>${formatCellHtml(c.key, val, r)}</td>`;
     }).join('');
-    const editBtn = userCan('edit_customers')
+    const editBtn = (userCan('edit_customers') || r.canEdit)
       ? `<button class="btn-sm" onclick="openEdit(${r.id})">編輯</button>`
       : '';
-    const deleteBtn = userCan('delete_customers') && r.canDelete
+    const deleteBtn = (userCan('delete_customers') && r.canDelete)
       ? `<button class="btn-sm btn-danger-sm-solid" onclick="deleteRecord(${r.id})">刪除</button>`
       : '';
     return `<tr>${cells}<td class="action-btns">
@@ -451,24 +459,35 @@ function renderResults(data) {
 
 function renderPagination(total, page, limit) {
   const totalPages = Math.ceil(total / limit);
-  const pag = document.getElementById('pagination');
-  if (totalPages <= 1) { pag.classList.add('hidden'); return; }
-  pag.classList.remove('hidden');
+  if (totalPages <= 1) {
+    setPaginationVisible(false);
+    return;
+  }
+  setPaginationVisible(true);
 
   let html = '';
-  if (page > 1) html += `<button onclick="goPage(${page - 1})">上一頁</button>`;
+  if (page > 1) html += `<button type="button" onclick="goPage(${page - 1})">上一頁</button>`;
   const start = Math.max(1, page - 4);
   const end = Math.min(totalPages, start + 9);
   for (let i = start; i <= end; i++) {
-    html += `<button class="${i === page ? 'active' : ''}" onclick="goPage(${i})">${i}</button>`;
+    html += `<button type="button" class="${i === page ? 'active' : ''}" onclick="goPage(${i})">${i}</button>`;
   }
-  if (page < totalPages) html += `<button onclick="goPage(${page + 1})">下一頁</button>`;
-  pag.innerHTML = html;
+  if (page < totalPages) html += `<button type="button" onclick="goPage(${page + 1})">下一頁</button>`;
+
+  const summary = `<span class="pagination-summary">第 ${page} / ${totalPages} 頁，共 ${total} 筆</span>`;
+  const controls = `<div class="pagination-controls">${html}</div>`;
+  const markup = `${summary}${controls}`;
+
+  ['paginationTop', 'pagination'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = markup;
+  });
 }
 
-window.goPage = function (page) {
+window.goPage = async function (page) {
   currentPage = page;
-  doSearch();
+  await doSearch();
+  document.querySelector('.table-wrap-scroll')?.scrollTo({ top: 0, behavior: 'smooth' });
 };
 
 async function doSearch() {
@@ -548,13 +567,17 @@ window.showDetail = async function (id) {
   html += '</dl>';
   content.innerHTML = html;
   const detailDeleteBtn = document.getElementById('detailDeleteBtn');
+  const detailEditBtn = document.getElementById('detailEditBtn');
+  if (detailEditBtn) {
+    detailEditBtn.classList.toggle('hidden', !(userCan('edit_customers') || record.canEdit));
+  }
   if (detailDeleteBtn) {
     const canDelete = userCan('delete_customers') && record.canDelete;
     detailDeleteBtn.classList.toggle('hidden', !canDelete);
     detailDeleteBtn.disabled = !canDelete;
     detailDeleteBtn.title = canDelete
       ? ''
-      : '建檔已超過 7 日，僅最高主管可刪除';
+      : '建檔已超過 7 日，僅可編輯；刪除請聯繫最高主管';
   }
   modal.classList.remove('hidden');
 };

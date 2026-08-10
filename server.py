@@ -645,7 +645,8 @@ def ensure_site_access(user, site_id):
 
 
 def enrich_customer_record(user, record: dict) -> dict:
-    """附加前端用權限旗標（如是否可刪除）。"""
+    """附加前端用權限旗標：編輯不限時間；刪除依 7 日／最高主管。"""
+    record['canEdit'] = user_has_permission(user, 'edit_customers')
     record['canDelete'] = user_can_delete_customer(user, record.get('created_at'))
     return record
 
