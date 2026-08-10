@@ -576,7 +576,7 @@ function renderTable(rows) {
   const tfoot = document.getElementById('salesTableTotal');
   document.getElementById('salesTotalBadge').textContent = String(rows.length);
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="16" class="empty-row">尚無銷售明細，請按「新增明細」</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="17" class="empty-row">尚無銷售明細，請按「新增明細」</td></tr>';
     tfoot.innerHTML = '';
     return;
   }
@@ -598,6 +598,7 @@ function renderTable(rows) {
       <td>${r.commissionUnclaimed ?? 0}</td>
       <td>${escapeHtml(r.commissionStatus || '未請')}</td>
       <td class="cell-date">${escapeHtml(r.ownerSaleReportDate || r.reportDate || '')}</td>
+      <td class="cell-date">${escapeHtml(r.ownerSignReportDate || '')}</td>
       <td>${escapeHtml(sales)}</td>
       <td>
         <button type="button" class="btn-xs" data-edit="${r.id}">編輯</button>
@@ -618,7 +619,7 @@ function renderTable(rows) {
     <th>${sum('commissionClaimable')}</th>
     <th>${sum('commissionClaimed')}</th>
     <th>${sum('commissionUnclaimed')}</th>
-    <th colspan="4"></th>
+    <th colspan="5"></th>
   </tr>`;
   tbody.querySelectorAll('[data-edit]').forEach((btn) => {
     btn.addEventListener('click', () => {

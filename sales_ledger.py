@@ -1320,7 +1320,8 @@ def build_sales_excel(site_name: str, rows: list[dict]) -> bytes:
         '請佣計價方式', '請佣銷售金額(萬)', '可請佣(萬)', '本期可請97%(萬)',
         '保留款3%(萬)', '已請(萬)', '未請(萬)', '請佣狀態', '請佣期別', '請佣日期',
         '已入帳金額(萬)', '預計本月可請戶數', '預計本月可請車位',
-        '預計本月可請金額(萬)', '業主報售日', '銷售人員1', '銷售人員2', '備註',
+        '預計本月可請金額(萬)', '業主報售日', '業主報簽日',
+        '銷售人員1', '銷售人員2', '備註',
     ]
     ws.append([f'{site_name} 銷售總表'])
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(headers))
@@ -1359,6 +1360,7 @@ def build_sales_excel(site_name: str, rows: list[dict]) -> bytes:
             row.get('commissionBooked'), row.get('nextMonthUnits'), row.get('nextMonthParking'),
             row.get('nextMonthClaimable'),
             row.get('ownerSaleReportDate') or row.get('reportDate'),
+            row.get('ownerSignReportDate'),
             row.get('salesperson1'), row.get('salesperson2'), row.get('memo'),
         ])
 

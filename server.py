@@ -1613,13 +1613,13 @@ SALES_IMPORT_ALIASES = {
     'decoration': ['裝潢', '裝潢費用'],
     'companyLoanInterest': ['公司貸利息', '公司貸利息', '公司貸利息'],
     'depositDate': [
-        '訂金日期', '下訂日', '銷售日期', '銷售日業主', '銷售日',
+        '訂金日期', '下訂日', '銷售日期', '銷售日',
         '回報下定日', '成交日期',
     ],
     'supplementDate': ['補足日', '補足日期'],
-    'signDate': ['簽約日', '簽約日期', '簽約日業主', '回報簽約日'],
+    'signDate': ['簽約日', '簽約日期', '實際簽約日'],
     'ownerSaleReportDate': ['業主報售日', '報售日', '銷售日業主'],
-    'ownerSignReportDate': ['業主報簽日', '報簽日', '簽約日業主'],
+    'ownerSignReportDate': ['業主報簽日', '報簽日', '簽約日業主', '回報簽約日'],
     'salesperson1': ['銷售人員1', '銷售1', '銷售人員'],
     'salesperson2': ['銷售人員2', '銷售2'],
     'commissionBaseMode': ['請佣計價方式', '請佣方式'],
@@ -2057,7 +2057,7 @@ def api_export_sales_csv():
         '請佣銷售金額(萬)', '可請佣(萬)', '本期可請97%(萬)', '保留款3%(萬)',
         '已請(萬)', '未請(萬)', '狀態', '請佣期別', '請佣日期', '已入帳金額(萬)',
         '預計本月可請戶數', '預計本月可請車位', '預計本月可請金額(萬)',
-        '業主報售日', '銷售人員1', '銷售人員2', '備註',
+        '業主報售日', '業主報簽日', '銷售人員1', '銷售人員2', '備註',
     ])
     total_fields = [
         'houseSalePrice', 'parkingSalePrice', 'contractTotal', 'actualTotalPrice',
@@ -2089,6 +2089,7 @@ def api_export_sales_csv():
             row.get('commissionBooked'), row.get('nextMonthUnits'), row.get('nextMonthParking'),
             row.get('nextMonthClaimable'),
             row.get('ownerSaleReportDate') or row.get('reportDate'),
+            row.get('ownerSignReportDate'),
             row.get('salesperson1'), row.get('salesperson2'), row.get('memo'),
         ])
     writer.writerow([
@@ -2106,7 +2107,7 @@ def api_export_sales_csv():
         '', '', '', round(totals['commissionBooked'], 4),
         round(totals['nextMonthUnits'], 4), round(totals['nextMonthParking'], 4),
         round(totals['nextMonthClaimable'], 4),
-        '', '', '', '',
+        '', '', '', '', '',
     ])
     utf8_name = quote(f'{site["name"]}_銷售總表.csv')
     return Response(
