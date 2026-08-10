@@ -1571,10 +1571,10 @@ def _sales_import_header(value):
     return re.sub(r'[\s\u3000（）()/／]', '', str(value or '')).lower()
 
 
-# 請佣總表常見重複欄名：取最後一次（合約區／底價區通常在右側）
+# 請佣總表常見重複欄名：底價區／階段區取最後一次（合約區改用前綴欄名）
 _SALES_HEADER_KEEP_LAST = {
     _sales_import_header(x) for x in (
-        '房售價', '車售價', '房底', '車底', '房底價', '車底價',
+        '房底', '車底', '房底價', '車底價',
         '房車總底', '房車總底價', '房單價', '房底單價',
     )
 }
@@ -1586,29 +1586,32 @@ SALES_IMPORT_ALIASES = {
     'unitNo': ['戶別', '戶號', '戶別樓層'],
     'customerName': ['客戶', '客戶姓名', '姓名'],
     'phone': ['電話', '手機'],
-    'productType': ['產品類型', '產品', '用途', '建物型態'],
+    'productType': ['產品類型', '產品', '用途', '建物型態', '建物型態'],
     'areaPing': ['坪數', '建物坪數', '戶別坪數'],
     'parkingNo1': ['車位1', '車位號碼1', '車位編號1', '編號1', '汽車1'],
     'parkingNo2': ['車位2', '車位號碼2', '車位編號2', '編號2', '汽車2'],
     'parkingNos': ['車位號碼', '車位'],
-    'houseSalePrice': ['房售價', '房屋成交價', '房售價未含其他費用', '實際房價'],
-    'parkingSalePrice': ['車售價', '車位售價'],
+    'houseSalePrice': [
+        '合約房售價', '合約房地', '房售價', '房售價萬', '房屋成交價',
+        '房售價未含其他費用', '實際房價',
+    ],
+    'parkingSalePrice': ['合約車售價', '合約車位', '車售價', '車位售價', '車位售價萬'],
     'totalPrice': [
-        '合約總價萬', '合約總價', '合約銷售總價',
+        '合約銷售總價', '合約總價', '合約總價萬',
         '房車總價未含其他費用', '房車總價', '實際合約金額總價',
     ],
     'actualTotalPrice': [
         '實際成交總價萬', '實際成交總價',
         '房車售價未含附加及其他費用', '房車售價',
     ],
-    'houseBasePrice': ['房底價', '房底'],
-    'parkingBasePrice': ['車底價', '車底'],
-    'basePrice': ['底總萬', '底總', '總底價', '房車總底', '房車總底價'],
+    'houseBasePrice': ['房底', '底價房地', '房底價'],
+    'parkingBasePrice': ['車底', '底價車位', '車底價'],
+    'basePrice': ['底價總價', '底總萬', '底總', '總底價', '房車總底', '房車總底價'],
     'surcharge': ['附加費', '其它費用', '其他費用'],
     'applianceGift': ['家電禮券', '家電禮'],
     'pickupVoucher': ['提貨券'],
-    'decoration': ['裝潢'],
-    'companyLoanInterest': ['公司貸利息', '公司貸利息'],
+    'decoration': ['裝潢', '裝潢費用'],
+    'companyLoanInterest': ['公司貸利息', '公司貸利息', '公司貸利息'],
     'depositDate': [
         '訂金日期', '下訂日', '銷售日期', '銷售日業主', '銷售日',
         '回報下定日', '成交日期',
@@ -1714,16 +1717,27 @@ def _sales_import_payload(row, normalized_headers, sheet_name=''):
 
     contract = _sales_import_num(get('totalPrice'))
     actual = _sales_import_num(get('actualTotalPrice'))
-    if not payload.get('houseSalePrice') and contract:
+    house = _sales_import_num(payload.get('houseSalePrice'))
+    parking = _sales_import_num(payload.get('parkingSalePrice'))
+    if house or parking:
+        payload['houseSalePrice'] = house
+        payload['parkingSalePrice'] = parking
+    if contract:
         payload['totalPrice'] = contract
-        # 系統會由合約總價扣除附加項目回算實際成交總價。
-        if actual and contract > actual and not any(
-            _sales_import_num(payload.get(k))
-            for k in ('surcharge', 'applianceGift', 'pickupVoucher', 'decoration', 'companyLoanInterest')
-        ):
+    surcharge_sum = sum(
+        _sales_import_num(payload.get(k))
+        for k in ('surcharge', 'applianceGift', 'pickupVoucher', 'decoration', 'companyLoanInterest')
+    )
+    has_parking = bool(payload.get('parkingNo1') or payload.get('parkingNo2'))
+    if has_parking and parking <= 0 and contract > house > 0:
+        diff = round(contract - house, 4)
+        if diff > 0.01 and abs(diff - surcharge_sum) > 0.01:
+            payload['parkingSalePrice'] = diff
+    elif not payload.get('houseSalePrice') and contract:
+        payload['totalPrice'] = contract
+        if actual and contract > actual and surcharge_sum <= 0:
             payload['surcharge'] = contract - actual
     if not payload.get('houseSalePrice') and actual and not payload.get('parkingSalePrice'):
-        # 房車售價合計 → 先放入房售價，車售價另欄若有再拆
         payload['houseSalePrice'] = actual
     if not payload.get('houseBasePrice') and get('basePrice'):
         payload['basePrice'] = get('basePrice')
@@ -1778,13 +1792,37 @@ def _sales_import_payload(row, normalized_headers, sheet_name=''):
     ):
         if payload.get(key) not in (None, ''):
             payload[key] = _sales_import_num(payload[key])
+    for date_key in (
+        'depositDate', 'supplementDate', 'signDate',
+        'ownerSaleReportDate', 'ownerSignReportDate', 'commissionClaimDate',
+    ):
+        val = payload.get(date_key)
+        if val not in (None, ''):
+            if isinstance(val, datetime):
+                payload[date_key] = val.date().isoformat()
+            else:
+                payload[date_key] = str(val).strip()[:10].replace('/', '-')
     return payload
 
 
 def _merge_header_labels(parent_row, child_row):
-    """合併請佣總表雙列表頭：可請+佣金 → 可請佣金；其它欄位用子表頭原名。"""
+    """合併請佣總表雙列表頭：可請+佣金 → 可請佣金；合約／底價區加前綴避免重複欄名。"""
     claim_groups = {'可請', '已請', '未請'}
     ambiguous = {'佣金', '保留款', '實際請款'}
+    contract_groups = ('合約銷售', '合約金額')
+    base_groups = ('底價', '階段請款', '階段執行')
+    contract_child_map = {
+        '房售價': '合約房售價',
+        '車售價': '合約車售價',
+        '房地': '合約房地',
+        '車位': '合約車位',
+        '總價': '合約總價',
+    }
+    base_child_map = {
+        '總價': '底價總價',
+        '房地': '底價房地',
+        '車位': '底價車位',
+    }
     n = max(len(parent_row or []), len(child_row or []))
     current_group = ''
     merged = []
@@ -1793,7 +1831,8 @@ def _merge_header_labels(parent_row, child_row):
         c = child_row[i] if child_row and i < len(child_row) else None
         if p not in (None, ''):
             current_group = re.sub(r'[\s\u3000]+', '', str(p)).strip()
-        child = '' if c in (None, '') else re.sub(r'[\s\u3000]+', '', str(c)).strip()
+        child_raw = '' if c in (None, '') else str(c).strip()
+        child = re.sub(r'[\s\u3000]+', '', child_raw).strip()
         group = current_group
         if group in claim_groups and child in ambiguous:
             label = f'{group}{child}'
@@ -1802,7 +1841,18 @@ def _merge_header_labels(parent_row, child_row):
         elif '銷售金額' in group and (not child or child == '$'):
             label = '請佣銷售金額'
         elif child:
-            label = child
+            child_key = _sales_import_header(child_raw)
+            if any(token in group for token in contract_groups):
+                if '合約銷售' in child_key and '總價' in child_key:
+                    label = '合約銷售總價'
+                elif child in contract_child_map:
+                    label = contract_child_map[child]
+                else:
+                    label = child_raw
+            elif any(token in group for token in base_groups):
+                label = base_child_map.get(child, child_raw)
+            else:
+                label = child_raw
         else:
             label = ''
         merged.append(label or None)
@@ -1976,16 +2026,19 @@ def api_export_sales_csv():
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow([
-        '類型', '訂單編號', '戶別', '客戶', '電話', '產品類型', '車位1', '車位2',
-        '合約總價(萬)', '實際成交總價(萬)', '底總(萬)', '請佣計價方式',
+        '類型', '訂單編號', '戶別', '客戶', '電話', '產品類型', '坪數', '車位1', '車位2',
+        '房售價(萬)', '車位售價(萬)', '合約總價(萬)', '實際成交總價(萬)',
+        '附加費(萬)', '家電禮券(萬)', '提貨券(萬)', '裝潢(萬)', '公司貸利息(萬)',
+        '底總(萬)', '下訂日', '補足日', '簽約日', '請佣計價方式',
         '請佣銷售金額(萬)', '可請佣(萬)', '本期可請97%(萬)', '保留款3%(萬)',
         '已請(萬)', '未請(萬)', '狀態', '請佣期別', '請佣日期', '已入帳金額(萬)',
         '預計本月可請戶數', '預計本月可請車位', '預計本月可請金額(萬)',
-        '業主報售日', '簽約日',
-        '銷售人員1', '銷售人員2', '備註',
+        '業主報售日', '銷售人員1', '銷售人員2', '備註',
     ])
     total_fields = [
-        'contractTotal', 'actualTotalPrice', 'baseTotal', 'commissionSalesAmount',
+        'houseSalePrice', 'parkingSalePrice', 'contractTotal', 'actualTotalPrice',
+        'surcharge', 'applianceGift', 'pickupVoucher', 'decoration', 'companyLoanInterest',
+        'baseTotal', 'commissionSalesAmount',
         'commissionClaimable', 'commissionPayable', 'commissionRetention',
         'commissionClaimed', 'commissionUnclaimed', 'commissionBooked',
         'nextMonthUnits', 'nextMonthParking', 'nextMonthClaimable',
@@ -1997,8 +2050,13 @@ def api_export_sales_csv():
         writer.writerow([
             row.get('recordTypeLabel') or row.get('recordType'), row.get('orderNo'),
             row.get('unitNo'), row.get('customerName'), row.get('phone'), row.get('productType'),
-            row.get('parkingNo1'), row.get('parkingNo2'), row.get('contractTotal'),
-            row.get('actualTotalPrice'), row.get('baseTotal'),
+            row.get('areaPing'), row.get('parkingNo1'), row.get('parkingNo2'),
+            row.get('houseSalePrice'), row.get('parkingSalePrice'),
+            row.get('contractTotal'), row.get('actualTotalPrice'),
+            row.get('surcharge'), row.get('applianceGift'), row.get('pickupVoucher'),
+            row.get('decoration'), row.get('companyLoanInterest'),
+            row.get('baseTotal'),
+            row.get('depositDate'), row.get('supplementDate'), row.get('signDate'),
             '成交價' if row.get('commissionBaseMode') == 'deal' else '底價',
             row.get('commissionSalesAmount'), row.get('commissionClaimable'),
             row.get('commissionPayable'), row.get('commissionRetention'),
@@ -2006,20 +2064,25 @@ def api_export_sales_csv():
             row.get('commissionStatus'), row.get('commissionPeriod'), row.get('commissionClaimDate'),
             row.get('commissionBooked'), row.get('nextMonthUnits'), row.get('nextMonthParking'),
             row.get('nextMonthClaimable'),
-            row.get('ownerSaleReportDate') or row.get('reportDate'), row.get('signDate'),
+            row.get('ownerSaleReportDate') or row.get('reportDate'),
             row.get('salesperson1'), row.get('salesperson2'), row.get('memo'),
         ])
     writer.writerow([
-        '合計', '', '', f'{len(rows)} 筆', '', '', '', '',
+        '合計', '', '', f'{len(rows)} 筆', '', '', '', '', '',
+        round(totals['houseSalePrice'], 4), round(totals['parkingSalePrice'], 4),
         round(totals['contractTotal'], 4), round(totals['actualTotalPrice'], 4),
-        round(totals['baseTotal'], 4), '', round(totals['commissionSalesAmount'], 4),
+        round(totals['surcharge'], 4), round(totals['applianceGift'], 4),
+        round(totals['pickupVoucher'], 4), round(totals['decoration'], 4),
+        round(totals['companyLoanInterest'], 4),
+        round(totals['baseTotal'], 4), '', '', '', '',
+        round(totals['commissionSalesAmount'], 4),
         round(totals['commissionClaimable'], 4), round(totals['commissionPayable'], 4),
         round(totals['commissionRetention'], 4), round(totals['commissionClaimed'], 4),
         round(totals['commissionUnclaimed'], 4),
         '', '', '', round(totals['commissionBooked'], 4),
         round(totals['nextMonthUnits'], 4), round(totals['nextMonthParking'], 4),
         round(totals['nextMonthClaimable'], 4),
-        '', '', '', '', '',
+        '', '', '', '',
     ])
     utf8_name = quote(f'{site["name"]}_銷售總表.csv')
     return Response(

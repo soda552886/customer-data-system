@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import io
 import sqlite3
-from datetime import datetime
+from datetime import date, datetime
 from typing import Optional
 
 from openpyxl import Workbook
@@ -276,12 +276,23 @@ def _add_to_bucket(bucket: dict, units, parking, claimable, retention, payable):
     bucket['payable'] += payable
 
 
+def _deposit_due(value) -> bool:
+    """預計入帳日已到期（含當日）。"""
+    parsed = _parse_date(value)
+    if not parsed:
+        return False
+    try:
+        return datetime.strptime(parsed[:10], '%Y-%m-%d').date() <= date.today()
+    except ValueError:
+        return False
+
+
 def _batch_status(deposit1, deposit2) -> str:
-    d1 = bool(str(deposit1 or '').strip())
-    d2 = bool(str(deposit2 or '').strip())
-    if d1 and d2:
+    due1 = _deposit_due(deposit1)
+    due2 = _deposit_due(deposit2)
+    if due2:
         return 'full'
-    if d1 or d2:
+    if due1:
         return 'partial'
     return 'none'
 
@@ -406,9 +417,9 @@ def list_commission_batches(conn: sqlite3.Connection, site_id: str) -> list[dict
             half2 = _round4(amount - half1)
         status = _batch_status(row['deposit_date1'], row['deposit_date2'])
         booked_total = 0.0
-        if row['deposit_date1']:
+        if _deposit_due(row['deposit_date1']):
             booked_total += half1
-        if row['deposit_date2']:
+        if _deposit_due(row['deposit_date2']):
             booked_total += half2
         out.append({
             'id': row['id'],
@@ -773,6 +784,7 @@ def normalize_deal_payload(body: dict, site_id: str = '') -> dict:
     co = _truthy(body.get('isCoManaged')) or bool(s1 and s2)
     house_sale = _num(body.get('houseSalePrice'))
     parking_sale = _num(body.get('parkingSalePrice'))
+    explicit_total = _num(body.get('totalPrice'))
     surcharge = _num(body.get('surcharge'))
     appliance_gift = _num(body.get('applianceGift'))
     pickup_voucher = _num(body.get('pickupVoucher'))
@@ -785,19 +797,28 @@ def normalize_deal_payload(body: dict, site_id: str = '') -> dict:
         + decoration + company_loan_interest
     )
     contract_total = house_sale + parking_sale
-    actual_house = house_sale - deductions
-    actual_total = actual_house + parking_sale
-    base_total = house_base + parking_base
-    excess = contract_total - base_total - deductions
     parking_no1 = str(body.get('parkingNo1') or '').strip()
     parking_no2 = str(body.get('parkingNo2') or '').strip()
     parking_nos = '、'.join(x for x in (parking_no1, parking_no2) if x)
     parking_count = sum(1 for x in (parking_no1, parking_no2) if x)
+    if explicit_total > 0:
+        if contract_total <= 0:
+            contract_total = explicit_total
+        elif abs(contract_total - explicit_total) > 0.01:
+            contract_total = explicit_total
+            if parking_count > 0 and parking_sale <= 0 and house_sale > 0:
+                diff = explicit_total - house_sale
+                if diff > 0.01 and abs(diff - deductions) > 0.01:
+                    parking_sale = diff
+    actual_house = house_sale - deductions
+    actual_total = actual_house + parking_sale
+    base_total = house_base + parking_base
+    excess = contract_total - base_total - deductions
     # 相容舊資料／API：尚未拆分房售、車售時保留既有總價。
-    if contract_total == 0 and _num(body.get('totalPrice')):
-        contract_total = _num(body.get('totalPrice'))
-        actual_house = contract_total - deductions
-        actual_total = actual_house
+    if contract_total == 0 and explicit_total:
+        contract_total = explicit_total
+        actual_house = contract_total - deductions - parking_sale
+        actual_total = actual_house + parking_sale
         excess = contract_total - base_total - deductions
     if base_total == 0 and _num(body.get('basePrice')):
         base_total = _num(body.get('basePrice'))
@@ -1241,11 +1262,13 @@ def build_sales_excel(site_name: str, rows: list[dict]) -> bytes:
     ws.title = '銷售總表'
     headers = [
         '類型', '訂單編號', '戶別', '客戶', '電話', '產品類型', '坪數',
-        '車位1', '車位2', '合約總價(萬)', '實際成交總價(萬)', '底總(萬)', '超價(萬)',
+        '車位1', '車位2', '房售價(萬)', '車位售價(萬)', '合約總價(萬)', '實際成交總價(萬)',
+        '附加費(萬)', '家電禮券(萬)', '提貨券(萬)', '裝潢(萬)', '公司貸利息(萬)',
+        '底總(萬)', '超價(萬)', '下訂日', '補足日', '簽約日',
         '請佣計價方式', '請佣銷售金額(萬)', '可請佣(萬)', '本期可請97%(萬)',
         '保留款3%(萬)', '已請(萬)', '未請(萬)', '請佣狀態', '請佣期別', '請佣日期',
         '已入帳金額(萬)', '預計本月可請戶數', '預計本月可請車位',
-        '預計本月可請金額(萬)', '業主報售日', '簽約日', '銷售人員1', '銷售人員2', '備註',
+        '預計本月可請金額(萬)', '業主報售日', '銷售人員1', '銷售人員2', '備註',
     ]
     ws.append([f'{site_name} 銷售總表'])
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(headers))
@@ -1271,14 +1294,19 @@ def build_sales_excel(site_name: str, rows: list[dict]) -> bytes:
             row.get('recordTypeLabel') or row.get('recordType'),
             row.get('orderNo'), row.get('unitNo'), row.get('customerName'), row.get('phone'),
             row.get('productType'), row.get('areaPing'), row.get('parkingNo1'), row.get('parkingNo2'),
-            row.get('contractTotal'), row.get('actualTotalPrice'), row.get('baseTotal'), row.get('excessPrice'),
+            row.get('houseSalePrice'), row.get('parkingSalePrice'),
+            row.get('contractTotal'), row.get('actualTotalPrice'),
+            row.get('surcharge'), row.get('applianceGift'), row.get('pickupVoucher'),
+            row.get('decoration'), row.get('companyLoanInterest'),
+            row.get('baseTotal'), row.get('excessPrice'),
+            row.get('depositDate'), row.get('supplementDate'), row.get('signDate'),
             '成交價' if row.get('commissionBaseMode') == 'deal' else '底價',
             row.get('commissionSalesAmount'), row.get('commissionClaimable'), row.get('commissionPayable'),
             row.get('commissionRetention'), row.get('commissionClaimed'), row.get('commissionUnclaimed'),
             row.get('commissionStatus'), row.get('commissionPeriod'), row.get('commissionClaimDate'),
             row.get('commissionBooked'), row.get('nextMonthUnits'), row.get('nextMonthParking'),
             row.get('nextMonthClaimable'),
-            row.get('ownerSaleReportDate') or row.get('reportDate'), row.get('signDate'),
+            row.get('ownerSaleReportDate') or row.get('reportDate'),
             row.get('salesperson1'), row.get('salesperson2'), row.get('memo'),
         ])
 
@@ -1286,11 +1314,14 @@ def build_sales_excel(site_name: str, rows: list[dict]) -> bytes:
     total_values[0] = '合計'
     total_values[3] = f'{len(rows)} 筆'
     total_columns = {
-        'contractTotal': 9, 'actualTotalPrice': 10, 'baseTotal': 11, 'excessPrice': 12,
-        'commissionSalesAmount': 14, 'commissionClaimable': 15, 'commissionPayable': 16,
-        'commissionRetention': 17, 'commissionClaimed': 18, 'commissionUnclaimed': 19,
-        'commissionBooked': 23, 'nextMonthUnits': 24, 'nextMonthParking': 25,
-        'nextMonthClaimable': 26,
+        'contractTotal': 11, 'actualTotalPrice': 12,
+        'surcharge': 13, 'applianceGift': 14, 'pickupVoucher': 15,
+        'decoration': 16, 'companyLoanInterest': 17,
+        'baseTotal': 18, 'excessPrice': 19,
+        'commissionSalesAmount': 24, 'commissionClaimable': 25, 'commissionPayable': 26,
+        'commissionRetention': 27, 'commissionClaimed': 28, 'commissionUnclaimed': 29,
+        'commissionBooked': 33, 'nextMonthUnits': 34, 'nextMonthParking': 35,
+        'nextMonthClaimable': 36,
     }
     for key, column_idx in total_columns.items():
         total_values[column_idx] = round(totals[key], 4)
