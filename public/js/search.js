@@ -13,16 +13,23 @@ function userCan(perm) {
   return window.currentUser && (window.currentUser.permissions || []).includes(perm);
 }
 
+function isExecutive() {
+  return window.currentUser?.role === 'executive';
+}
+
 function applyPermissionUI() {
   const user = window.currentUser;
+  const executive = isExecutive();
   const dangerZone = document.querySelector('.danger-zone');
   if (dangerZone) {
-    const canBulkDelete = userCan('delete_all_customers');
-    dangerZone.classList.toggle('hidden', !canBulkDelete);
-    const deleteAllBtn = document.getElementById('deleteAllBtn');
-    if (deleteAllBtn) {
-      deleteAllBtn.classList.toggle('hidden', !(canBulkDelete && user && user.role === 'executive'));
-    }
+    dangerZone.classList.toggle('hidden', !executive);
+  }
+  const deleteHint = document.getElementById('deleteWindowHint');
+  if (deleteHint) {
+    deleteHint.classList.toggle(
+      'hidden',
+      !userCan('delete_customers') || executive,
+    );
   }
   const exportBtn = document.getElementById('exportBtn');
   if (exportBtn) {
@@ -429,7 +436,7 @@ function renderResults(data) {
     const editBtn = userCan('edit_customers')
       ? `<button class="btn-sm" onclick="openEdit(${r.id})">編輯</button>`
       : '';
-    const deleteBtn = userCan('delete_customers')
+    const deleteBtn = userCan('delete_customers') && r.canDelete
       ? `<button class="btn-sm btn-danger-sm-solid" onclick="deleteRecord(${r.id})">刪除</button>`
       : '';
     return `<tr>${cells}<td class="action-btns">
@@ -540,6 +547,15 @@ window.showDetail = async function (id) {
 
   html += '</dl>';
   content.innerHTML = html;
+  const detailDeleteBtn = document.getElementById('detailDeleteBtn');
+  if (detailDeleteBtn) {
+    const canDelete = userCan('delete_customers') && record.canDelete;
+    detailDeleteBtn.classList.toggle('hidden', !canDelete);
+    detailDeleteBtn.disabled = !canDelete;
+    detailDeleteBtn.title = canDelete
+      ? ''
+      : '建檔已超過 7 日，僅最高主管可刪除';
+  }
   modal.classList.remove('hidden');
 };
 
@@ -832,6 +848,10 @@ async function deleteRecord(id) {
 window.deleteRecord = deleteRecord;
 
 async function requestDeleteCustomers(siteId) {
+  if (!isExecutive()) {
+    alert('僅最高主管可清空案場資料');
+    return false;
+  }
   const typed = prompt(
     '此操作將刪除客戶資料且無法復原。\n請輸入 DELETE ALL 以確認：',
   );

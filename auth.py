@@ -1,5 +1,6 @@
 import os
 import sqlite3
+from datetime import datetime, timedelta
 from functools import wraps
 from typing import Optional
 
@@ -21,7 +22,7 @@ ROLE_PERMISSIONS = {
     },
     'field_staff': {
         'view_customers', 'edit_customers', 'delete_customers',
-        'import_customers', 'export_customers', 'delete_all_customers',
+        'import_customers', 'export_customers',
         'manage_field_options', 'view_audit_logs', 'submit_form',
         'manage_weekly_reports',
     },
@@ -49,6 +50,44 @@ PUBLIC_API_POST_ONLY = frozenset({
     '/api/customers',
     '/api/customers/import',
 })
+
+CUSTOMER_DELETE_WINDOW_DAYS = 7
+
+
+def parse_db_datetime(value) -> Optional[datetime]:
+    if value in (None, ''):
+        return None
+    text = str(value).strip()
+    for fmt in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%d'):
+        try:
+            return datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def customer_within_delete_window(created_at, days: int = CUSTOMER_DELETE_WINDOW_DAYS) -> bool:
+    """建檔後仍在可刪除天數內（預設 7 日含當日）。"""
+    dt = parse_db_datetime(created_at)
+    if not dt:
+        return False
+    return datetime.now() - dt <= timedelta(days=days)
+
+
+def user_can_delete_customer(user, created_at) -> bool:
+    if not user or not user_has_permission(user, 'delete_customers'):
+        return False
+    if user.get('role') == 'executive':
+        return True
+    return customer_within_delete_window(created_at)
+
+
+def user_can_bulk_delete_customers(user) -> bool:
+    """清空案場／全部客戶資料：僅最高主管。"""
+    return bool(user and user.get('role') == 'executive')
 
 
 def hash_password(password: str) -> str:

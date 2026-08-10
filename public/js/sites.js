@@ -22,8 +22,9 @@ async function loadSitesList() {
     tbody.innerHTML = sites.map((s) => {
       const count = s.customer_count || 0;
       const canDeleteSite = count === 0;
+      const isExec = window.currentUser?.role === 'executive';
       const created = s.created_at ? s.created_at.slice(0, 10) : '-';
-      const clearBtn = count > 0
+      const clearBtn = count > 0 && isExec
         ? `<button class="btn-sm btn-danger-sm" onclick="clearSiteData('${s.id}', '${escapeAttr(s.name)}', ${count})">清空資料</button>`
         : '';
       const deleteSiteBtn = canDeleteSite

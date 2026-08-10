@@ -14,7 +14,8 @@ from openpyxl import load_workbook
 from auth import (
     PROTECTED_PAGES, ROLES, get_allowed_site_ids, get_current_user,
     get_user_by_id, get_user_by_username, hash_password, init_auth_tables, is_public_api,
-    migrate_retired_roles, save_user_sites, seed_initial_admin, user_can_access_site, user_has_permission,
+    migrate_retired_roles, save_user_sites, seed_initial_admin, user_can_access_site,
+    user_can_bulk_delete_customers, user_can_delete_customer, user_has_permission,
     verify_password,
 )
 from audit import init_audit_table, log_operation, row_to_log_dict
@@ -641,6 +642,12 @@ def ensure_site_access(user, site_id):
     if site_id and not user_can_access_site(user, site_id):
         return jsonify({'error': '無權存取此案場', 'code': 'FORBIDDEN'}), 403
     return None
+
+
+def enrich_customer_record(user, record: dict) -> dict:
+    """附加前端用權限旗標（如是否可刪除）。"""
+    record['canDelete'] = user_can_delete_customer(user, record.get('created_at'))
+    return record
 
 
 def fields_payload_for_site(conn, site_id: str) -> dict:
@@ -2821,7 +2828,7 @@ def list_customers():
 
     total = len(filtered)
     start = (page - 1) * limit
-    page_rows = filtered[start:start + limit]
+    page_rows = [enrich_customer_record(user, dict(r)) for r in filtered[start:start + limit]]
     conn.close()
 
     return jsonify({'total': total, 'page': page, 'limit': limit, 'records': page_rows})
@@ -2840,7 +2847,7 @@ def get_customer(record_id):
     if denied:
         conn.close()
         return denied
-    record = dict(row)
+    record = enrich_customer_record(user, dict(row))
     record['data'] = json.loads(record['data'])
     conn.close()
     return jsonify(record)
@@ -2913,6 +2920,12 @@ def delete_customer(record_id):
     if denied:
         conn.close()
         return denied
+    if not user_can_delete_customer(user, row['created_at']):
+        conn.close()
+        return jsonify({
+            'error': '此筆資料建檔已超過 7 日，無法刪除。若需刪除請聯繫最高主管。',
+            'code': 'DELETE_WINDOW_EXPIRED',
+        }), 403
     data = json.loads(row['data'])
     customer_name = str(data.get('customerName', '')).strip() or '（未填姓名）'
     cur = conn.execute('DELETE FROM customers WHERE id = ?', (record_id,))
@@ -2931,9 +2944,12 @@ def delete_customer(record_id):
 
 @app.route('/api/customers/all', methods=['DELETE'])
 def delete_all_customers():
-    conn, user, err = auth_guard('delete_all_customers')
+    conn, user, err = auth_guard('delete_customers')
     if err:
         return err
+    if not user_can_bulk_delete_customers(user):
+        conn.close()
+        return jsonify({'error': '僅最高主管可清空案場或全部客戶資料'}), 403
     body = request.get_json() or {}
     if body.get('confirm') != 'DELETE ALL':
         conn.close()
@@ -2950,9 +2966,6 @@ def delete_all_customers():
         site_name = site_row['name'] if site_row else site_id
         cur = conn.execute('DELETE FROM customers WHERE site_id = ?', (site_id,))
     else:
-        if user['role'] != 'executive':
-            conn.close()
-            return jsonify({'error': '僅最高主管可清空全部案場資料'}), 403
         cur = conn.execute('DELETE FROM customers')
     deleted = cur.rowcount
     log_operation(

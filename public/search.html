@@ -133,6 +133,7 @@
           <button type="button" id="exportBtn" class="btn btn-secondary">匯出報表 (CSV)</button>
         </div>
       </div>
+      <p id="deleteWindowHint" class="hint hidden">單筆刪除僅限建檔後 7 日內；超過期限請聯繫最高主管。清空案場資料僅最高主管可操作。</p>
       <div class="table-wrap">
         <table class="data-table" id="resultsTable">
           <thead id="resultsHead">
@@ -151,9 +152,9 @@
       <div id="statsPanel" class="stats-grid"></div>
     </section>
 
-    <section class="card danger-zone">
+    <section class="card danger-zone hidden">
       <h2>資料管理</h2>
-      <p class="hint danger-hint">以下操作無法復原，請謹慎使用。建議先匯出 CSV 備份。</p>
+      <p class="hint danger-hint">僅最高主管可見。清空後無法復原，請先匯出 CSV 備份。</p>
       <div class="delete-site-row">
         <div class="form-group">
           <label for="deleteSiteSelect">選擇案場</label>
