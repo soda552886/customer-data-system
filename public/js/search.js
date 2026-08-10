@@ -297,18 +297,19 @@ function getCellValue(record, key) {
 
 function formatCellHtml(key, value, record) {
   if (!value) return '-';
+  const text = String(value);
   if (key === 'visit_type') {
-    const cls = value === '新客' ? 'tag-new' : 'tag-return';
-    return `<span class="tag ${cls}">${value}</span>`;
+    const cls = text === '新客' ? 'tag-new' : 'tag-return';
+    return `<span class="tag ${cls}">${escapeHtml(text)}</span>`;
   }
   if (key === 'is_deal') {
-    const cls = value === '是' ? 'tag-deal' : 'tag-no-deal';
-    return `<span class="tag ${cls}">${value}</span>`;
+    const cls = text === '是' ? 'tag-deal' : 'tag-no-deal';
+    return `<span class="tag ${cls}">${escapeHtml(text)}</span>`;
   }
-  if (key === 'discussion' && value.length > 40) {
-    return `${value.slice(0, 40)}…`;
+  if (key === 'discussion' && text.length > 40) {
+    return escapeHtml(`${text.slice(0, 40)}…`);
   }
-  return escapeHtml(value);
+  return escapeHtml(text);
 }
 
 function escapeHtml(str) {
@@ -442,13 +443,13 @@ function renderResults(data) {
       return `<td${cls ? ` class="${cls}"` : ''}>${formatCellHtml(c.key, val, r)}</td>`;
     }).join('');
     const editBtn = (userCan('edit_customers') || r.canEdit)
-      ? `<button class="btn-sm" onclick="openEdit(${r.id})">編輯</button>`
+      ? `<button type="button" class="btn-sm" onclick="openEdit(${r.id})">編輯</button>`
       : '';
     const deleteBtn = (userCan('delete_customers') && r.canDelete)
-      ? `<button class="btn-sm btn-danger-sm-solid" onclick="deleteRecord(${r.id})">刪除</button>`
+      ? `<button type="button" class="btn-sm btn-danger-sm-solid" onclick="deleteRecord(${r.id})">刪除</button>`
       : '';
     return `<tr>${cells}<td class="action-btns">
-      <button class="btn-sm" onclick="showDetail(${r.id})">詳情</button>
+      <button type="button" class="btn-sm" onclick="showDetail(${r.id})">詳情</button>
       ${editBtn}
       ${deleteBtn}
     </td></tr>`;

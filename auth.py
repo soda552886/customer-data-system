@@ -69,20 +69,29 @@ def parse_db_datetime(value) -> Optional[datetime]:
         return None
 
 
-def customer_within_delete_window(created_at, days: int = CUSTOMER_DELETE_WINDOW_DAYS) -> bool:
-    """建檔後仍在可刪除天數內（預設 7 日含當日）。"""
-    dt = parse_db_datetime(created_at)
-    if not dt:
+def customer_within_delete_window(created_at, days: int = CUSTOMER_DELETE_WINDOW_DAYS, visit_date=None) -> bool:
+    """建檔後仍在可刪除天數內（預設 7 個日曆日，建檔當日算第 0 日）。
+
+    若有訪次日且早於建檔日，以訪次日為準（避免畫面上看起來已超過一週卻仍可刪）。
+    """
+    candidates = []
+    for value in (created_at, visit_date):
+        dt = parse_db_datetime(value)
+        if dt:
+            candidates.append(dt.date())
+    if not candidates:
         return False
-    return datetime.now() - dt <= timedelta(days=days)
+    ref = min(candidates)
+    age_days = (datetime.now().date() - ref).days
+    return age_days < days
 
 
-def user_can_delete_customer(user, created_at) -> bool:
+def user_can_delete_customer(user, created_at, visit_date=None) -> bool:
     if not user or not user_has_permission(user, 'delete_customers'):
         return False
     if user.get('role') == 'executive':
         return True
-    return customer_within_delete_window(created_at)
+    return customer_within_delete_window(created_at, visit_date=visit_date)
 
 
 def user_can_bulk_delete_customers(user) -> bool:

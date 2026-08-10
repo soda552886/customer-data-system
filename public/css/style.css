@@ -590,7 +590,7 @@ td.is-deal-mode {
   padding: 0.65rem 0.75rem;
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
-  vertical-align: top;
+  vertical-align: middle;
 }
 .data-table td.cell-date {
   min-width: 7.5rem;
@@ -600,6 +600,8 @@ td.is-deal-mode {
   white-space: normal;
   min-width: 12rem;
   max-width: 28rem;
+  vertical-align: middle;
+  word-break: break-word;
 }
 
 .data-table tr:hover td { background: #f8fafc; }
@@ -778,7 +780,17 @@ td.is-deal-mode {
 }
 .delete-site-row .form-group { flex: 1; min-width: 220px; margin-bottom: 0; }
 
-.action-btns { display: flex; gap: 0.35rem; flex-wrap: wrap; }
+.action-btns {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  min-width: 9rem;
+}
+.action-btns .btn-sm {
+  flex: 0 0 auto;
+}
 .btn-sm.btn-danger-sm-solid {
   color: #fff;
   background: var(--danger);

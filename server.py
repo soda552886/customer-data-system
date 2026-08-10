@@ -647,7 +647,16 @@ def ensure_site_access(user, site_id):
 def enrich_customer_record(user, record: dict) -> dict:
     """附加前端用權限旗標：編輯不限時間；刪除依 7 日／最高主管。"""
     record['canEdit'] = user_has_permission(user, 'edit_customers')
-    record['canDelete'] = user_can_delete_customer(user, record.get('created_at'))
+    data = record.get('data') if isinstance(record.get('data'), dict) else {}
+    visit_ref = (
+        record.get('visit_date')
+        or data.get('visitDate')
+        or data.get('returnVisitDate')
+        or data.get('firstVisitDate')
+    )
+    record['canDelete'] = user_can_delete_customer(
+        user, record.get('created_at'), visit_date=visit_ref,
+    )
     return record
 
 
@@ -3104,10 +3113,10 @@ def delete_customer(record_id):
     if denied:
         conn.close()
         return denied
-    if not user_can_delete_customer(user, row['created_at']):
+    if not user_can_delete_customer(user, row['created_at'], visit_date=row['visit_date']):
         conn.close()
         return jsonify({
-            'error': '此筆資料建檔已超過 7 日，無法刪除。若需刪除請聯繫最高主管。',
+            'error': '此筆資料建檔／訪次已超過 7 日，無法刪除。若需刪除請聯繫最高主管。',
             'code': 'DELETE_WINDOW_EXPIRED',
         }), 403
     data = json.loads(row['data'])
