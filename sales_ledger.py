@@ -1063,6 +1063,19 @@ def delete_sales_deal(conn: sqlite3.Connection, deal_id: int, site_id: str) -> b
     return cur.rowcount > 0
 
 
+def delete_all_sales_deals(conn: sqlite3.Connection, site_id: str) -> dict:
+    """清空指定案場的銷售明細與期別服務費批次。"""
+    deals = conn.execute(
+        'DELETE FROM sales_deals WHERE site_id = ?',
+        (site_id,),
+    ).rowcount
+    batches = conn.execute(
+        'DELETE FROM commission_batches WHERE site_id = ?',
+        (site_id,),
+    ).rowcount
+    return {'deals': int(deals), 'batches': int(batches)}
+
+
 def _in_range(date_s: Optional[str], start, end) -> bool:
     if not date_s:
         return False

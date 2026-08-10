@@ -29,9 +29,9 @@ from weekly_reports import (
 )
 from sales_ledger import (
     RECORD_TYPES as SALES_RECORD_TYPES, aggregate_for_weekly, build_commission_overview_excel,
-    build_sales_excel, commission_defaults_for_site, create_sales_deal, delete_commission_batch,
-    delete_sales_deal, get_sales_deal, init_sales_tables, list_commission_batches,
-    list_sales_deals, update_sales_deal, upsert_commission_batch,
+    build_sales_excel, commission_defaults_for_site, create_sales_deal, delete_all_sales_deals,
+    delete_commission_batch, delete_sales_deal, get_sales_deal, init_sales_tables,
+    list_commission_batches, list_sales_deals, update_sales_deal, upsert_commission_batch,
 )
 from field_options import (
     apply_site_field_options, apply_site_hidden_fields, build_site_field_config,
@@ -2370,6 +2370,40 @@ def api_delete_sales_deal(deal_id):
     conn.commit()
     conn.close()
     return jsonify({'success': True})
+
+
+@app.route('/api/sales/deals/all', methods=['DELETE'])
+def api_delete_all_sales_deals():
+    conn, user, err = auth_guard('manage_weekly_reports')
+    if err:
+        return err
+    if not user_can_bulk_delete_customers(user):
+        conn.close()
+        return jsonify({'error': '僅最高主管可清空銷售總表'}), 403
+    body = request.get_json(silent=True) or {}
+    site_id = (body.get('siteId') or request.args.get('siteId') or '').strip()
+    if not site_id or not get_site_by_id(site_id):
+        conn.close()
+        return jsonify({'error': '請選擇有效案場'}), 400
+    denied = ensure_site_access(user, site_id)
+    if denied:
+        conn.close()
+        return denied
+    if body.get('confirm') != 'DELETE ALL':
+        conn.close()
+        return jsonify({'error': '請輸入正確確認碼 DELETE ALL'}), 400
+    site = get_site_by_id(site_id)
+    counts = delete_all_sales_deals(conn, site_id)
+    log_operation(
+        conn, user, 'sales_clear_site',
+        f'清空「{site["name"]}」銷售總表：刪除明細 {counts["deals"]} 筆、期別 {counts["batches"]} 筆',
+        entity_type='sales_deal',
+        site_id=site_id, site_name=site['name'],
+        detail=counts,
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True, **counts})
 
 
 @app.route('/api/sales/summary')

@@ -791,6 +791,54 @@ async function deleteDeal(id) {
   }
 }
 
+function isExecutive() {
+  return window.currentUser?.role === 'executive';
+}
+
+function syncDeleteAllSalesVisibility() {
+  const canClear = isExecutive();
+  document.getElementById('deleteAllSalesBtn')?.classList.toggle('hidden', !canClear);
+  document.getElementById('deleteAllSalesHint')?.classList.toggle('hidden', !canClear);
+}
+
+async function deleteAllSales() {
+  if (!isExecutive()) {
+    showToast('僅最高主管可清空銷售總表', 'error');
+    return;
+  }
+  const siteId = document.getElementById('salesSite').value;
+  const siteName = document.getElementById('salesSite').selectedOptions?.[0]?.textContent || siteId;
+  if (!siteId) {
+    showToast('請先選擇案場', 'error');
+    return;
+  }
+  const count = document.getElementById('salesTotalBadge')?.textContent || '0';
+  if (!confirm(`確定清空「${siteName}」全部銷售明細（目前約 ${count} 筆）與期別服務費？\n此操作無法復原，請先匯出備份。`)) {
+    return;
+  }
+  const confirmCode = prompt('請輸入 DELETE ALL 確認清空：');
+  if (confirmCode !== 'DELETE ALL') {
+    showToast('已取消（確認碼不符）', 'error');
+    return;
+  }
+  try {
+    const res = await fetch('/api/sales/deals/all', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ siteId, confirm: 'DELETE ALL' }),
+    });
+    const json = await res.json();
+    if (!res.ok) {
+      showToast(json.error || '清空失敗', 'error');
+      return;
+    }
+    showToast(`已清空：明細 ${json.deals || 0} 筆、期別 ${json.batches || 0} 筆`);
+    await loadSales();
+  } catch {
+    showToast('清空失敗', 'error');
+  }
+}
+
 async function init() {
   for (let i = 0; i < 50 && !window.navReady; i += 1) {
     await new Promise((r) => setTimeout(r, 20));
@@ -806,10 +854,12 @@ async function init() {
     return;
   }
 
+  syncDeleteAllSalesVisibility();
   await loadSites();
   await loadCommissionDefaults(document.getElementById('salesSite').value);
 
   document.getElementById('loadSalesBtn').addEventListener('click', loadSales);
+  document.getElementById('deleteAllSalesBtn')?.addEventListener('click', deleteAllSales);
   document.getElementById('exportSalesExcelBtn').addEventListener('click', () => exportSales('xlsx'));
   document.getElementById('exportSalesCsvBtn').addEventListener('click', () => exportSales('csv'));
   document.getElementById('exportCommissionBtn')?.addEventListener('click', exportCommissionOverview);

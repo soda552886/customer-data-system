@@ -385,7 +385,11 @@
     </section>
 
     <section class="card">
-      <h2>明細列表 <span id="salesTotalBadge" class="badge badge-muted">0</span></h2>
+      <div class="section-header-row">
+        <h2>明細列表 <span id="salesTotalBadge" class="badge badge-muted">0</span></h2>
+        <button type="button" id="deleteAllSalesBtn" class="btn btn-danger hidden">全部刪除</button>
+      </div>
+      <p id="deleteAllSalesHint" class="hint danger-hint hidden">僅最高主管可清空目前案場全部銷售明細與期別服務費；無法復原，請先匯出備份。</p>
       <div class="table-wrap table-wrap-scroll">
         <table class="data-table" id="salesTable">
           <thead>
