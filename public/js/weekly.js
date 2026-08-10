@@ -356,6 +356,8 @@ function phoneCountByDay(manual, fallback = {}) {
   return by;
 }
 
+const WEATHER_OPTIONS = ['晴', '陰', '雨', '多雲', '雷雨'];
+
 function renderDaily(auto, manual) {
   const byDay = auto.byDay || [];
   const days = manual.days || [];
@@ -374,7 +376,7 @@ function renderDaily(auto, manual) {
       <td><strong>${d.total}</strong></td>
       <td>${d.deal}</td>
       <td><strong>${phones}</strong></td>
-      <td><input type="text" class="table-input" data-field="weather" value="${escapeHtml(m.weather || '')}" placeholder="晴／陰／雨"></td>
+      <td><select class="table-input" data-field="weather">${optionHtml(WEATHER_OPTIONS, m.weather || '')}</select></td>
     </tr>`;
   }).join('');
 }

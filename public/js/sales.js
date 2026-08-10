@@ -196,7 +196,7 @@ function collectForm() {
     orderNo: document.getElementById('fOrderNo').value.trim(),
     unitNo: document.getElementById('fUnitNo').value.trim(),
     customerName: document.getElementById('fCustomerName').value.trim(),
-    phone: document.getElementById('fPhone').value.trim(),
+    phone: '',
     productType: document.getElementById('fProductType').value,
     areaPing: Number(document.getElementById('fAreaPing').value) || 0,
     units: Number(document.getElementById('fUnits').value) || 1,
@@ -243,7 +243,6 @@ function fillForm(rec) {
   document.getElementById('fOrderNo').value = rec?.orderNo || '';
   document.getElementById('fUnitNo').value = rec?.unitNo || '';
   document.getElementById('fCustomerName').value = rec?.customerName || '';
-  document.getElementById('fPhone').value = rec?.phone || '';
   document.getElementById('fProductType').value = rec?.productType || '';
   document.getElementById('fAreaPing').value = rec?.areaPing || 0;
   document.getElementById('fUnits').value = rec?.units ?? 1;

@@ -1766,7 +1766,7 @@ def _sales_import_payload(row, normalized_headers, sheet_name=''):
     if not payload.get('houseBasePrice') and get('basePrice'):
         payload['basePrice'] = get('basePrice')
     if get('excessPrice') not in (None, ''):
-        payload['extra'] = {'excessPrice': _sales_import_num(get('excessPrice'))}
+        payload['excessPrice'] = _sales_import_num(get('excessPrice'))
 
     mode = str(payload.get('commissionBaseMode') or '').strip()
     payload['commissionBaseMode'] = 'deal' if '成交' in mode or mode == 'deal' else 'base'
@@ -2050,10 +2050,10 @@ def api_export_sales_csv():
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow([
-        '類型', '訂單編號', '戶別', '客戶', '電話', '產品類型', '坪數', '車位1', '車位2',
+        '類型', '訂單編號', '戶別', '客戶', '產品類型', '坪數', '車位1', '車位2',
         '房售價(萬)', '車位售價(萬)', '合約總價(萬)', '實際成交總價(萬)',
         '附加費(萬)', '家電禮券(萬)', '提貨券(萬)', '裝潢(萬)', '公司貸利息(萬)',
-        '底總(萬)', '下訂日', '補足日', '簽約日', '請佣計價方式',
+        '底總(萬)', '超價(萬)', '下訂日', '補足日', '簽約日', '請佣計價方式',
         '請佣銷售金額(萬)', '可請佣(萬)', '本期可請97%(萬)', '保留款3%(萬)',
         '已請(萬)', '未請(萬)', '狀態', '請佣期別', '請佣日期', '已入帳金額(萬)',
         '預計本月可請戶數', '預計本月可請車位', '預計本月可請金額(萬)',
@@ -2062,7 +2062,7 @@ def api_export_sales_csv():
     total_fields = [
         'houseSalePrice', 'parkingSalePrice', 'contractTotal', 'actualTotalPrice',
         'surcharge', 'applianceGift', 'pickupVoucher', 'decoration', 'companyLoanInterest',
-        'baseTotal', 'commissionSalesAmount',
+        'baseTotal', 'excessPrice', 'commissionSalesAmount',
         'commissionClaimable', 'commissionPayable', 'commissionRetention',
         'commissionClaimed', 'commissionUnclaimed', 'commissionBooked',
         'nextMonthUnits', 'nextMonthParking', 'nextMonthClaimable',
@@ -2073,13 +2073,13 @@ def api_export_sales_csv():
             totals[key] += float(row.get(key) or 0)
         writer.writerow([
             row.get('recordTypeLabel') or row.get('recordType'), row.get('orderNo'),
-            row.get('unitNo'), row.get('customerName'), row.get('phone'), row.get('productType'),
+            row.get('unitNo'), row.get('customerName'), row.get('productType'),
             row.get('areaPing'), row.get('parkingNo1'), row.get('parkingNo2'),
             row.get('houseSalePrice'), row.get('parkingSalePrice'),
             row.get('contractTotal'), row.get('actualTotalPrice'),
             row.get('surcharge'), row.get('applianceGift'), row.get('pickupVoucher'),
             row.get('decoration'), row.get('companyLoanInterest'),
-            row.get('baseTotal'),
+            row.get('baseTotal'), row.get('excessPrice'),
             row.get('depositDate'), row.get('supplementDate'), row.get('signDate'),
             '成交價' if row.get('commissionBaseMode') == 'deal' else '底價',
             row.get('commissionSalesAmount'), row.get('commissionClaimable'),
@@ -2092,13 +2092,13 @@ def api_export_sales_csv():
             row.get('salesperson1'), row.get('salesperson2'), row.get('memo'),
         ])
     writer.writerow([
-        '合計', '', '', f'{len(rows)} 筆', '', '', '', '', '',
+        '合計', '', '', f'{len(rows)} 筆', '', '', '', '',
         round(totals['houseSalePrice'], 4), round(totals['parkingSalePrice'], 4),
         round(totals['contractTotal'], 4), round(totals['actualTotalPrice'], 4),
         round(totals['surcharge'], 4), round(totals['applianceGift'], 4),
         round(totals['pickupVoucher'], 4), round(totals['decoration'], 4),
         round(totals['companyLoanInterest'], 4),
-        round(totals['baseTotal'], 4), '', '', '', '',
+        round(totals['baseTotal'], 4), round(totals['excessPrice'], 4), '', '', '', '',
         round(totals['commissionSalesAmount'], 4),
         round(totals['commissionClaimable'], 4), round(totals['commissionPayable'], 4),
         round(totals['commissionRetention'], 4), round(totals['commissionClaimed'], 4),

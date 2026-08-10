@@ -650,6 +650,41 @@ def _truthy(val) -> bool:
     return str(val or '').strip().lower() in {'1', 'true', 'yes', 'y', '是', '有'}
 
 
+def _deal_deductions(data) -> float:
+    snake = ('surcharge', 'appliance_gift', 'pickup_voucher', 'decoration', 'company_loan_interest')
+    camel = ('surcharge', 'applianceGift', 'pickupVoucher', 'decoration', 'companyLoanInterest')
+    if isinstance(data, dict):
+        if any(k in data for k in ('appliance_gift', 'pickup_voucher', 'company_loan_interest')):
+            return sum(_num(data.get(k)) for k in snake)
+        if any(k in data for k in ('applianceGift', 'pickupVoucher', 'companyLoanInterest')):
+            return sum(_num(data.get(k)) for k in camel)
+        return sum(_num(data.get(k)) for k in snake)
+    return sum(_num(data[k]) for k in snake if k in data.keys())
+
+
+def _calc_excess_price(contract_total, base_total, deductions, imported=None) -> float:
+    if imported not in (None, ''):
+        val = _num(imported)
+        if val != 0 or str(imported).strip() in ('0', '0.0', '-0'):
+            return _round4(val)
+    return _round4(_num(contract_total) - _num(base_total) - _num(deductions))
+
+
+def _excess_from_body(body: dict, contract_total: float, base_total: float, deductions: float) -> float:
+    extra = body.get('extra')
+    if isinstance(extra, str):
+        try:
+            extra = json.loads(extra or '{}')
+        except (TypeError, json.JSONDecodeError):
+            extra = {}
+    if not isinstance(extra, dict):
+        extra = {}
+    imported = body.get('excessPrice')
+    if imported in (None, '') and extra.get('excessPrice') not in (None, ''):
+        imported = extra.get('excessPrice')
+    return _calc_excess_price(contract_total, base_total, deductions, imported)
+
+
 def row_to_deal(row) -> dict:
     extra = {}
     try:
@@ -687,7 +722,11 @@ def row_to_deal(row) -> dict:
         'houseBasePrice': row['house_base_price'] or 0,
         'parkingBasePrice': row['parking_base_price'] or 0,
         'baseTotal': row['base_price'] or 0,
-        'excessPrice': row['excess_price'] or 0,
+        'excessPrice': _calc_excess_price(
+            row['total_price'],
+            row['base_price'],
+            _deal_deductions(row),
+        ),
         'units': row['units'] if row['units'] is not None else 1,
         'depositDate': row['deposit_date'],
         'supplementDate': row['supplement_date'],
@@ -755,8 +794,8 @@ def list_sales_deals(
         SELECT * FROM sales_deals
         WHERE {where}
         ORDER BY
-          COALESCE(owner_sale_report_date, report_date, sign_date, deposit_date, '') DESC,
-          id DESC
+          COALESCE(owner_sale_report_date, report_date, sign_date, deposit_date, '') ASC,
+          id ASC
         LIMIT ? OFFSET ?
         ''',
         [*params, limit, offset],
@@ -813,16 +852,16 @@ def normalize_deal_payload(body: dict, site_id: str = '') -> dict:
     actual_house = house_sale - deductions
     actual_total = actual_house + parking_sale
     base_total = house_base + parking_base
-    excess = contract_total - base_total - deductions
+    excess = _excess_from_body(body, contract_total, base_total, deductions)
     # 相容舊資料／API：尚未拆分房售、車售時保留既有總價。
     if contract_total == 0 and explicit_total:
         contract_total = explicit_total
         actual_house = contract_total - deductions - parking_sale
         actual_total = actual_house + parking_sale
-        excess = contract_total - base_total - deductions
+        excess = _excess_from_body(body, contract_total, base_total, deductions)
     if base_total == 0 and _num(body.get('basePrice')):
         base_total = _num(body.get('basePrice'))
-        excess = contract_total - base_total - deductions
+        excess = _excess_from_body(body, contract_total, base_total, deductions)
     if not parking_nos:
         parking_nos = str(body.get('parkingNos') or '').strip()
         parking_count = _num(body.get('parkingCount'))
@@ -1261,7 +1300,7 @@ def build_sales_excel(site_name: str, rows: list[dict]) -> bytes:
     ws = wb.active
     ws.title = '銷售總表'
     headers = [
-        '類型', '訂單編號', '戶別', '客戶', '電話', '產品類型', '坪數',
+        '類型', '訂單編號', '戶別', '客戶', '產品類型', '坪數',
         '車位1', '車位2', '房售價(萬)', '車位售價(萬)', '合約總價(萬)', '實際成交總價(萬)',
         '附加費(萬)', '家電禮券(萬)', '提貨券(萬)', '裝潢(萬)', '公司貸利息(萬)',
         '底總(萬)', '超價(萬)', '下訂日', '補足日', '簽約日',
@@ -1292,7 +1331,7 @@ def build_sales_excel(site_name: str, rows: list[dict]) -> bytes:
             totals[key] += _num(row.get(key))
         ws.append([
             row.get('recordTypeLabel') or row.get('recordType'),
-            row.get('orderNo'), row.get('unitNo'), row.get('customerName'), row.get('phone'),
+            row.get('orderNo'), row.get('unitNo'), row.get('customerName'),
             row.get('productType'), row.get('areaPing'), row.get('parkingNo1'), row.get('parkingNo2'),
             row.get('houseSalePrice'), row.get('parkingSalePrice'),
             row.get('contractTotal'), row.get('actualTotalPrice'),
@@ -1314,14 +1353,14 @@ def build_sales_excel(site_name: str, rows: list[dict]) -> bytes:
     total_values[0] = '合計'
     total_values[3] = f'{len(rows)} 筆'
     total_columns = {
-        'contractTotal': 11, 'actualTotalPrice': 12,
-        'surcharge': 13, 'applianceGift': 14, 'pickupVoucher': 15,
-        'decoration': 16, 'companyLoanInterest': 17,
-        'baseTotal': 18, 'excessPrice': 19,
-        'commissionSalesAmount': 24, 'commissionClaimable': 25, 'commissionPayable': 26,
-        'commissionRetention': 27, 'commissionClaimed': 28, 'commissionUnclaimed': 29,
-        'commissionBooked': 33, 'nextMonthUnits': 34, 'nextMonthParking': 35,
-        'nextMonthClaimable': 36,
+        'contractTotal': 10, 'actualTotalPrice': 11,
+        'surcharge': 12, 'applianceGift': 13, 'pickupVoucher': 14,
+        'decoration': 15, 'companyLoanInterest': 16,
+        'baseTotal': 17, 'excessPrice': 18,
+        'commissionSalesAmount': 23, 'commissionClaimable': 24, 'commissionPayable': 25,
+        'commissionRetention': 26, 'commissionClaimed': 27, 'commissionUnclaimed': 28,
+        'commissionBooked': 32, 'nextMonthUnits': 33, 'nextMonthParking': 34,
+        'nextMonthClaimable': 35,
     }
     for key, column_idx in total_columns.items():
         total_values[column_idx] = round(totals[key], 4)
