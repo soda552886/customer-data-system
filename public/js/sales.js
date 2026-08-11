@@ -576,7 +576,7 @@ function renderTable(rows) {
   const tfoot = document.getElementById('salesTableTotal');
   document.getElementById('salesTotalBadge').textContent = String(rows.length);
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="17" class="empty-row">尚無銷售明細，請按「新增明細」</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="19" class="empty-row">尚無銷售明細，請按「新增明細」</td></tr>';
     tfoot.innerHTML = '';
     return;
   }
@@ -591,6 +591,8 @@ function renderTable(rows) {
       <td>${escapeHtml([r.parkingNo1, r.parkingNo2].filter(Boolean).join('／'))}</td>
       <td>${r.contractTotal ?? r.totalPrice ?? 0}</td>
       <td>${r.actualTotalPrice ?? 0}</td>
+      <td>${r.houseBasePrice ?? 0}</td>
+      <td>${r.parkingBasePrice ?? 0}</td>
       <td>${r.baseTotal ?? r.basePrice ?? 0}</td>
       <td${salesAmtClass}>${r.commissionSalesAmount ?? 0}</td>
       <td>${r.commissionClaimable ?? 0}</td>
@@ -600,7 +602,7 @@ function renderTable(rows) {
       <td class="cell-date">${escapeHtml(r.ownerSaleReportDate || r.reportDate || '')}</td>
       <td class="cell-date">${escapeHtml(r.ownerSignReportDate || '')}</td>
       <td>${escapeHtml(sales)}</td>
-      <td>
+      <td class="col-actions action-btns">
         <button type="button" class="btn-xs" data-edit="${r.id}">編輯</button>
         <button type="button" class="btn-xs link-btn" data-del="${r.id}">刪除</button>
       </td>
@@ -614,12 +616,14 @@ function renderTable(rows) {
     <th colspan="5">合計（${rows.length} 筆）</th>
     <th>${sum('contractTotal', 'totalPrice')}</th>
     <th>${sum('actualTotalPrice')}</th>
+    <th>${sum('houseBasePrice')}</th>
+    <th>${sum('parkingBasePrice')}</th>
     <th>${sum('baseTotal', 'basePrice')}</th>
     <th>${sum('commissionSalesAmount')}</th>
     <th>${sum('commissionClaimable')}</th>
     <th>${sum('commissionClaimed')}</th>
     <th>${sum('commissionUnclaimed')}</th>
-    <th colspan="5"></th>
+    <th colspan="5" class="col-actions"></th>
   </tr>`;
   tbody.querySelectorAll('[data-edit]').forEach((btn) => {
     btn.addEventListener('click', () => {

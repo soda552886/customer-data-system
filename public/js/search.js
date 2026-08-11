@@ -428,13 +428,13 @@ function renderResults(data) {
   }
 
   if (data.records.length === 0) {
-    thead.innerHTML = `<tr>${cols.map((c) => `<th>${c.label}</th>`).join('')}<th>操作</th></tr>`;
+    thead.innerHTML = `<tr>${cols.map((c) => `<th>${c.label}</th>`).join('')}<th class="col-actions">操作</th></tr>`;
     tbody.innerHTML = `<tr><td colspan="${cols.length + 1}" class="empty-row">查無符合條件的資料</td></tr>`;
     setPaginationVisible(false);
     return;
   }
 
-  thead.innerHTML = `<tr>${cols.map((c) => `<th>${c.label}</th>`).join('')}<th>操作</th></tr>`;
+  thead.innerHTML = `<tr>${cols.map((c) => `<th>${c.label}</th>`).join('')}<th class="col-actions">操作</th></tr>`;
 
   tbody.innerHTML = data.records.map((r) => {
     const cells = cols.map((c) => {
@@ -448,7 +448,7 @@ function renderResults(data) {
     const deleteBtn = (userCan('delete_customers') && r.canDelete)
       ? `<button type="button" class="btn-sm btn-danger-sm-solid" onclick="deleteRecord(${r.id})">刪除</button>`
       : '';
-    return `<tr>${cells}<td class="action-btns">
+    return `<tr>${cells}<td class="col-actions action-btns">
       <button type="button" class="btn-sm" onclick="showDetail(${r.id})">詳情</button>
       ${editBtn}
       ${deleteBtn}

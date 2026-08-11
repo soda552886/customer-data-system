@@ -41,7 +41,7 @@
         <button type="button" id="importSalesBtn" class="btn btn-outline">匯入 Excel／CSV</button>
         <a class="btn btn-outline" href="/weekly.html">前往週報工作台</a>
       </div>
-      <p class="hint">匯入支援系統匯出的 Excel／CSV，也支援請佣總表（優先讀「累計銷售分析」：戶別、坪數、車位、房／車售價、合約總價、附加費細項、下訂／簽約日、請佣期別等）。同一檔若已有累計分析會略過已報／未報明細以免重複。重複訂單或相同戶別＋客戶會自動略過。</p>
+      <p class="hint">匯入支援系統匯出的 Excel／CSV，也支援請佣總表（優先讀「累計銷售分析」：戶別、坪數、車位、房／車售價、合約總價、附加費細項、房底／車底／底總、下訂／簽約日、請佣期別等）。「請佣狀態」填「已請」或「未請」；有填請佣期別或請佣日期會自動算成已請。同一檔若已有累計分析會略過已報／未報明細以免重複。重複訂單或相同戶別＋客戶會自動略過。</p>
     </section>
 
     <section class="card" id="salesSummaryCard">
@@ -395,9 +395,10 @@
           <thead>
             <tr>
               <th>類型</th><th>訂單編號</th><th>戶別</th><th>客戶</th><th>車位1/2</th>
-              <th>合約總價</th><th>實際成交總價</th><th>底總</th><th>請佣銷售金額</th>
-              <th>可請</th><th>已請</th><th>未請</th><th>狀態</th>
-              <th>業主報售日</th><th>業主報簽日</th><th>銷售</th><th>操作</th>
+              <th>合約總價</th><th>實際成交總價</th><th>房底</th><th>車底</th><th>底總</th>
+              <th>請佣銷售金額</th>
+              <th>可請</th><th>已請</th><th>未請</th><th>請佣狀態</th>
+              <th>業主報售日</th><th>業主報簽日</th><th>銷售</th><th class="col-actions">操作</th>
             </tr>
           </thead>
           <tbody></tbody>

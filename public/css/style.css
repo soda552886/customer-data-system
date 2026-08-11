@@ -556,15 +556,35 @@ td.is-deal-mode {
 .table-wrap-scroll .data-table thead th {
   position: sticky;
   top: 0;
-  z-index: 2;
-  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.12);
+  z-index: 3;
+  background: var(--primary);
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.12);
 }
 
 .table-wrap-scroll .data-table tfoot th {
   position: sticky;
   bottom: 0;
-  z-index: 2;
+  z-index: 3;
   box-shadow: 0 -1px 0 rgba(0, 0, 0, 0.12);
+}
+
+.table-wrap-scroll .data-table .col-actions {
+  position: sticky;
+  right: 0;
+  z-index: 2;
+  background: #fff;
+  box-shadow: -6px 0 8px -6px rgba(23, 59, 94, 0.18);
+}
+
+.table-wrap-scroll .data-table thead .col-actions {
+  z-index: 4;
+  background: var(--primary);
+  color: #fff;
+}
+
+.table-wrap-scroll .data-table tfoot .col-actions,
+.table-wrap-scroll .data-table tfoot th {
+  background: #e8f1f8;
 }
 
 .batch-deals-btn {
@@ -573,24 +593,29 @@ td.is-deal-mode {
 }
 
 .data-table {
-  width: 100%;
-  border-collapse: collapse;
+  width: max-content;
+  min-width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
   font-size: 0.9rem;
 }
 
 .data-table th {
   background: var(--primary);
   color: #fff;
-  padding: 0.75rem;
+  padding: 0.7rem 0.75rem;
   text-align: left;
   white-space: nowrap;
+  vertical-align: middle;
+  border-bottom: 1px solid #143a5e;
 }
 
 .data-table td {
-  padding: 0.65rem 0.75rem;
+  padding: 0.6rem 0.75rem;
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
   vertical-align: middle;
+  background: #fff;
 }
 .data-table td.cell-date {
   min-width: 7.5rem;
@@ -598,13 +623,17 @@ td.is-deal-mode {
 }
 .data-table td.cell-wrap {
   white-space: normal;
-  min-width: 12rem;
-  max-width: 28rem;
+  min-width: 10rem;
+  max-width: 22rem;
   vertical-align: middle;
   word-break: break-word;
+  line-height: 1.35;
 }
 
-.data-table tr:hover td { background: #f8fafc; }
+.data-table tbody tr:nth-child(even) td { background: #f7fafc; }
+.data-table tbody tr:nth-child(even) td.col-actions { background: #f7fafc; }
+.data-table tr:hover td,
+.data-table tr:hover td.col-actions { background: #eef4fa; }
 
 .empty-row { text-align: center; color: var(--text-muted); padding: 2rem !important; }
 
@@ -783,10 +812,11 @@ td.is-deal-mode {
 .action-btns {
   display: flex;
   gap: 0.35rem;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   justify-content: flex-start;
-  min-width: 9rem;
+  white-space: nowrap;
+  min-width: 12.5rem;
 }
 .action-btns .btn-sm {
   flex: 0 0 auto;

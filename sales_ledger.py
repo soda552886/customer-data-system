@@ -1316,7 +1316,7 @@ def build_sales_excel(site_name: str, rows: list[dict]) -> bytes:
         '類型', '訂單編號', '戶別', '客戶', '產品類型', '坪數',
         '車位1', '車位2', '房售價(萬)', '車位售價(萬)', '合約總價(萬)', '實際成交總價(萬)',
         '附加費(萬)', '家電禮券(萬)', '提貨券(萬)', '裝潢(萬)', '公司貸利息(萬)',
-        '底總(萬)', '超價(萬)', '下訂日', '補足日', '簽約日',
+        '房底(萬)', '車底(萬)', '底總(萬)', '超價(萬)', '下訂日', '補足日', '簽約日',
         '請佣計價方式', '請佣銷售金額(萬)', '可請佣(萬)', '本期可請97%(萬)',
         '保留款3%(萬)', '已請(萬)', '未請(萬)', '請佣狀態', '請佣期別', '請佣日期',
         '已入帳金額(萬)', '預計本月可請戶數', '預計本月可請車位',
@@ -1334,7 +1334,8 @@ def build_sales_excel(site_name: str, rows: list[dict]) -> bytes:
         cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
 
     amount_keys = [
-        'contractTotal', 'actualTotalPrice', 'baseTotal', 'excessPrice',
+        'contractTotal', 'actualTotalPrice',
+        'houseBasePrice', 'parkingBasePrice', 'baseTotal', 'excessPrice',
         'commissionSalesAmount', 'commissionClaimable', 'commissionPayable',
         'commissionRetention', 'commissionClaimed', 'commissionUnclaimed',
         'commissionBooked', 'nextMonthUnits', 'nextMonthParking', 'nextMonthClaimable',
@@ -1351,6 +1352,7 @@ def build_sales_excel(site_name: str, rows: list[dict]) -> bytes:
             row.get('contractTotal'), row.get('actualTotalPrice'),
             row.get('surcharge'), row.get('applianceGift'), row.get('pickupVoucher'),
             row.get('decoration'), row.get('companyLoanInterest'),
+            row.get('houseBasePrice'), row.get('parkingBasePrice'),
             row.get('baseTotal'), row.get('excessPrice'),
             row.get('depositDate'), row.get('supplementDate'), row.get('signDate'),
             '成交價' if row.get('commissionBaseMode') == 'deal' else '底價',
@@ -1371,11 +1373,11 @@ def build_sales_excel(site_name: str, rows: list[dict]) -> bytes:
         'contractTotal': 10, 'actualTotalPrice': 11,
         'surcharge': 12, 'applianceGift': 13, 'pickupVoucher': 14,
         'decoration': 15, 'companyLoanInterest': 16,
-        'baseTotal': 17, 'excessPrice': 18,
-        'commissionSalesAmount': 23, 'commissionClaimable': 24, 'commissionPayable': 25,
-        'commissionRetention': 26, 'commissionClaimed': 27, 'commissionUnclaimed': 28,
-        'commissionBooked': 32, 'nextMonthUnits': 33, 'nextMonthParking': 34,
-        'nextMonthClaimable': 35,
+        'houseBasePrice': 17, 'parkingBasePrice': 18, 'baseTotal': 19, 'excessPrice': 20,
+        'commissionSalesAmount': 25, 'commissionClaimable': 26, 'commissionPayable': 27,
+        'commissionRetention': 28, 'commissionClaimed': 29, 'commissionUnclaimed': 30,
+        'commissionBooked': 34, 'nextMonthUnits': 35, 'nextMonthParking': 36,
+        'nextMonthClaimable': 37,
     }
     for key, column_idx in total_columns.items():
         total_values[column_idx] = round(totals[key], 4)
