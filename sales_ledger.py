@@ -94,15 +94,22 @@ def compute_commission(
     extra = body.get('extra') if isinstance(body.get('extra'), dict) else {}
     if extra.get('importClaimable') not in (None, ''):
         claimable = max(_num(extra.get('importClaimable')), 0)
-        payable = claimable * payable_ratio
-        retention = claimable * retention_ratio
         claimed = payable if is_claimed else 0.0
         unclaimed = max(claimable - claimed, 0)
     if extra.get('importPayable') not in (None, ''):
         payable = max(_num(extra.get('importPayable')), 0)
+    else:
+        payable = claimable * payable_ratio
+    if extra.get('importRetention') not in (None, ''):
+        retention = max(_num(extra.get('importRetention')), 0)
+    else:
+        # 保留款一律＝可請佣（4.85%）× 3%，避免匯入的 97% 四捨五入讓 3% 對不上
+        retention = claimable * retention_ratio
     if extra.get('importClaimed') not in (None, ''):
         claimed = max(_num(extra.get('importClaimed')), 0)
         is_claimed = is_claimed or claimed > 0
+    else:
+        claimed = payable if is_claimed else 0.0
     if extra.get('importUnclaimed') not in (None, ''):
         unclaimed = max(_num(extra.get('importUnclaimed')), 0)
     else:
@@ -258,13 +265,25 @@ def _comm_bucket():
     }
 
 
-def _round_bucket(b: dict) -> dict:
+def _round_bucket(b: dict, *, derive_from_claimable: bool = True) -> dict:
+    claimable = round(b['claimable'], 4)
+    if derive_from_claimable and claimable > 0:
+        return {
+            'units': round(b['units'], 2),
+            'parking': round(b['parking'], 2),
+            'claimable': claimable,
+            'retention': round(claimable * 0.03, 4),
+            'payable': round(claimable * 0.97, 4),
+        }
+    payable = round(b['payable'], 4)
+    if derive_from_claimable and payable > 0 and claimable <= 0:
+        claimable = round(payable / 0.97, 4)
     return {
         'units': round(b['units'], 2),
         'parking': round(b['parking'], 2),
-        'claimable': round(b['claimable'], 4),
-        'retention': round(b['retention'], 4),
-        'payable': round(b['payable'], 4),
+        'claimable': claimable,
+        'retention': round(claimable * 0.03, 4) if claimable else round(b['retention'], 4),
+        'payable': round(claimable * 0.97, 4) if claimable else payable,
     }
 
 
@@ -415,6 +434,15 @@ def list_commission_batches(conn: sqlite3.Connection, site_id: str) -> list[dict
         if half1 <= 0 and half2 <= 0 and amount > 0:
             half1 = _round4(amount / 2)
             half2 = _round4(amount - half1)
+        claim_month = str(row['claim_month'] or '').strip()
+        if not claim_month:
+            inferred = _infer_period_claim_month(conn, site_id, row['period_name'])
+            if inferred:
+                claim_month = inferred
+                conn.execute(
+                    'UPDATE commission_batches SET claim_month = ? WHERE id = ?',
+                    (inferred, row['id']),
+                )
         status = _batch_status(row['deposit_date1'], row['deposit_date2'])
         booked_total = 0.0
         if _deposit_due(row['deposit_date1']):
@@ -425,7 +453,7 @@ def list_commission_batches(conn: sqlite3.Connection, site_id: str) -> list[dict
             'id': row['id'],
             'siteId': row['site_id'],
             'periodName': row['period_name'],
-            'claimMonth': row['claim_month'] or '',
+            'claimMonth': claim_month,
             'amountPayable': _round4(amount),
             'autoPayable': auto_payable,
             'half1Amount': _round4(half1),
@@ -437,12 +465,14 @@ def list_commission_batches(conn: sqlite3.Connection, site_id: str) -> list[dict
             'memo': row['memo'] or '',
             'status': status,
             'bookedTotal': _round4(booked_total),
+            'claimable': totals['claimable'],
             'units': totals['units'],
             'parking': totals['parking'],
             'dealCount': totals['dealCount'],
             'deals': totals['deals'],
             'updatedAt': row['updated_at'],
         })
+    conn.commit()
     return out
 
 
@@ -618,19 +648,95 @@ def build_commission_overview_excel(site_name: str, matrix: dict, batches: list[
     return buf.getvalue()
 
 
+def parse_deal_date(value) -> Optional[str]:
+    """對外日期解析（民國年 113/12/12 → 2024-12-12）。"""
+    return _parse_date(value)
+
+
 def _parse_date(value) -> Optional[str]:
     if value is None or value == '':
         return None
     if isinstance(value, datetime):
         return value.date().isoformat()
-    s = str(value).strip().replace('/', '-')
-    if not s:
+    if isinstance(value, date):
+        return value.isoformat()
+    s = str(value).strip()
+    if not s or s.lower() in ('none', 'nat', 'nan'):
         return None
-    # allow YYYY-MM-DD or with time
+    s = s.replace('年', '-').replace('月', '-').replace('日', '')
+    s = s.split()[0].replace('.', '-').replace('/', '-')
+    parts = [p for p in s.split('-') if p]
+    if len(parts) >= 3:
+        try:
+            year = int(parts[0])
+            month = int(parts[1])
+            day = int(str(parts[2])[:2])
+        except ValueError:
+            return None
+        if 1 <= year <= 200:
+            year += 1911
+        try:
+            return date(year, month, day).isoformat()
+        except ValueError:
+            return None
     try:
         return datetime.strptime(s[:10], '%Y-%m-%d').date().isoformat()
     except ValueError:
-        return s[:10]
+        return None
+
+
+def _norm_roc_month(value) -> str:
+    s = str(value or '').strip().replace('.', '/').replace('-', '/')
+    if not s:
+        return ''
+    parts = [p for p in s.split('/') if p]
+    if len(parts) < 2:
+        return ''
+    try:
+        year = int(''.join(c for c in parts[0] if c.isdigit()) or '0')
+        month = int(''.join(c for c in parts[1] if c.isdigit()) or '0')
+    except ValueError:
+        return ''
+    if year > 1911:
+        year -= 1911
+    if year <= 0 or not (1 <= month <= 12):
+        return ''
+    return f'{year}/{month:02d}'
+
+
+def _current_roc_month(today=None) -> str:
+    d = today or date.today()
+    return f'{d.year - 1911}/{d.month:02d}'
+
+
+def _infer_period_claim_month(conn: sqlite3.Connection, site_id: str, period_name: str) -> str:
+    rows = conn.execute(
+        '''
+        SELECT extra, memo FROM sales_deals
+        WHERE site_id = ?
+          AND TRIM(COALESCE(commission_period, '')) = ?
+        ''',
+        (site_id, period_name),
+    ).fetchall()
+    counts = {}
+    for row in rows:
+        extra = {}
+        try:
+            extra = json.loads(row['extra'] or '{}')
+        except (TypeError, json.JSONDecodeError):
+            extra = {}
+        raw = str((extra or {}).get('claimMonth') or '').strip()
+        if not raw:
+            memo = str(row['memo'] or '')
+            marker = '請佣月份 '
+            if marker in memo:
+                raw = memo.split(marker, 1)[-1].split('；', 1)[0].strip()
+        key = _norm_roc_month(raw)
+        if key:
+            counts[key] = counts.get(key, 0) + 1
+    if not counts:
+        return ''
+    return max(counts, key=counts.get)
 
 
 def _num(val, default=0.0) -> float:
@@ -728,12 +834,12 @@ def row_to_deal(row) -> dict:
             _deal_deductions(row),
         ),
         'units': row['units'] if row['units'] is not None else 1,
-        'depositDate': row['deposit_date'],
-        'supplementDate': row['supplement_date'],
-        'signDate': row['sign_date'],
-        'reportDate': row['report_date'],
-        'ownerSaleReportDate': row['owner_sale_report_date'] or row['report_date'],
-        'ownerSignReportDate': row['owner_sign_report_date'],
+        'depositDate': _parse_date(row['deposit_date']),
+        'supplementDate': _parse_date(row['supplement_date']),
+        'signDate': _parse_date(row['sign_date']),
+        'reportDate': _parse_date(row['report_date']),
+        'ownerSaleReportDate': _parse_date(row['owner_sale_report_date'] or row['report_date']),
+        'ownerSignReportDate': _parse_date(row['owner_sign_report_date']),
         'salesperson1': row['salesperson1'] or '',
         'salesperson2': row['salesperson2'] or '',
         'isCoManaged': bool(row['is_co_managed']),
@@ -747,7 +853,7 @@ def row_to_deal(row) -> dict:
         'commissionPayable': row['commission_payable'] if 'commission_payable' in row.keys() else 0,
         'commissionRetention': row['commission_retention'] if 'commission_retention' in row.keys() else 0,
         'commissionPeriod': (row['commission_period'] if 'commission_period' in row.keys() else '') or '',
-        'commissionClaimDate': row['commission_claim_date'] if 'commission_claim_date' in row.keys() else None,
+        'commissionClaimDate': _parse_date(row['commission_claim_date']) if 'commission_claim_date' in row.keys() else None,
         'commissionClaimed': row['commission_claimed'] or 0,
         'commissionUnclaimed': row['commission_unclaimed'] if 'commission_unclaimed' in row.keys() else 0,
         'commissionStatus': '已請' if (
@@ -849,8 +955,20 @@ def normalize_deal_payload(body: dict, site_id: str = '') -> dict:
                 diff = explicit_total - house_sale
                 if diff > 0.01 and abs(diff - deductions) > 0.01:
                     parking_sale = diff
-    actual_house = house_sale - deductions
-    actual_total = actual_house + parking_sale
+    # 請佣總表「房售價」多為未含附加；若 房+車+附加 ≈ 合約總價，實際成交＝房售＋車售
+    net_of_extras = (
+        deductions > 0.01
+        and contract_total > 0
+        and abs(house_sale + parking_sale + deductions - contract_total) <= 0.05
+    )
+    if net_of_extras:
+        actual_house = house_sale
+        actual_total = house_sale + parking_sale
+        if explicit_total <= 0:
+            contract_total = house_sale + parking_sale + deductions
+    else:
+        actual_house = house_sale - deductions
+        actual_total = actual_house + parking_sale
     base_total = house_base + parking_base
     excess = _excess_from_body(body, contract_total, base_total, deductions)
     # 相容舊資料／API：尚未拆分房售、車售時保留既有總價。
@@ -930,7 +1048,10 @@ def normalize_deal_payload(body: dict, site_id: str = '') -> dict:
         'next_month_parking': _num(body.get('nextMonthParking')),
         'customer_id': int(body['customerId']) if body.get('customerId') not in (None, '') else None,
         'memo': str(body.get('memo') or '').strip(),
-        'extra': json.dumps(body.get('extra') or {}, ensure_ascii=False),
+        'extra': json.dumps(
+            body.get('extra') if isinstance(body.get('extra'), dict) else {},
+            ensure_ascii=False,
+        ),
     }
 
 
@@ -1077,10 +1198,11 @@ def delete_all_sales_deals(conn: sqlite3.Connection, site_id: str) -> dict:
 
 
 def _in_range(date_s: Optional[str], start, end) -> bool:
-    if not date_s:
+    parsed = _parse_date(date_s)
+    if not parsed:
         return False
     try:
-        d = datetime.strptime(str(date_s)[:10], '%Y-%m-%d').date()
+        d = datetime.strptime(parsed, '%Y-%m-%d').date()
     except ValueError:
         return False
     return start <= d <= end
@@ -1189,7 +1311,7 @@ def aggregate_for_weekly(conn: sqlite3.Connection, site_id: str, start, end) -> 
             )
             if payable <= 0 and claimable > 0:
                 payable = claimable * 0.97
-            if retention <= 0 and claimable > 0:
+            if claimable > 0:
                 retention = claimable * 0.03
             payable_amount += payable
             retention_amount += retention
@@ -1207,21 +1329,6 @@ def aggregate_for_weekly(conn: sqlite3.Connection, site_id: str, start, end) -> 
             else:
                 unclaimed_amount += unclaimed if unclaimed else claimable
                 _add_to_bucket(matrix_unclaimed, units, parking, claimable, retention, payable)
-            nm_amt = _num(row['next_month_claimable'])
-            nm_u = _num(row['next_month_units'])
-            nm_p = _num(row['next_month_parking'])
-            next_month_amount += nm_amt
-            next_month_units += nm_u
-            next_month_parking += nm_p
-            if nm_amt or nm_u or nm_p:
-                _add_to_bucket(
-                    matrix_forecast,
-                    nm_u or units,
-                    nm_p or parking,
-                    0,
-                    0,
-                    nm_amt or payable,
-                )
 
         # 本週區塊
         def add(block, u, p, a):
@@ -1254,6 +1361,33 @@ def aggregate_for_weekly(conn: sqlite3.Connection, site_id: str, start, end) -> 
     # 若未請金額未從「未請列」累加到（相容舊資料），用矩陣 payable 補
     if unclaimed_amount <= 0 and matrix_unclaimed['payable'] > 0:
         unclaimed_amount = matrix_unclaimed['payable']
+
+    # 已入帳／預計本月：依期別「預計入帳日」與「請款月份」彙總，不必逐戶勾選
+    batches = list_commission_batches(conn, site_id)
+    booked_from_batches = 0.0
+    has_deposit_dates = False
+    this_month = _current_roc_month()
+    for b in batches:
+        if b.get('depositDate1') or b.get('depositDate2'):
+            has_deposit_dates = True
+        booked_from_batches += _num(b.get('bookedTotal'))
+        if _norm_roc_month(b.get('claimMonth')) != this_month:
+            continue
+        units_b = _num(b.get('units'))
+        parking_b = _num(b.get('parking'))
+        payable_b = _num(b.get('amountPayable'))
+        claimable_b = _num(b.get('claimable'))
+        if claimable_b <= 0 and payable_b > 0:
+            claimable_b = payable_b / 0.97
+        retention_b = claimable_b * 0.03
+        if payable_b <= 0:
+            payable_b = claimable_b * 0.97
+        next_month_units += units_b
+        next_month_parking += parking_b
+        next_month_amount += payable_b
+        _add_to_bucket(matrix_forecast, units_b, parking_b, claimable_b, retention_b, payable_b)
+    if has_deposit_dates:
+        booked_amount = booked_from_batches
 
     commission_matrix = {
         'claimable': _round_bucket(matrix_all),

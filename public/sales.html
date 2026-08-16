@@ -46,7 +46,7 @@
 
     <section class="card" id="salesSummaryCard">
       <h2>請佣總覽（可請／已請／未請）</h2>
-      <p class="hint">由銷售明細自動彙總。已請＝已填請佣期別或請佣日期；預計本月可請＝單筆勾選「預計可於本月請款」合計。</p>
+      <p class="hint">由銷售明細自動彙總。已請＝已填請佣期別或請佣日期；預計本月可請＝期別「請款月份」等於本月的戶／車／97%；已入帳＝期別預計入帳日到期的拆半合計。</p>
       <div class="form-actions" style="margin-bottom:0.75rem;">
         <button type="button" id="exportCommissionBtn" class="btn btn-secondary">匯出請佣 Excel</button>
         <span class="hint">含「請佣摘要」「期別服務費」兩張表</span>
@@ -186,7 +186,7 @@
         <h4 class="sales-form-subtitle">合約售價</h4>
         <div class="search-grid">
           <div class="form-group">
-            <label for="fHouseSalePrice">房售</label>
+            <label for="fHouseSalePrice">房售（未含附加）</label>
             <input type="number" step="0.01" id="fHouseSalePrice" value="0">
           </div>
           <div class="form-group">
@@ -194,7 +194,7 @@
             <input type="number" step="0.01" id="fParkingSalePrice" value="0">
           </div>
           <div class="form-group">
-            <label for="fContractTotal">合約總價＝房售＋車售</label>
+            <label for="fContractTotal">合約總價＝房售＋車售＋附加</label>
             <input type="number" step="0.01" id="fContractTotal" value="0" readonly>
           </div>
         </div>
@@ -226,7 +226,7 @@
         <h4 class="sales-form-subtitle">實際成交（自動計算）</h4>
         <div class="search-grid">
           <div class="form-group">
-            <label for="fActualHousePrice">實際房價＝房售−附加費−家電禮券−提貨券−裝潢−公司貸利息</label>
+            <label for="fActualHousePrice">實際房價＝房售（未含附加）</label>
             <input type="number" step="0.01" id="fActualHousePrice" value="0" readonly>
           </div>
           <div class="form-group">
@@ -347,29 +347,14 @@
               <option value="否">否</option>
               <option value="是">是（自動帶入本期可請97%金額）</option>
             </select>
+            <span class="field-hint">不必逐戶改成「是」。在上方「期別服務費」填預計入帳日，到期後週報的已入帳金額會自動加總拆半入帳。</span>
           </div>
           <div class="form-group">
             <label for="fCommBooked">已入帳金額(萬)</label>
             <input type="number" step="0.0001" id="fCommBooked" value="0">
           </div>
-          <div class="form-group">
-            <label for="fCurrentMonthClaimable">預計可於本月請款</label>
-            <select id="fCurrentMonthClaimable">
-              <option value="否">否</option>
-              <option value="是">是（自動帶入戶／車／97%金額）</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label for="fNextMonthUnits">預計本月可請戶數</label>
-            <input type="number" step="0.5" id="fNextMonthUnits" value="0">
-          </div>
-          <div class="form-group">
-            <label for="fNextMonthParking">預計本月可請車位</label>
-            <input type="number" step="0.5" id="fNextMonthParking" value="0">
-          </div>
-          <div class="form-group">
-            <label for="fNextMonthAmt">預計本月可請金額(萬)</label>
-            <input type="number" step="0.0001" id="fNextMonthAmt" value="0">
+          <div class="form-group full-width">
+            <p class="hint">「預計本月可請戶數／車位／金額」改由期別「請款月份」＝本月自動加總，不在單戶編輯。週報工作台仍可手動微調。</p>
           </div>
           <div class="form-group full-width">
             <label for="fMemo">備註</label>

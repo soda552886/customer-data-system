@@ -297,8 +297,8 @@ function calcCommissionDerived(c) {
     unclaimedAmount: round4(n('unclaimedAmount') || Math.max(n('claimableAmount') - n('claimedAmount'), 0)),
     unclaimedUnits: n('unclaimedUnits') || Math.max(n('claimableUnits') - n('claimedUnits'), 0),
     unclaimedParking: n('unclaimedParking') || Math.max(n('claimableParking') - n('claimedParking'), 0),
-    payableAmount: round4(n('payableAmount')),
-    retentionAmount: round4(n('retentionAmount')),
+    payableAmount: round4(n('payableAmount') || n('claimableAmount') * 0.97),
+    retentionAmount: round4(n('retentionAmount') || n('claimableAmount') * 0.03),
     bookedAmount: round4(n('bookedAmount')),
     nextMonthUnits: n('nextMonthUnits'),
     nextMonthParking: n('nextMonthParking'),
@@ -492,7 +492,7 @@ function renderInventory(manual, derived) {
     { key: 'totalParking', label: '總車位' },
     { key: 'soldParking', label: '已售車位' },
     { key: 'totalAmount', label: '總底價金額(萬)' },
-    { key: 'soldAmount', label: '已售成交價(萬)' },
+        { key: 'soldAmount', label: '已售成交價(萬)（實際房價＋車售）' },
     { key: 'soldBasePrice', label: '已售底價(萬)' },
     { key: 'residentialTotal', label: '住宅總戶' },
     { key: 'residentialSold', label: '住宅已售' },
@@ -540,7 +540,7 @@ function renderWeeklyCommissionMatrix(matrix) {
   ];
   el.innerHTML = cards.map((c) => {
     const b = matrix[c.key] || {};
-    return `<div class="commission-matrix-card">
+    return `<div class="commission-matrix-card" data-tone="${c.key}">
       <h3>${escapeHtml(c.title)}</h3>
       <div class="upc">${fmtWeekNum(b.units)}戶／${fmtWeekNum(b.parking)}車</div>
       <dl>
@@ -557,7 +557,7 @@ function renderCommission(manual, derived) {
   const fields = [
     { key: 'sellableUnits', label: '累積銷售戶數' },
     { key: 'sellableParking', label: '累積銷售車位' },
-    { key: 'sellableAmount', label: '累積銷售金額(萬)' },
+    { key: 'sellableAmount', label: '累積銷售金額(萬)（實際房價＋車售）' },
     { key: 'claimableUnits', label: '可請佣戶數' },
     { key: 'claimableParking', label: '可請佣車位' },
     { key: 'claimableAmount', label: '可請佣金額(萬)', step: '0.0001' },

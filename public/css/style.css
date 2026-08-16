@@ -239,8 +239,8 @@ td.is-deal-mode {
   font-weight: 600;
 }
 .sales-total-row th {
-  background: #e8f1f8;
-  color: #173b5e;
+  background: #1a4d7c;
+  color: #fff;
   font-weight: 700;
   white-space: nowrap;
 }
@@ -278,19 +278,36 @@ td.is-deal-mode {
 .commission-matrix-card dl {
   margin: 0;
   display: grid;
-  gap: 0.25rem;
+  grid-template-columns: auto 1fr;
+  column-gap: 0.65rem;
+  row-gap: 0.25rem;
   font-size: 0.85rem;
   color: #334155;
 }
 .commission-matrix-card dt {
-  float: left;
-  clear: left;
-  width: 5.5rem;
   color: #64748b;
 }
 .commission-matrix-card dd {
-  margin: 0 0 0 5.5rem;
+  margin: 0;
+  text-align: right;
   font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+.commission-matrix-card[data-tone="claimable"] {
+  background: #e8f1fa;
+  border-color: #8fb3d4;
+}
+.commission-matrix-card[data-tone="claimed"] {
+  background: #e5f8ee;
+  border-color: #86c9a5;
+}
+.commission-matrix-card[data-tone="unclaimed"] {
+  background: #fff6d8;
+  border-color: #e0c36a;
+}
+.commission-matrix-card[data-tone="forecast"] {
+  background: #fdecd2;
+  border-color: #e0a36a;
 }
 .batch-row-full {
   background: #d5f5e3 !important;
@@ -583,8 +600,11 @@ td.is-deal-mode {
 }
 
 .table-wrap-scroll .data-table tfoot .col-actions,
-.table-wrap-scroll .data-table tfoot th {
-  background: #e8f1f8;
+.table-wrap-scroll .data-table tfoot th,
+.data-table tfoot th {
+  background: #1a4d7c !important;
+  color: #fff !important;
+  font-weight: 700;
 }
 
 .batch-deals-btn {
@@ -616,6 +636,18 @@ td.is-deal-mode {
   white-space: nowrap;
   vertical-align: middle;
   background: #fff;
+}
+.data-table tbody tr.batch-row-full td {
+  background: #d5f5e3 !important;
+}
+.data-table tbody tr.batch-row-partial td {
+  background: #fcf3cf !important;
+}
+.data-table tbody tr.batch-row-full:hover td {
+  background: #c8eed9 !important;
+}
+.data-table tbody tr.batch-row-partial:hover td {
+  background: #f6e8b0 !important;
 }
 .data-table td.cell-date {
   min-width: 7.5rem;

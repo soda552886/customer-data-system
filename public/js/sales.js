@@ -69,9 +69,9 @@ function calculatePrices() {
   ].reduce((sum, id) => sum + numberValue(id), 0);
   const houseBase = numberValue('fHouseBasePrice');
   const parkingBase = numberValue('fParkingBasePrice');
-  const contractTotal = houseSale + parkingSale;
-  const actualHouse = houseSale - deductions;
-  const actualTotal = actualHouse + parkingSale;
+  const contractTotal = houseSale + parkingSale + deductions;
+  const actualHouse = houseSale;
+  const actualTotal = houseSale + parkingSale;
   const baseTotal = houseBase + parkingBase;
   const excess = contractTotal - baseTotal - deductions;
 
@@ -130,11 +130,15 @@ function syncBookedAmount() {
 function syncCurrentMonthClaimable() {
   const select = document.getElementById('fCurrentMonthClaimable');
   if (!select || select.value !== '是') return;
+  const unitsEl = document.getElementById('fNextMonthUnits');
+  const parkingEl = document.getElementById('fNextMonthParking');
+  const amtEl = document.getElementById('fNextMonthAmt');
+  if (!unitsEl || !parkingEl || !amtEl) return;
   const parking = ['fParkingNo1', 'fParkingNo2']
     .filter((id) => document.getElementById(id).value.trim()).length;
-  document.getElementById('fNextMonthUnits').value = numberValue('fUnits') || 1;
-  document.getElementById('fNextMonthParking').value = parking;
-  document.getElementById('fNextMonthAmt').value = roundMoney(numberValue('fCommPayable'));
+  unitsEl.value = numberValue('fUnits') || 1;
+  parkingEl.value = parking;
+  amtEl.value = roundMoney(numberValue('fCommPayable'));
 }
 
 async function loadSites() {
@@ -228,9 +232,9 @@ function collectForm() {
     commissionPeriod: document.getElementById('fCommPeriod').value.trim(),
     commissionClaimDate: document.getElementById('fCommClaimDate').value || null,
     commissionBooked: numberValue('fCommBooked'),
-    nextMonthClaimable: numberValue('fNextMonthAmt'),
-    nextMonthUnits: numberValue('fNextMonthUnits'),
-    nextMonthParking: numberValue('fNextMonthParking'),
+    nextMonthClaimable: 0,
+    nextMonthUnits: 0,
+    nextMonthParking: 0,
     memo: document.getElementById('fMemo').value.trim(),
   };
 }
@@ -251,20 +255,23 @@ function fillForm(rec) {
   document.getElementById('fHouseSalePrice').value =
     rec?.houseSalePrice || rec?.contractTotal || rec?.totalPrice || 0;
   document.getElementById('fParkingSalePrice').value = rec?.parkingSalePrice || 0;
-  document.getElementById('fSurcharge').value = rec?.surcharge || 0;
-  document.getElementById('fApplianceGift').value = rec?.applianceGift || 0;
-  document.getElementById('fPickupVoucher').value = rec?.pickupVoucher || 0;
-  document.getElementById('fDecoration').value = rec?.decoration || 0;
-  document.getElementById('fCompanyLoanInterest').value = rec?.companyLoanInterest || 0;
+  document.getElementById('fSurcharge').value = rec?.surcharge ?? 0;
+  document.getElementById('fApplianceGift').value = rec?.applianceGift ?? 0;
+  document.getElementById('fPickupVoucher').value = rec?.pickupVoucher ?? 0;
+  document.getElementById('fDecoration').value = rec?.decoration ?? 0;
+  document.getElementById('fCompanyLoanInterest').value = rec?.companyLoanInterest ?? 0;
   document.getElementById('fHouseBasePrice').value =
     rec?.houseBasePrice || rec?.baseTotal || rec?.basePrice || 0;
   document.getElementById('fParkingBasePrice').value = rec?.parkingBasePrice || 0;
-  document.getElementById('fDepositDate').value = rec?.depositDate || '';
-  document.getElementById('fSupplementDate').value = rec?.supplementDate || '';
-  document.getElementById('fSignDate').value = rec?.signDate || '';
-  document.getElementById('fOwnerSaleReportDate').value =
-    rec?.ownerSaleReportDate || rec?.reportDate || '';
-  document.getElementById('fOwnerSignReportDate').value = rec?.ownerSignReportDate || '';
+  document.getElementById('fDepositDate').value = toDateInput(
+    rec?.depositDate || rec?.ownerSaleReportDate || rec?.reportDate,
+  );
+  document.getElementById('fSupplementDate').value = toDateInput(rec?.supplementDate);
+  document.getElementById('fSignDate').value = toDateInput(rec?.signDate || rec?.ownerSignReportDate);
+  document.getElementById('fOwnerSaleReportDate').value = toDateInput(
+    rec?.ownerSaleReportDate || rec?.reportDate,
+  );
+  document.getElementById('fOwnerSignReportDate').value = toDateInput(rec?.ownerSignReportDate);
   ensureStaffOption('fSales1', rec?.salesperson1);
   ensureStaffOption('fSales2', rec?.salesperson2);
   document.getElementById('fSales1').value = rec?.salesperson1 || '';
@@ -284,18 +291,10 @@ function fillForm(rec) {
   }
   document.getElementById('fCommDeduction').value = rec?.commissionDeduction || 0;
   document.getElementById('fCommPeriod').value = rec?.commissionPeriod || '';
-  document.getElementById('fCommClaimDate').value = rec?.commissionClaimDate || '';
+  document.getElementById('fCommClaimDate').value = toDateInput(rec?.commissionClaimDate);
   document.getElementById('fCommBooked').value = rec?.commissionBooked || 0;
   document.getElementById('fCommissionBookedStatus').value =
     Number(rec?.commissionBooked || 0) > 0 ? '是' : '否';
-  document.getElementById('fNextMonthAmt').value = rec?.nextMonthClaimable || 0;
-  document.getElementById('fNextMonthUnits').value = rec?.nextMonthUnits || 0;
-  document.getElementById('fNextMonthParking').value = rec?.nextMonthParking || 0;
-  document.getElementById('fCurrentMonthClaimable').value = (
-    Number(rec?.nextMonthClaimable || 0)
-    || Number(rec?.nextMonthUnits || 0)
-    || Number(rec?.nextMonthParking || 0)
-  ) ? '是' : '否';
   document.getElementById('fMemo').value = rec?.memo || '';
 
   salesAmountManual = false;
@@ -328,6 +327,16 @@ function clearForm() {
   document.getElementById('salesFormCard').classList.add('hidden');
 }
 
+function toDateInput(value) {
+  if (!value) return '';
+  const s = String(value).trim().split(/[ T]/)[0].replace(/\./g, '-').replace(/\//g, '-');
+  const m = s.match(/^(\d{2,4})-(\d{1,2})-(\d{1,2})/);
+  if (!m) return '';
+  let y = Number(m[1]);
+  if (y > 0 && y < 1911) y += 1911;
+  return `${String(y).padStart(4, '0')}-${String(Number(m[2])).padStart(2, '0')}-${String(Number(m[3])).padStart(2, '0')}`;
+}
+
 function fmtNum(val) {
   const n = Number(val || 0);
   if (Number.isInteger(n)) return String(n);
@@ -350,7 +359,7 @@ function renderCommissionMatrix(summary) {
   ];
   el.innerHTML = cards.map((c) => {
     const b = m[c.key] || {};
-    return `<div class="commission-matrix-card">
+    return `<div class="commission-matrix-card" data-tone="${c.key}">
       <h3>${escapeHtml(c.title)}</h3>
       <div class="upc">${fmtNum(b.units)}戶／${fmtNum(b.parking)}車</div>
       <dl>
@@ -432,9 +441,9 @@ function renderCommissionBatches(batches) {
       <td><button type="button" class="btn-xs link-btn batch-deals-btn" data-show-deals="${b.id}" title="點擊查看該期戶別明細">${fmtNum(b.units)}／${fmtNum(b.parking)}</button></td>
       <td><input class="batch-inline-input" type="number" step="0.0001" data-field="amountPayable" value="${b.amountPayable ?? 0}" title="自動加總 ${b.autoPayable ?? 0}"></td>
       <td><input class="batch-inline-input" type="number" step="0.0001" data-field="half1Amount" value="${b.half1Amount ?? 0}"></td>
-      <td><input class="batch-inline-input" type="date" data-field="depositDate1" value="${escapeHtml(b.depositDate1 || '')}"></td>
+      <td><input class="batch-inline-input" type="date" data-field="depositDate1" value="${escapeHtml(toDateInput(b.depositDate1))}"></td>
       <td><input class="batch-inline-input" type="number" step="0.0001" data-field="half2Amount" value="${b.half2Amount ?? 0}"></td>
-      <td><input class="batch-inline-input" type="date" data-field="depositDate2" value="${escapeHtml(b.depositDate2 || '')}"></td>
+      <td><input class="batch-inline-input" type="date" data-field="depositDate2" value="${escapeHtml(toDateInput(b.depositDate2))}"></td>
       <td><input class="batch-inline-input" data-field="deductionMemo" value="${escapeHtml(b.deductionMemo || '')}" placeholder="墊水電／折讓…"></td>
       <td>
         <button type="button" class="btn-xs" data-save-batch="${b.id}">儲存</button>
@@ -913,15 +922,21 @@ async function init() {
     'fCommRatePct', 'fCommPayablePct', 'fCommRetentionPct', 'fCommDeduction',
     'fCommPeriod', 'fCommClaimDate',
   ].forEach((id) => document.getElementById(id).addEventListener('input', calculateCommission));
-  document.getElementById('fCurrentMonthClaimable').addEventListener('change', () => {
-    if (document.getElementById('fCurrentMonthClaimable').value === '是') {
-      syncCurrentMonthClaimable();
-    } else {
-      document.getElementById('fNextMonthUnits').value = 0;
-      document.getElementById('fNextMonthParking').value = 0;
-      document.getElementById('fNextMonthAmt').value = 0;
-    }
-  });
+  const currentMonthSel = document.getElementById('fCurrentMonthClaimable');
+  if (currentMonthSel) {
+    currentMonthSel.addEventListener('change', () => {
+      if (currentMonthSel.value === '是') {
+        syncCurrentMonthClaimable();
+      } else {
+        const unitsEl = document.getElementById('fNextMonthUnits');
+        const parkingEl = document.getElementById('fNextMonthParking');
+        const amtEl = document.getElementById('fNextMonthAmt');
+        if (unitsEl) unitsEl.value = 0;
+        if (parkingEl) parkingEl.value = 0;
+        if (amtEl) amtEl.value = 0;
+      }
+    });
+  }
   ['fUnits', 'fParkingNo1', 'fParkingNo2'].forEach((id) => {
     document.getElementById(id).addEventListener('input', syncCurrentMonthClaimable);
   });

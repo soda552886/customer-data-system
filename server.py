@@ -31,7 +31,8 @@ from sales_ledger import (
     RECORD_TYPES as SALES_RECORD_TYPES, aggregate_for_weekly, build_commission_overview_excel,
     build_sales_excel, commission_defaults_for_site, create_sales_deal, delete_all_sales_deals,
     delete_commission_batch, delete_sales_deal, get_sales_deal, init_sales_tables,
-    list_commission_batches, list_sales_deals, update_sales_deal, upsert_commission_batch,
+    list_commission_batches, list_sales_deals, parse_deal_date, update_sales_deal,
+    upsert_commission_batch,
 )
 from field_options import (
     apply_site_field_options, apply_site_hidden_fields, build_site_field_config,
@@ -1601,10 +1602,10 @@ SALES_IMPORT_ALIASES = {
     'parkingNo2': ['車位2', '車位號碼2', '車位編號2', '編號2', '汽車2'],
     'parkingNos': ['車位號碼', '車位'],
     'houseSalePrice': [
-        '合約房售價', '合約房地', '房售價', '房售價萬', '房屋成交價',
-        '房售價未含其他費用', '實際房價',
+        '房售價未含其他費用', '實際房價', '房售價萬', '房屋成交價', '房售價',
+        '合約房地', '合約房售價',
     ],
-    'parkingSalePrice': ['合約車售價', '合約車位', '車售價', '車位售價', '車位售價萬'],
+    'parkingSalePrice': ['車售價', '車位售價', '車位售價萬', '合約車售價', '合約車位'],
     'totalPrice': [
         '合約銷售總價', '合約總價', '合約總價萬',
         '房車總價未含其他費用', '房車總價', '實際合約金額總價',
@@ -1616,17 +1617,19 @@ SALES_IMPORT_ALIASES = {
     'houseBasePrice': ['房底', '底價房地', '房底價'],
     'parkingBasePrice': ['車底', '底價車位', '車底價'],
     'basePrice': ['底價總價', '底總萬', '底總', '總底價', '房車總底', '房車總底價'],
-    'surcharge': ['附加費', '其它費用', '其他費用'],
+    'surcharge': ['附加費', '其它費用', '其他費用', '請款需扣除'],
     'applianceGift': ['家電禮券', '家電禮'],
     'pickupVoucher': ['提貨券'],
     'decoration': ['裝潢', '裝潢費用'],
-    'companyLoanInterest': ['公司貸利息', '公司貸利息', '公司貸利息'],
-    'depositDate': [
-        '訂金日期', '下訂日', '銷售日期', '銷售日',
-        '回報下定日', '成交日期',
+    'companyLoanInterest': [
+        '公司貸利息', '公司貸/利息', '公司貸／利息', '利息費用',
     ],
-    'supplementDate': ['補足日', '補足日期'],
-    'signDate': ['簽約日', '簽約日期', '實際簽約日'],
+    'depositDate': [
+        '訂金日期', '下訂日', '下定日', '銷售日期', '銷售日',
+        '回報下定日', '成交日期', '銷售日業主',
+    ],
+    'supplementDate': ['補足日', '補足日期', '補足'],
+    'signDate': ['簽約日', '簽約日期', '實際簽約日', '簽約日業主'],
     'ownerSaleReportDate': ['業主報售日', '報售日', '銷售日業主'],
     'ownerSignReportDate': ['業主報簽日', '報簽日', '簽約日業主', '回報簽約日'],
     'salesperson1': ['銷售人員1', '銷售1', '銷售人員'],
@@ -1704,6 +1707,15 @@ def _sales_import_num(value):
     return float(text) if text not in ('', '-', '.', '-.') else 0.0
 
 
+def _sales_import_num_if_col(row, normalized_headers, key):
+    """讀取欄位數字；欄位存在時連 0 也帶回，避免附加費被略過。"""
+    for alias in SALES_IMPORT_ALIASES.get(key, []):
+        idx = normalized_headers.get(_sales_import_header(alias))
+        if idx is not None and idx < len(row):
+            return _sales_import_num(row[idx])
+    return None
+
+
 def _sales_record_type(value, sheet_name=''):
     text = str(value or sheet_name or '').strip()
     if '未報' in text:
@@ -1757,10 +1769,16 @@ def _sales_import_payload(row, normalized_headers, sheet_name=''):
         payload['parkingSalePrice'] = parking
     if contract:
         payload['totalPrice'] = contract
-    surcharge_sum = sum(
-        _sales_import_num(payload.get(k))
-        for k in ('surcharge', 'applianceGift', 'pickupVoucher', 'decoration', 'companyLoanInterest')
-    )
+    surcharge_sum = 0.0
+    for extra_key in (
+        'surcharge', 'applianceGift', 'pickupVoucher', 'decoration', 'companyLoanInterest',
+    ):
+        extra_val = _sales_import_num_if_col(row, normalized_headers, extra_key)
+        if extra_val is not None:
+            payload[extra_key] = extra_val
+            surcharge_sum += extra_val
+        else:
+            surcharge_sum += _sales_import_num(payload.get(extra_key))
     has_parking = bool(payload.get('parkingNo1') or payload.get('parkingNo2'))
     if has_parking and parking <= 0 and contract > house > 0:
         diff = round(contract - house, 4)
@@ -1784,6 +1802,7 @@ def _sales_import_payload(row, normalized_headers, sheet_name=''):
     payable = _sales_import_num(get('commissionPayable'))
     claimed = _sales_import_num(get('commissionClaimed'))
     unclaimed = _sales_import_num(get('commissionUnclaimed'))
+    retention = _sales_import_num(get('commissionRetention'))
     if sales_amount and claimable:
         payload['commissionDeduction'] = round(max(sales_amount * 0.0485 - claimable, 0), 4)
 
@@ -1803,9 +1822,11 @@ def _sales_import_payload(row, normalized_headers, sheet_name=''):
         note = f'請佣月份 {claim_month}'
         payload['memo'] = f'{memo}；{note}'.strip('；') if memo else note
 
-    # 若檔案有明確可請／已請／未請金額，帶入 extra 供後續覆寫（compute 後再套）
-    if claimable or payable or claimed or unclaimed:
-        extra = payload.get('extra') if isinstance(payload.get('extra'), dict) else {}
+    # 若檔案有明確可請／已請／未請／保留款金額，帶入 extra 供後續覆寫
+    extra = payload.get('extra') if isinstance(payload.get('extra'), dict) else {}
+    if claim_month:
+        extra['claimMonth'] = claim_month
+    if claimable or payable or claimed or unclaimed or retention:
         if claimable:
             extra['importClaimable'] = claimable
         if payable:
@@ -1814,6 +1835,9 @@ def _sales_import_payload(row, normalized_headers, sheet_name=''):
             extra['importClaimed'] = claimed
         if unclaimed:
             extra['importUnclaimed'] = unclaimed
+        if retention:
+            extra['importRetention'] = retention
+    if extra:
         payload['extra'] = extra
 
     for key in (
@@ -1831,10 +1855,7 @@ def _sales_import_payload(row, normalized_headers, sheet_name=''):
     ):
         val = payload.get(date_key)
         if val not in (None, ''):
-            if isinstance(val, datetime):
-                payload[date_key] = val.date().isoformat()
-            else:
-                payload[date_key] = str(val).strip()[:10].replace('/', '-')
+            payload[date_key] = parse_deal_date(val) or val
     return payload
 
 
