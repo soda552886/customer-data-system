@@ -83,6 +83,8 @@ function applySuggestedWeekNumber() {
   if (n == null || !Number.isFinite(n)) return;
   document.getElementById('weekNumber').value = n;
 }
+
+function updateRangeLabel() {
   const startEl = document.getElementById('weekStart');
   const label = document.getElementById('weekRangeLabel');
   if (!startEl.value) {
