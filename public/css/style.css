@@ -1231,7 +1231,17 @@ td.is-deal-mode {
 }
 .budget-hot, input.budget-hot { color: #c0392b; }
 .budget-neg { color: #c0392b; font-weight: 700; }
-.budget-total-col { outline: 2px solid #e74c3c; outline-offset: -2px; }
+.budget-grid th.budget-total-col,
+.budget-grid td.budget-total-col {
+  border-left: 3px solid #e74c3c;
+  border-right: 3px solid #e74c3c;
+}
+.budget-grid thead th.budget-total-col {
+  border-top: 3px solid #e74c3c;
+}
+.budget-grid tbody tr:last-child td.budget-total-col {
+  border-bottom: 3px solid #e74c3c;
+}
 .budget-pie-wrap {
   display: flex;
   flex-wrap: wrap;

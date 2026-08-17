@@ -17,7 +17,7 @@
   <main class="container container-wide">
     <section class="card">
       <h2>預算花費</h2>
-      <p class="hint">本頁分三塊：①全案總預算發包請款 ②本週花費與媒體執行 ③業主版預算。預算欄為「萬」；已發包／已請款／週費用為「元」。媒體％與人事％依「總銷售基數」自動算出該欄預算。</p>
+      <p class="hint">本頁分三塊：①全案總預算發包請款 ②本週花費與媒體執行 ③業主版預算。全案表與業主版表單位皆為「萬」；週媒體執行費用為「元」。媒體％與人事％依「總銷售基數」自動算出該欄預算。</p>
       <div class="search-grid">
         <div class="form-group">
           <label for="budgetSite">案場 <span class="required">*</span></label>
@@ -72,7 +72,7 @@
       <section class="card">
         <div class="budget-banner">廣告預算執行花費</div>
         <h3 class="section-title">全案總預算發包請款 <span id="execSiteLabel"></span></h3>
-        <p class="hint">列：預算／已發包金額／已請款金額／尚可發包。尚可發包＝預算（萬×10,000）− 已發包。圓餅圖依「已請款金額」繪製，不含媒體％池與總預算彙總欄。</p>
+        <p class="hint">單位皆為萬。列：預算／已發包金額／已請款金額／尚可發包（預算 − 已發包）。圓餅圖依「已請款金額」繪製，不含媒體％池與總預算彙總欄。</p>
         <div class="table-wrap">
           <table class="data-table budget-grid" id="execBudgetTable"></table>
         </div>
@@ -128,7 +128,7 @@
       <section class="card">
         <div class="budget-banner">業主版預算</div>
         <h3 class="section-title">業主版預算 <span id="ownerSiteLabel"></span></h3>
-        <p class="hint">給業主看的分類表。尚可發包＝預算（萬×10,000）− 已發包金額。</p>
+        <p class="hint">給業主看的分類表，單位皆為萬。尚可發包＝預算 − 已發包金額。</p>
         <div class="table-wrap">
           <table class="data-table budget-grid" id="ownerBudgetTable"></table>
         </div>

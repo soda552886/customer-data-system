@@ -54,6 +54,18 @@ function moneyClass(val) {
   return Number(val) < 0 ? 'budget-neg' : (Number(val) !== 0 ? 'budget-hot' : '');
 }
 
+function wanToYuan(val) {
+  return Math.round((Number(val) || 0) * WAN * 100) / 100;
+}
+
+function yuanToWan(val) {
+  return (Number(val) || 0) / WAN;
+}
+
+function totalColClass(key, extra = '') {
+  return [key === 'total' ? 'budget-total-col' : '', extra].filter(Boolean).join(' ');
+}
+
 async function loadSites() {
   const res = await fetch('/api/sites');
   sites = await res.json();
@@ -133,9 +145,9 @@ function readGridInputs(prefix, cats) {
     const conEl = document.querySelector(`[data-${prefix}-contracted="${cat.key}"]`);
     out[cat.key] = {
       budgetWan: Number(budgetEl?.value) || 0,
-      sent: Number(sentEl?.value) || 0,
-      invoiced: Number(invEl?.value) || 0,
-      contracted: Number(conEl?.value) || 0,
+      sent: wanToYuan(sentEl?.value),
+      invoiced: wanToYuan(invEl?.value),
+      contracted: wanToYuan(conEl?.value),
     };
   });
   return out;
@@ -159,16 +171,16 @@ function renderOwnerTable() {
     return `<td><input type="number" step="0.01" ${ro} data-owner-budget="${c.key}" value="${fmtWan(wan)}"> <span class="unit">萬</span></td>`;
   }).join('');
   const contractedCells = cats.map((c) => {
-    const val = rows[c.key]?.contracted ?? 0;
-    return `<td><input type="number" step="1" class="budget-hot" data-owner-contracted="${c.key}" value="${val}"></td>`;
+    const val = yuanToWan(rows[c.key]?.contracted);
+    return `<td><input type="number" step="0.01" class="budget-hot" data-owner-contracted="${c.key}" value="${fmtWan(val)}"> <span class="unit">萬</span></td>`;
   }).join('');
   const invoicedCells = cats.map((c) => {
-    const val = rows[c.key]?.invoiced ?? 0;
-    return `<td><input type="number" step="1" data-owner-invoiced="${c.key}" value="${val}"></td>`;
+    const val = yuanToWan(rows[c.key]?.invoiced);
+    return `<td><input type="number" step="0.01" data-owner-invoiced="${c.key}" value="${fmtWan(val)}"> <span class="unit">萬</span></td>`;
   }).join('');
   const remainCells = cats.map((c) => {
-    const remain = rows[c.key]?.remainContract ?? 0;
-    return `<td class="${moneyClass(remain)}" data-owner-remain="${c.key}">${fmtYuan(remain)}</td>`;
+    const remain = yuanToWan(rows[c.key]?.remainContract);
+    return `<td class="${moneyClass(remain)}" data-owner-remain="${c.key}">${fmtWan(remain)} <span class="unit">萬</span></td>`;
   }).join('');
   table.innerHTML = `${head}<tbody>
     <tr><th>預算</th>${budgetCells}</tr>
@@ -193,23 +205,23 @@ function renderExecTable() {
       ? calcRateWan(c.ratePct)
       : (rows[c.key]?.budgetWan ?? 0);
     const ro = (c.kind === 'rate' || c.kind === 'rate_sum') ? 'readonly' : '';
-    const highlight = c.key === 'total' ? ' class="budget-total-col"' : '';
-    return `<td${highlight}><input type="number" step="0.01" ${ro} data-exec-budget="${c.key}" value="${fmtWan(wan)}"> <span class="unit">萬</span></td>`;
+    const highlight = totalColClass(c.key);
+    return `<td class="${highlight}"><input type="number" step="0.01" ${ro} data-exec-budget="${c.key}" value="${fmtWan(wan)}"> <span class="unit">萬</span></td>`;
   }).join('');
   const contractedCells = cats.map((c) => {
-    const val = rows[c.key]?.contracted ?? 0;
-    const highlight = c.key === 'total' ? ' class="budget-total-col"' : '';
-    return `<td${highlight}><input type="number" step="1" class="budget-hot" data-exec-contracted="${c.key}" value="${val}"></td>`;
+    const val = yuanToWan(rows[c.key]?.contracted);
+    const highlight = totalColClass(c.key);
+    return `<td class="${highlight}"><input type="number" step="0.01" class="budget-hot" data-exec-contracted="${c.key}" value="${fmtWan(val)}"> <span class="unit">萬</span></td>`;
   }).join('');
   const invCells = cats.map((c) => {
-    const val = rows[c.key]?.invoiced ?? 0;
-    const highlight = c.key === 'total' ? ' class="budget-total-col"' : '';
-    return `<td${highlight}><input type="number" step="1" data-exec-invoiced="${c.key}" value="${val}"></td>`;
+    const val = yuanToWan(rows[c.key]?.invoiced);
+    const highlight = totalColClass(c.key);
+    return `<td class="${highlight}"><input type="number" step="0.01" data-exec-invoiced="${c.key}" value="${fmtWan(val)}"> <span class="unit">萬</span></td>`;
   }).join('');
   const remainCells = cats.map((c) => {
-    const remain = rows[c.key]?.remainContract ?? (0);
-    const highlight = c.key === 'total' ? ' class="budget-total-col"' : '';
-    return `<td${highlight} class="${moneyClass(remain)}" data-exec-remain="${c.key}">${fmtYuan(remain)}</td>`;
+    const remain = yuanToWan(rows[c.key]?.remainContract);
+    const highlight = totalColClass(c.key, moneyClass(remain));
+    return `<td class="${highlight}" data-exec-remain="${c.key}">${fmtWan(remain)} <span class="unit">萬</span></td>`;
   }).join('');
   table.innerHTML = `${head}<tbody>
     <tr><th>預算</th>${budgetCells}</tr>
@@ -239,8 +251,8 @@ function renderPie() {
   cats.forEach((c) => {
     if (!c.inPie) return;
     const invoiced = Number(document.querySelector(`[data-exec-invoiced="${c.key}"]`)?.value) || 0;
-    const wan = invoiced / WAN;
-    if (wan > 0) slices.push({ label: c.label, wan, invoiced });
+    const wan = invoiced;
+    if (wan > 0) slices.push({ label: c.label, wan, invoiced: wanToYuan(invoiced) });
   });
   const total = slices.reduce((s, x) => s + x.wan, 0);
   const svg = document.getElementById('budgetPie');
@@ -412,8 +424,8 @@ function refreshDerived() {
     const contracted = Number(document.querySelector(`[data-owner-contracted="${c.key}"]`)?.value) || 0;
     const remainEl = document.querySelector(`[data-owner-remain="${c.key}"]`);
     if (remainEl) {
-      const remain = wan * WAN - contracted;
-      remainEl.textContent = fmtYuan(remain);
+      const remain = wan - contracted;
+      remainEl.innerHTML = `${fmtWan(remain)} <span class="unit">萬</span>`;
       remainEl.className = moneyClass(remain);
     }
   });
@@ -430,9 +442,9 @@ function refreshDerived() {
     const contracted = Number(document.querySelector(`[data-exec-contracted="${c.key}"]`)?.value) || 0;
     const remainEl = document.querySelector(`[data-exec-remain="${c.key}"]`);
     if (remainEl) {
-      const remain = wan * WAN - contracted;
-      remainEl.textContent = fmtYuan(remain);
-      remainEl.className = `${c.key === 'total' ? 'budget-total-col ' : ''}${moneyClass(remain)}`.trim();
+      const remain = wan - contracted;
+      remainEl.innerHTML = `${fmtWan(remain)} <span class="unit">萬</span>`;
+      remainEl.className = totalColClass(c.key, moneyClass(remain));
     }
   });
   const ownerThs = document.querySelectorAll('#ownerBudgetTable thead th');
