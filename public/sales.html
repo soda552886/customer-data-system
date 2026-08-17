@@ -6,7 +6,7 @@
   <title>銷售總表 - 得意佳</title>
   <link rel="stylesheet" href="/css/style.css">
 </head>
-<body>
+<body class="commission-scheme-simple">
   <header class="header">
     <div class="header-inner">
       <h1><span class="brand">得意佳</span>客戶資料管理系統</h1>
@@ -40,13 +40,76 @@
         <input type="file" id="importSalesFile" accept=".xlsx,.xlsm,.csv" hidden>
         <button type="button" id="importSalesBtn" class="btn btn-outline">匯入 Excel／CSV</button>
         <a class="btn btn-outline" href="/weekly.html">前往週報工作台</a>
+        <a class="btn btn-outline" href="/budget.html">前往預算花費</a>
       </div>
-      <p class="hint">匯入支援系統匯出的 Excel／CSV，也支援請佣總表（優先讀「累計銷售分析」：戶別、坪數、車位、房／車售價、合約總價、附加費細項、房底／車底／底總、下訂／簽約日、請佣期別等）。「請佣狀態」填「已請」或「未請」；有填請佣期別或請佣日期會自動算成已請。同一檔若已有累計分析會略過已報／未報明細以免重複。重複訂單或相同戶別＋客戶會自動略過。</p>
+      <p class="hint">匯入支援系統匯出的 Excel／CSV，也支援請佣總表（優先讀「累計銷售分析」：戶別、坪數、車位、房／車售價、合約總價、附加費細項、房底／車底／底總、下訂／簽約日、請佣期別等）。「請佣狀態」填「已請」或「未請」；有填請佣期別或請佣日期會自動算成已請。同一檔若已有累計分析會略過已報／未報明細以免重複。系統已有相同訂單或戶別＋客戶時改為<strong>更新</strong>該筆（補齊房底、車底、附加費），不必先全部刪除。</p>
+    </section>
+
+    <section class="card" id="siteSalesSettingsCard">
+      <h2>本案場請佣與減項設定</h2>
+      <p class="hint">每個工地可自訂佣金總比例、本期可請／保留款，或改成「繳款成數解鎖」（如世界都心：每戶填已繳%、依門檻解鎖可請%；交屋保留另計，各期不再另扣保留款）。附加／減項名稱也可改（欄位仍對應同一組數字）。</p>
+      <div class="search-grid">
+        <div class="form-group">
+          <label for="ssScheme">請佣方案</label>
+          <select id="ssScheme">
+            <option value="simple">一般（總佣 × 本期可請／保留款）</option>
+            <option value="payment_tiers">繳款成數解鎖（如世界都心）</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="ssRatePct">佣金總比例(%)</label>
+          <input type="number" step="0.01" id="ssRatePct" value="4.85">
+        </div>
+        <div class="form-group ss-simple-only">
+          <label for="ssPayablePct">本期可請比例(%)</label>
+          <input type="number" step="0.01" id="ssPayablePct" value="97">
+        </div>
+        <div class="form-group ss-simple-only">
+          <label for="ssRetentionPct">保留款比例(%)</label>
+          <input type="number" step="0.01" id="ssRetentionPct" value="3">
+        </div>
+        <div class="form-group ss-tier-only">
+          <label for="ssHandoverPct">交屋保留款(%)</label>
+          <input type="number" step="0.01" id="ssHandoverPct" value="0.5">
+        </div>
+        <div class="form-group ss-tier-only" style="grid-column:1/-1">
+          <label for="ssTiersText">繳款門檻 → 可請比例（累計）</label>
+          <textarea id="ssTiersText" rows="3" placeholder="6,2&#10;8,3"></textarea>
+          <small class="field-hint">每行：已繳%，可請%。例：繳到 6% 可請 2%；再繳到 8% 可請累計 3%（即再請 1%）</small>
+        </div>
+      </div>
+      <h3 class="sales-form-block-title">附加／減項名稱</h3>
+      <div class="search-grid">
+        <div class="form-group">
+          <label for="ssLabelSurcharge">項目 1</label>
+          <input type="text" id="ssLabelSurcharge" value="附加費">
+        </div>
+        <div class="form-group">
+          <label for="ssLabelAppliance">項目 2</label>
+          <input type="text" id="ssLabelAppliance" value="家電禮券">
+        </div>
+        <div class="form-group">
+          <label for="ssLabelPickup">項目 3</label>
+          <input type="text" id="ssLabelPickup" value="提貨券">
+        </div>
+        <div class="form-group">
+          <label for="ssLabelDecoration">項目 4</label>
+          <input type="text" id="ssLabelDecoration" value="裝潢">
+        </div>
+        <div class="form-group">
+          <label for="ssLabelCompany">項目 5</label>
+          <input type="text" id="ssLabelCompany" value="公司貸利息">
+        </div>
+      </div>
+      <div class="form-actions">
+        <button type="button" id="saveSalesSettingsBtn" class="btn btn-primary">儲存本案場設定</button>
+        <span class="hint" id="ssSettingsHint"></span>
+      </div>
     </section>
 
     <section class="card" id="salesSummaryCard">
       <h2>請佣總覽（可請／已請／未請）</h2>
-      <p class="hint">由銷售明細自動彙總。已請＝已填請佣期別或請佣日期；預計本月可請＝期別「請款月份」等於本月的戶／車／97%；已入帳＝期別預計入帳日到期的拆半合計。</p>
+      <p class="hint">由銷售明細自動彙總。已請＝已填請佣期別或請佣日期；預計本月可請＝期別「請款月份」等於本月的戶／車／可請金額；已入帳＝期別預計入帳日到期的拆半合計。百分比依上方「本案場請佣設定」顯示。</p>
       <div class="form-actions" style="margin-bottom:0.75rem;">
         <button type="button" id="exportCommissionBtn" class="btn btn-secondary">匯出請佣 Excel</button>
         <span class="hint">含「請佣摘要」「期別服務費」兩張表</span>
@@ -159,6 +222,8 @@
               <option value="">未填</option>
               <option value="住宅">住宅</option>
               <option value="事務所">事務所</option>
+              <option value="店鋪">店鋪</option>
+              <option value="店面">店面</option>
             </select>
           </div>
           <div class="form-group">
@@ -297,11 +362,11 @@
             <label for="fCommRatePct">佣金比例(%)</label>
             <input type="number" step="0.01" id="fCommRatePct" value="4.85">
           </div>
-          <div class="form-group">
+          <div class="form-group ss-simple-only">
             <label for="fCommPayablePct">本期可請比例(%)</label>
             <input type="number" step="0.01" id="fCommPayablePct" value="97">
           </div>
-          <div class="form-group">
+          <div class="form-group ss-simple-only">
             <label for="fCommRetentionPct">保留款比例(%)</label>
             <input type="number" step="0.01" id="fCommRetentionPct" value="3">
           </div>
@@ -310,16 +375,21 @@
             <input type="number" step="0.0001" id="fCommDeduction" value="0">
           </div>
           <div class="form-group">
-            <label for="fCommClaimable">可請佣金額 4.85%(萬)</label>
+            <label for="fCommClaimable" id="lCommClaimable">可請佣金額(萬)</label>
             <input type="number" step="0.0001" id="fCommClaimable" value="0" readonly>
           </div>
           <div class="form-group">
-            <label for="fCommPayable">本期可請 97%(萬)</label>
+            <label for="fCommPayable" id="lCommPayable">本期可請(萬)</label>
             <input type="number" step="0.0001" id="fCommPayable" value="0" readonly>
           </div>
           <div class="form-group">
-            <label for="fCommRetention">保留款 3%(萬)</label>
+            <label for="fCommRetention" id="lCommRetention">保留款(萬)</label>
             <input type="number" step="0.0001" id="fCommRetention" value="0" readonly>
+          </div>
+          <div class="form-group ss-tier-only">
+            <label for="fCustomerPaidPct">客戶已繳比例(%)</label>
+            <input type="number" step="0.01" id="fCustomerPaidPct" value="0">
+            <small class="field-hint">例：繳 60 萬／成交 1000 萬＝6%；達門檻後解鎖可請%</small>
           </div>
           <div class="form-group">
             <label for="fCommPeriod">請佣期別</label>

@@ -33,8 +33,13 @@ function applyPermissionUI() {
   }
   const exportBtn = document.getElementById('exportBtn');
   if (exportBtn) {
-    // toggle 而非只 add，避免登入狀態尚未就緒時被永久隱藏
-    exportBtn.classList.toggle('hidden', !userCan('export_customers'));
+    if (!user) {
+      exportBtn.classList.remove('hidden');
+      exportBtn.disabled = false;
+    } else {
+      const canExport = userCan('export_customers') || userCan('view_customers');
+      exportBtn.classList.toggle('hidden', !canExport);
+    }
   }
   const detailEditBtn = document.getElementById('detailEditBtn');
   if (detailEditBtn) {

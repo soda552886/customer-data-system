@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>預算花費 - 得意佳</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body class="budget-page">
+  <header class="header">
+    <div class="header-inner">
+      <h1><span class="brand">得意佳</span>客戶資料管理系統</h1>
+      <nav id="mainNav"></nav>
+    </div>
+  </header>
+
+  <main class="container container-wide">
+    <section class="card">
+      <h2>預算花費</h2>
+      <p class="hint">本頁分三塊：①全案總預算發包請款 ②本週花費與媒體執行 ③業主版預算。預算欄為「萬」；已發包／已請款／週費用為「元」。媒體％與人事％依「總銷售基數」自動算出該欄預算。</p>
+      <div class="search-grid">
+        <div class="form-group">
+          <label for="budgetSite">案場 <span class="required">*</span></label>
+          <select id="budgetSite"><option value="">請選擇案場</option></select>
+        </div>
+        <div class="form-group">
+          <label for="budgetWeekStart">週起始日（週一） <span class="required">*</span></label>
+          <input type="date" id="budgetWeekStart">
+        </div>
+        <div class="form-group">
+          <label>區間</label>
+          <div id="budgetWeekLabel" class="current-site-label">—</div>
+        </div>
+        <div class="form-group">
+          <label for="salesBaseWan">總銷售基數(萬)</label>
+          <input type="number" step="0.01" id="salesBaseWan" value="0">
+        </div>
+        <div class="form-group">
+          <label for="salesFeePct">媒體比例(%)</label>
+          <input type="number" step="0.001" id="salesFeePct" value="2.375">
+        </div>
+        <div class="form-group">
+          <label for="rewardPct">人事預算比例(%)</label>
+          <input type="number" step="0.001" id="rewardPct" value="1">
+        </div>
+        <div class="form-group">
+          <label for="ownerBudgetPct">業主版預算比例(%)</label>
+          <input type="number" step="0.001" id="ownerBudgetPct" value="2.375">
+        </div>
+        <div class="form-group">
+          <label class="budget-check">
+            <input type="checkbox" id="showReferralFee">
+            顯示「介紹費」欄（世界都心預設開啟）
+          </label>
+        </div>
+      </div>
+      <div class="form-actions">
+        <button type="button" id="loadBudgetBtn" class="btn btn-primary">載入</button>
+        <button type="button" id="prevBudgetWeekBtn" class="btn btn-outline">上一週</button>
+        <button type="button" id="nextBudgetWeekBtn" class="btn btn-outline">下一週</button>
+        <button type="button" id="saveBudgetBtn" class="btn btn-secondary">儲存本案場／本週</button>
+        <a class="btn btn-outline" href="/weekly.html">週報工作台</a>
+        <a class="btn btn-outline" href="/sales.html">銷售總表</a>
+      </div>
+    </section>
+
+    <div id="budgetEmpty" class="empty-state">
+      <p>請選擇案場與週次後按「載入」</p>
+    </div>
+
+    <div id="budgetWorkspace" class="hidden">
+      <section class="card">
+        <div class="budget-banner">廣告預算執行花費</div>
+        <h3 class="section-title">全案總預算發包請款 <span id="execSiteLabel"></span></h3>
+        <p class="hint">列：預算／已發包金額／已請款金額／尚可發包。尚可發包＝預算（萬×10,000）− 已發包。圓餅圖依「已請款金額」繪製，不含媒體％池與總預算彙總欄。</p>
+        <div class="table-wrap">
+          <table class="data-table budget-grid" id="execBudgetTable"></table>
+        </div>
+        <div class="budget-pie-wrap">
+          <svg id="budgetPie" viewBox="0 0 320 320" aria-label="已請款分布"></svg>
+          <ul id="budgetPieLegend" class="budget-pie-legend"></ul>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="budget-banner">本週花費</div>
+        <div class="budget-week-layout">
+          <div class="budget-week-extras">
+            <h3 class="section-title">週花費</h3>
+            <p class="hint" id="weekSpendRange">—</p>
+            <p class="hint">第一列「媒體」等於右側本週執行合計；其餘雜項可由各工地自行增減項目與金額。</p>
+            <div id="weekExtraList"></div>
+            <div class="form-actions" style="margin-top:0.6rem;">
+              <button type="button" id="addWeekExtraBtn" class="btn btn-outline">新增雜項</button>
+            </div>
+            <p class="budget-week-total">總計：<span id="weekGrandTotal">0</span> 萬元</p>
+          </div>
+          <div class="budget-week-media">
+            <h3 class="section-title">本週媒體執行費用</h3>
+            <p class="hint">先從基本媒體選單加入，額外通路再自行新增。週執行＝本週花費（元）；總累計＝期初累計＋歷週週執行（含本週）。首次帶入 Excel 現有累計請填「期初累計」。點位分布圖請上傳已標好編號／點位／金額的合成圖，照片說明可補文字。</p>
+            <div class="form-actions budget-media-toolbar">
+              <select id="mediaPreset"></select>
+              <button type="button" id="addPresetMediaBtn" class="btn btn-outline">加入選單項目</button>
+              <input type="text" id="customMediaName" placeholder="自訂媒體名稱">
+              <button type="button" id="addMediaItemBtn" class="btn btn-outline">新增自訂項目</button>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table budget-media-table" id="weekMediaTable">
+                <thead>
+                  <tr>
+                    <th>項目</th>
+                    <th>概況</th>
+                    <th>週執行(元)</th>
+                    <th>總累計(元)</th>
+                    <th>期初累計(元)</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+                <tfoot></tfoot>
+              </table>
+            </div>
+            <div id="mediaPhotoGallery" class="budget-photo-gallery"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="budget-banner">業主版預算</div>
+        <h3 class="section-title">業主版預算 <span id="ownerSiteLabel"></span></h3>
+        <p class="hint">給業主看的分類表。尚可發包＝預算（萬×10,000）− 已發包金額。</p>
+        <div class="table-wrap">
+          <table class="data-table budget-grid" id="ownerBudgetTable"></table>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="/js/nav.js"></script>
+  <script src="/js/budget.js"></script>
+</body>
+</html>

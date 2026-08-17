@@ -57,7 +57,32 @@ function addDays(d, n) {
   return x;
 }
 
-function updateRangeLabel() {
+function weekNumberFromOrigin(weekStart, origin) {
+  if (!weekStart || !origin) return null;
+  const start = mondayOf(parseYmd(weekStart));
+  const first = mondayOf(parseYmd(origin));
+  return Math.round((start - first) / (7 * 24 * 60 * 60 * 1000)) + 1;
+}
+
+function currentSite() {
+  const id = document.getElementById('weekSite')?.value;
+  return sites.find((s) => s.id === id) || null;
+}
+
+function syncWeek1StartField() {
+  const el = document.getElementById('week1Start');
+  if (!el) return;
+  el.value = currentSite()?.week1Start || '';
+}
+
+function applySuggestedWeekNumber() {
+  const n = weekNumberFromOrigin(
+    document.getElementById('weekStart')?.value,
+    currentSite()?.week1Start,
+  );
+  if (n == null || !Number.isFinite(n)) return;
+  document.getElementById('weekNumber').value = n;
+}
   const startEl = document.getElementById('weekStart');
   const label = document.getElementById('weekRangeLabel');
   if (!startEl.value) {
@@ -161,16 +186,22 @@ async function loadSites() {
   });
   const duoyi = sites.find((s) => s.id === 'libao_duoyi' || s.name.includes('鐸藝'));
   if (duoyi) sel.value = duoyi.id;
+  syncWeek1StartField();
 }
 
 async function loadMeta() {
   try {
-    const res = await fetch('/api/weekly/meta');
+    const siteId = document.getElementById('weekSite')?.value || '';
+    const qs = siteId ? `?siteId=${encodeURIComponent(siteId)}` : '';
+    const res = await fetch(`/api/weekly/meta${qs}`);
     if (!res.ok) return;
     const json = await res.json();
-    document.getElementById('weekStart').value = json.defaultWeekStart;
+    const startEl = document.getElementById('weekStart');
+    if (!startEl.value) startEl.value = json.defaultWeekStart;
     document.getElementById('weekNumber').value = json.defaultWeekNumber;
+    if (json.week1Start) document.getElementById('week1Start').value = json.week1Start;
     updateRangeLabel();
+    applySuggestedWeekNumber();
   } catch { /* ignore */ }
 }
 
@@ -226,7 +257,7 @@ function collectManualFromForm(baseManual) {
     });
   }
 
-  ['deals', 'signings', 'purchases', 'unreported'].forEach((key) => {
+  ['deals', 'dealsCum', 'signings', 'signingsCum', 'purchases', 'purchasesCum', 'unreported'].forEach((key) => {
     manual[key] = manual[key] || { units: 0, parking: 0, amount: 0 };
     ['units', 'parking', 'amount'].forEach((f) => {
       const el = document.querySelector(`[data-block="${key}"][data-field="${f}"]`);
@@ -239,6 +270,7 @@ function collectManualFromForm(baseManual) {
     'totalUnits', 'soldUnits', 'totalParking', 'soldParking',
     'totalAmount', 'soldAmount', 'soldBasePrice',
     'residentialTotal', 'residentialSold', 'officeTotal', 'officeSold',
+    'shopTotal', 'shopSold', 'storefrontTotal', 'storefrontSold',
   ].forEach((f) => {
     const el = document.querySelector(`[data-block="inventory"][data-field="${f}"]`);
     if (el) manual.inventory[f] = Number(el.value) || 0;
@@ -283,6 +315,8 @@ function calcInventoryDerived(inv) {
     basePriceRate: rate(n('soldBasePrice'), n('totalAmount')),
     residentialRate: rate(n('residentialSold'), n('residentialTotal')),
     officeRate: rate(n('officeSold'), n('officeTotal')),
+    shopRate: rate(n('shopSold'), n('shopTotal')),
+    storefrontRate: rate(n('storefrontSold'), n('storefrontTotal')),
     remainUnits: Math.max(n('totalUnits') - n('soldUnits'), 0),
     remainParking: Math.max(n('totalParking') - n('soldParking'), 0),
     remainAmount: Math.max(n('totalAmount') - n('soldAmount'), 0),
@@ -297,8 +331,8 @@ function calcCommissionDerived(c) {
     unclaimedAmount: round4(n('unclaimedAmount') || Math.max(n('claimableAmount') - n('claimedAmount'), 0)),
     unclaimedUnits: n('unclaimedUnits') || Math.max(n('claimableUnits') - n('claimedUnits'), 0),
     unclaimedParking: n('unclaimedParking') || Math.max(n('claimableParking') - n('claimedParking'), 0),
-    payableAmount: round4(n('payableAmount') || n('claimableAmount') * 0.97),
-    retentionAmount: round4(n('retentionAmount') || n('claimableAmount') * 0.03),
+    payableAmount: round4(n('payableAmount') || n('claimableAmount') * (current?.commissionDefaults?.payableRatio || 0.97)),
+    retentionAmount: round4(n('retentionAmount') || n('claimableAmount') * (current?.commissionDefaults?.retentionRatio || 0.03)),
     bookedAmount: round4(n('bookedAmount')),
     nextMonthUnits: n('nextMonthUnits'),
     nextMonthParking: n('nextMonthParking'),
@@ -463,15 +497,18 @@ function addPhoneCallRow() {
 
 function renderDealInputs(manual) {
   const blocks = [
-    { key: 'deals', title: '成交', amountHint: '實際房價＋車售' },
-    { key: 'signings', title: '簽約', amountHint: '實際房價＋車售' },
-    { key: 'purchases', title: '買進', amountHint: '實際房價＋車售' },
+    { key: 'deals', title: '本週成交', amountHint: '實際房價＋車售' },
+    { key: 'dealsCum', title: '累計成交', amountHint: '實際房價＋車售', cum: true },
+    { key: 'signings', title: '本週簽約', amountHint: '實際房價＋車售' },
+    { key: 'signingsCum', title: '累計簽約', amountHint: '實際房價＋車售', cum: true },
+    { key: 'purchases', title: '本週買進', amountHint: '實際房價＋車售' },
+    { key: 'purchasesCum', title: '累計買進', amountHint: '實際房價＋車售', cum: true },
     { key: 'unreported', title: '未報', amountHint: '合約總價' },
   ];
   document.getElementById('dealInputs').innerHTML = blocks.map((b) => {
     const v = manual[b.key] || {};
     return `
-      <div class="deal-input-row">
+      <div class="deal-input-row${b.cum ? ' is-cum' : ''}">
         <div class="deal-input-label">${escapeHtml(b.title)}</div>
         <div class="form-group"><label>戶</label>
           <input type="number" min="0" data-block="${b.key}" data-field="units" value="${Number(v.units) || 0}"></div>
@@ -498,6 +535,10 @@ function renderInventory(manual, derived) {
     { key: 'residentialSold', label: '住宅已售' },
     { key: 'officeTotal', label: '事務所總戶' },
     { key: 'officeSold', label: '事務所已售' },
+    { key: 'shopTotal', label: '店鋪總戶' },
+    { key: 'shopSold', label: '店鋪已售' },
+    { key: 'storefrontTotal', label: '店面總戶' },
+    { key: 'storefrontSold', label: '店面已售' },
   ];
   document.getElementById('inventoryInputs').innerHTML = fields.map((f) => `
     <div class="form-group">
@@ -505,7 +546,7 @@ function renderInventory(manual, derived) {
       <input type="number" min="0" step="0.01" data-block="inventory" data-field="${f.key}" value="${Number(inv[f.key]) || 0}">
     </div>
   `).join('');
-  const d = derived || calcInventoryDerived(inv);
+  const d = calcInventoryDerived(inv);
   renderDerivedCards('inventoryDerived', [
     { label: '戶數去化率', value: `${d.unitRate}%` },
     { label: '車位去化率', value: `${d.parkingRate}%` },
@@ -513,6 +554,10 @@ function renderInventory(manual, derived) {
     { label: '底價去化率', value: `${d.basePriceRate}%` },
     { label: '未售底價(萬)', value: `${d.remainBasePrice}` },
     { label: '剩餘戶／車', value: `${d.remainUnits} / ${d.remainParking}` },
+    { label: '住宅去化率', value: `${d.residentialRate}%` },
+    { label: '事務所去化率', value: `${d.officeRate}%` },
+    { label: '店鋪去化率', value: `${d.shopRate}%` },
+    { label: '店面去化率', value: `${d.storefrontRate}%` },
   ]);
   document.querySelectorAll('[data-block="inventory"]').forEach((el) => {
     el.addEventListener('input', refreshDerivedFromForm);
@@ -540,13 +585,16 @@ function renderWeeklyCommissionMatrix(matrix) {
   ];
   el.innerHTML = cards.map((c) => {
     const b = matrix[c.key] || {};
+    const labels = matrix.labels || current?.commissionDefaults?.labels || {
+      claimable: '佣金', retention: '保留', payable: '可請',
+    };
     return `<div class="commission-matrix-card" data-tone="${c.key}">
       <h3>${escapeHtml(c.title)}</h3>
       <div class="upc">${fmtWeekNum(b.units)}戶／${fmtWeekNum(b.parking)}車</div>
       <dl>
-        <dt>4.85%</dt><dd>${fmtWeekNum(b.claimable)} 萬</dd>
-        <dt>3%保留</dt><dd>${fmtWeekNum(b.retention)} 萬</dd>
-        <dt>97%可請</dt><dd>${fmtWeekNum(b.payable)} 萬</dd>
+        <dt>${escapeHtml(labels.claimable)}</dt><dd>${fmtWeekNum(b.claimable)} 萬</dd>
+        <dt>${escapeHtml(labels.retention)}</dt><dd>${fmtWeekNum(b.retention)} 萬</dd>
+        <dt>${escapeHtml(labels.payable)}</dt><dd>${fmtWeekNum(b.payable)} 萬</dd>
       </dl>
     </div>`;
   }).join('');
@@ -576,9 +624,12 @@ function renderCommission(manual, derived) {
     </div>
   `).join('');
   const d = derived || calcCommissionDerived(c);
+  const labels = current?.commissionDefaults?.labels
+    || current?.suggested?.commissionMatrix?.labels
+    || { payable: '本期可請', retention: '保留款' };
   renderDerivedCards('commissionDerived', [
-    { label: '本期可請97%(萬)', value: `${d.payableAmount}` },
-    { label: '保留款3%(萬)', value: `${d.retentionAmount}` },
+    { label: `${labels.payable}(萬)`, value: `${d.payableAmount}` },
+    { label: `${labels.retention}(萬)`, value: `${d.retentionAmount}` },
     { label: '未請佣金額(萬)', value: `${d.unclaimedAmount}` },
     { label: '未請佣戶數', value: `${d.unclaimedUnits}` },
     { label: '未請佣車位', value: `${d.unclaimedParking}` },
@@ -602,11 +653,18 @@ function refreshDerivedFromForm() {
     { label: '底價去化率', value: `${inv.basePriceRate}%` },
     { label: '未售底價(萬)', value: `${inv.remainBasePrice}` },
     { label: '剩餘戶／車', value: `${inv.remainUnits} / ${inv.remainParking}` },
+    { label: '住宅去化率', value: `${inv.residentialRate}%` },
+    { label: '事務所去化率', value: `${inv.officeRate}%` },
+    { label: '店鋪去化率', value: `${inv.shopRate}%` },
+    { label: '店面去化率', value: `${inv.storefrontRate}%` },
   ]);
   const com = calcCommissionDerived(manual.commission || {});
+  const labels = current?.commissionDefaults?.labels
+    || current?.suggested?.commissionMatrix?.labels
+    || { payable: '本期可請', retention: '保留款' };
   renderDerivedCards('commissionDerived', [
-    { label: '本期可請97%(萬)', value: `${com.payableAmount}` },
-    { label: '保留款3%(萬)', value: `${com.retentionAmount}` },
+    { label: `${labels.payable}(萬)`, value: `${com.payableAmount}` },
+    { label: `${labels.retention}(萬)`, value: `${com.retentionAmount}` },
     { label: '未請佣金額(萬)', value: `${com.unclaimedAmount}` },
     { label: '未請佣戶數', value: `${com.unclaimedUnits}` },
     { label: '未請佣車位', value: `${com.unclaimedParking}` },
@@ -770,21 +828,22 @@ function renderVisitors(auto) {
   const tbody = document.querySelector('#visitorTable tbody');
   const rows = auto.visitors || [];
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="11" class="empty-row">本週尚無納入週報的客資</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="12" class="empty-row">本週尚無納入週報的客資</td></tr>';
     return;
   }
   tbody.innerHTML = rows.map((v) => `<tr>
     <td class="cell-date">${escapeHtml(v.date)}</td>
     <td>${escapeHtml(v.visitType)}</td>
     <td>${escapeHtml(v.customerName)}</td>
-    <td>${escapeHtml(v.phone)}</td>
     <td>${escapeHtml(v.region)}</td>
     <td>${escapeHtml(v.media)}</td>
     <td>${escapeHtml(v.occupation || '')}</td>
     <td>${escapeHtml(v.age || '')}</td>
+    <td>${escapeHtml(v.introUnit || '')}</td>
+    <td class="cell-wrap cell-discussion">${escapeHtml(v.discussion || '')}</td>
+    <td class="cell-wrap">${escapeHtml(v.notPurchasedReason || '')}</td>
     <td>${escapeHtml(v.sincerity)}</td>
-    <td>${escapeHtml(v.salesperson1)}</td>
-    <td class="cell-wrap">${escapeHtml(v.discussion)}</td>
+    <td>${escapeHtml(v.salesperson1)}${v.isCoManaged ? '＋' + escapeHtml(v.salesperson2 || '') : ''}</td>
   </tr>`).join('');
 }
 
@@ -820,7 +879,7 @@ function applySuggestedFromSales() {
     return;
   }
   const manual = collectManualFromForm(current.manual);
-  ['deals', 'signings', 'purchases', 'unreported'].forEach((key) => {
+  ['deals', 'dealsCum', 'signings', 'signingsCum', 'purchases', 'purchasesCum', 'unreported'].forEach((key) => {
     if (s[key]) manual[key] = { ...manual[key], ...s[key] };
   });
   if (s.commission) {
@@ -884,6 +943,9 @@ function renderAll(payload) {
   document.getElementById('weekEmpty').classList.add('hidden');
   document.getElementById('weekWorkspace').classList.remove('hidden');
   document.getElementById('weekNumber').value = payload.weekNumber || '';
+  if (payload.week1Start != null && document.getElementById('week1Start')) {
+    document.getElementById('week1Start').value = payload.week1Start || '';
+  }
   document.getElementById('weekSaveBadge').textContent = payload.saved
     ? `已儲存 ${payload.updatedAt || ''}`
     : '尚未儲存';
@@ -954,6 +1016,39 @@ async function loadWeek() {
     }
   } catch {
     showToast('載入失敗', 'error');
+  }
+}
+
+async function saveWeek1Start() {
+  const siteId = document.getElementById('weekSite').value;
+  if (!siteId) {
+    showToast('請先選擇案場', 'error');
+    return;
+  }
+  const el = document.getElementById('week1Start');
+  let week1Start = el.value || '';
+  if (week1Start) {
+    week1Start = toYmd(mondayOf(parseYmd(week1Start)));
+    el.value = week1Start;
+  }
+  try {
+    const res = await fetch(`/api/sites/${encodeURIComponent(siteId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ week1Start }),
+    });
+    const json = await res.json();
+    if (!res.ok) {
+      showToast(json.error || '儲存失敗', 'error');
+      return;
+    }
+    const site = currentSite();
+    if (site) site.week1Start = json.site?.week1Start || '';
+    applySuggestedWeekNumber();
+    saveWeeklyContext();
+    showToast(week1Start ? `已設第 1 週為 ${week1Start}（週一）` : '已清除第 1 週起始日');
+  } catch {
+    showToast('儲存失敗', 'error');
   }
 }
 
@@ -1033,6 +1128,8 @@ function shiftWeek(delta) {
   const start = mondayOf(parseYmd(el.value));
   el.value = toYmd(addDays(start, delta * 7));
   updateRangeLabel();
+  applySuggestedWeekNumber();
+  saveWeeklyContext();
   if (document.getElementById('weekSite').value) loadWeek();
 }
 
@@ -1055,13 +1152,18 @@ async function init() {
   await loadSites();
   await loadMeta();
   const shouldAutoLoad = restoreWeeklyContext();
+  syncWeek1StartField();
+  if (!document.getElementById('weekNumber').value) applySuggestedWeekNumber();
   await loadFieldOptions(document.getElementById('weekSite').value);
 
   document.getElementById('weekStart').addEventListener('change', () => {
     updateRangeLabel();
+    applySuggestedWeekNumber();
     saveWeeklyContext();
   });
   document.getElementById('weekSite').addEventListener('change', () => {
+    syncWeek1StartField();
+    applySuggestedWeekNumber();
     saveWeeklyContext();
     loadFieldOptions(document.getElementById('weekSite').value);
   });
@@ -1069,6 +1171,7 @@ async function init() {
   document.getElementById('loadWeekBtn').addEventListener('click', loadWeek);
   document.getElementById('prevWeekBtn').addEventListener('click', () => shiftWeek(-1));
   document.getElementById('nextWeekBtn').addEventListener('click', () => shiftWeek(1));
+  document.getElementById('saveWeek1Btn')?.addEventListener('click', saveWeek1Start);
   document.getElementById('saveWeekBtn').addEventListener('click', saveWeek);
   document.getElementById('selectAllVisitorsBtn').addEventListener('click', () => {
     document.querySelectorAll('#visitorSelectTable tbody input[type="checkbox"]').forEach((cb) => { cb.checked = true; });

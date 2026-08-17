@@ -15,7 +15,7 @@ async function loadSitesList() {
     document.getElementById('siteCount').textContent = `${sites.length} 個`;
 
     if (sites.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="5" class="empty-row">尚無案場，請上方新增</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="6" class="empty-row">尚無案場，請上方新增</td></tr>';
       return;
     }
 
@@ -36,12 +36,16 @@ async function loadSitesList() {
         <td><strong>${escapeHtml(s.name)}</strong></td>
         <td>${GROUP_LABELS[s.group] || s.group}</td>
         <td>${count} 筆</td>
+        <td>
+          <input type="date" class="batch-inline-input" value="${escapeHtml(s.week1Start || '')}"
+            onchange="saveWeek1Start('${s.id}', this.value)" title="第 1 週週一，空白則用日曆週次">
+        </td>
         <td>${created}</td>
         <td class="action-btns">${actions}</td>
       </tr>`;
     }).join('');
   } catch {
-    tbody.innerHTML = '<tr><td colspan="5" class="empty-row">載入失敗</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" class="empty-row">載入失敗</td></tr>';
   }
 }
 
@@ -54,6 +58,26 @@ function escapeHtml(str) {
 function escapeAttr(str) {
   return String(str).replace(/'/g, "\\'");
 }
+
+window.saveWeek1Start = async function (id, value) {
+  try {
+    const res = await fetch(`/api/sites/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ week1Start: value || '' }),
+    });
+    const json = await res.json();
+    if (!res.ok) {
+      showToast(json.error || '儲存失敗', 'error');
+      return;
+    }
+    const snapped = json.site?.week1Start || '';
+    showToast(snapped ? `第 1 週起始日：${snapped}` : '已改回日曆週次');
+    loadSitesList();
+  } catch {
+    showToast('儲存失敗', 'error');
+  }
+};
 
 window.deleteSite = async function (id, name) {
   if (!confirm(`確定要刪除案場「${name}」？`)) return;

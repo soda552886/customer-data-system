@@ -166,17 +166,32 @@ def roc_year(d) -> int:
     return d.year - 1911
 
 
-def default_week_number(start) -> int:
-    return int(start.isocalendar()[1])
+def normalize_week1_start(value) -> Optional[str]:
+    """第 1 週起始日：對齊該週週一，回傳 YYYY-MM-DD。"""
+    parsed = value if hasattr(value, 'toordinal') else parse_ymd(value)
+    if not parsed:
+        return None
+    return monday_of(parsed).isoformat()
 
 
-def safe_week_number(week_number, start) -> int:
+def default_week_number(start, origin=None) -> int:
+    """有設定第一週起始日時，依間隔算第 N 週；否則用日曆 ISO 週次。"""
+    start_d = start if hasattr(start, 'toordinal') else parse_ymd(str(start or ''))
+    if not start_d:
+        return 1
+    origin_d = origin if hasattr(origin, 'toordinal') else parse_ymd(origin)
+    if origin_d:
+        return (monday_of(start_d) - monday_of(origin_d)).days // 7 + 1
+    return int(start_d.isocalendar()[1])
+
+
+def safe_week_number(week_number, start, origin=None) -> int:
     if week_number in (None, ''):
-        return default_week_number(start)
+        return default_week_number(start, origin)
     try:
         return int(float(week_number))
     except (TypeError, ValueError):
-        return default_week_number(start)
+        return default_week_number(start, origin)
 
 
 def _parse_included_visitor_ids(raw) -> Optional[set]:
@@ -195,7 +210,7 @@ def _parse_included_visitor_ids(raw) -> Optional[set]:
     return out
 
 
-def empty_manual_payload(start, end, week_number=None):
+def empty_manual_payload(start, end, week_number=None, origin=None):
     days = []
     for i in range(7):
         d = start + timedelta(days=i)
@@ -206,13 +221,16 @@ def empty_manual_payload(start, end, week_number=None):
             'phoneCalls': 0,
         })
     return {
-        'weekNumber': week_number if week_number is not None else default_week_number(start),
+        'weekNumber': week_number if week_number is not None else default_week_number(start, origin),
         'days': days,
         # null = 尚未選取（預設納入全部本週來人）；[] = 刻意報 0 組；[id…] = 僅報選取組
         'includedVisitorIds': None,
         'deals': {'units': 0, 'parking': 0, 'amount': 0},
+        'dealsCum': {'units': 0, 'parking': 0, 'amount': 0},
         'signings': {'units': 0, 'parking': 0, 'amount': 0},
+        'signingsCum': {'units': 0, 'parking': 0, 'amount': 0},
         'purchases': {'units': 0, 'parking': 0, 'amount': 0},
+        'purchasesCum': {'units': 0, 'parking': 0, 'amount': 0},
         'unreported': {'units': 0, 'parking': 0, 'amount': 0},
         'commission': {
             'sellableUnits': 0,
@@ -244,6 +262,10 @@ def empty_manual_payload(start, end, week_number=None):
             'residentialSold': 0,
             'officeTotal': 42,
             'officeSold': 0,
+            'shopTotal': 0,
+            'shopSold': 0,
+            'storefrontTotal': 0,
+            'storefrontSold': 0,
         },
         'phoneCallsDetail': [],
         'reviewNotes': '',
@@ -540,7 +562,13 @@ def build_auto_stats(
             'sincerity': sincerity,
             'salesperson1': staff1,
             'salesperson2': staff2,
-            'discussion': (data.get('discussion') or '')[:120],
+            'discussion': data.get('discussion') or '',
+            'introUnit': data.get('introUnit') or '',
+            'notPurchasedReason': (
+                '、'.join(str(x) for x in data.get('notPurchasedReason') if x)
+                if isinstance(data.get('notPurchasedReason'), (list, tuple))
+                else str(data.get('notPurchasedReason') or '')
+            ),
             'included': week_included if in_week else None,
         }
 
@@ -753,6 +781,10 @@ def inventory_summary(manual: dict) -> dict:
     res_s = _num(inv.get('residentialSold'))
     off_t = _num(inv.get('officeTotal'))
     off_s = _num(inv.get('officeSold'))
+    shop_t = _num(inv.get('shopTotal'))
+    shop_s = _num(inv.get('shopSold'))
+    store_t = _num(inv.get('storefrontTotal'))
+    store_s = _num(inv.get('storefrontSold'))
     # 未售金額以底價：總底價金額 - 已售底價（totalAmount 視為總底價）
     remain_base = max(total_a - sold_base, 0)
     return {
@@ -762,6 +794,8 @@ def inventory_summary(manual: dict) -> dict:
         'basePriceRate': round(sold_base / total_a * 100, 2) if total_a else 0,
         'residentialRate': round(res_s / res_t * 100, 2) if res_t else 0,
         'officeRate': round(off_s / off_t * 100, 2) if off_t else 0,
+        'shopRate': round(shop_s / shop_t * 100, 2) if shop_t else 0,
+        'storefrontRate': round(store_s / store_t * 100, 2) if store_t else 0,
         'remainUnits': max(total_u - sold_u, 0),
         'remainParking': max(total_p - sold_p, 0),
         'remainAmount': max(total_a - sold_a, 0),
@@ -1107,6 +1141,9 @@ def _build_ppt_summary_sheet(ws, *, site_name, start, end, week_number, manual, 
     deals = manual.get('deals') or {}
     signings = manual.get('signings') or {}
     purchases = manual.get('purchases') or {}
+    deals_cum = manual.get('dealsCum') or {}
+    signings_cum = manual.get('signingsCum') or {}
+    purchases_cum = manual.get('purchasesCum') or {}
     c = manual.get('commission') or {}
     com = commission_summary(manual)
     matrix = auto.get('commissionMatrix') or {}
@@ -1114,9 +1151,18 @@ def _build_ppt_summary_sheet(ws, *, site_name, start, end, week_number, manual, 
 
     visit_total = t.get('reportedTotal', t.get('total', 0))
     return_total = t.get('return', 0)
-    cum_units = _num(c.get('sellableUnits')) or _num(inv_raw.get('soldUnits'))
-    cum_parking = _num(c.get('sellableParking')) or _num(inv_raw.get('soldParking'))
-    cum_amount = _num(c.get('sellableAmount')) or _num(inv_raw.get('soldAmount'))
+    cum_deal_u = _num(deals_cum.get('units')) or _num(c.get('sellableUnits')) or _num(inv_raw.get('soldUnits'))
+    cum_deal_p = _num(deals_cum.get('parking')) or _num(c.get('sellableParking')) or _num(inv_raw.get('soldParking'))
+    cum_deal_a = _num(deals_cum.get('amount')) or _num(c.get('sellableAmount')) or _num(inv_raw.get('soldAmount'))
+    cum_sign_u = _num(signings_cum.get('units'))
+    cum_sign_p = _num(signings_cum.get('parking'))
+    cum_sign_a = _num(signings_cum.get('amount'))
+    cum_buy_u = _num(purchases_cum.get('units'))
+    cum_buy_p = _num(purchases_cum.get('parking'))
+    cum_buy_a = _num(purchases_cum.get('amount'))
+    sold_u = _num(c.get('sellableUnits')) or _num(inv_raw.get('soldUnits'))
+    sold_p = _num(c.get('sellableParking')) or _num(inv_raw.get('soldParking'))
+    sold_a = _num(c.get('sellableAmount')) or _num(inv_raw.get('soldAmount'))
     rate = COMMISSION_RATE_DEFAULT
     claimable_amt = _num(c.get('claimableAmount'))
     claimed_amt = _num(c.get('claimedAmount'))
@@ -1125,8 +1171,8 @@ def _build_ppt_summary_sheet(ws, *, site_name, start, end, week_number, manual, 
     unclaimed_amt = _num(c.get('unclaimedAmount')) or com.get('unclaimedAmount')
     unclaimed_units = _num(c.get('unclaimedUnits')) or com.get('unclaimedUnits')
     unclaimed_parking = _num(c.get('unclaimedParking')) or com.get('unclaimedParking')
-    claimable_units = _num(c.get('claimableUnits')) or cum_units
-    claimable_parking = _num(c.get('claimableParking')) or cum_parking
+    claimable_units = _num(c.get('claimableUnits')) or cum_deal_u
+    claimable_parking = _num(c.get('claimableParking')) or cum_deal_p
     claimed_units = _num(c.get('claimedUnits'))
     claimed_parking = _num(c.get('claimedParking'))
 
@@ -1158,7 +1204,7 @@ def _build_ppt_summary_sheet(ws, *, site_name, start, end, week_number, manual, 
             or unclaimed_amt
         )
 
-    comm_sales_amount = round(claimable_amt / rate, 4) if claimable_amt else cum_amount
+    comm_sales_amount = round(claimable_amt / rate, 4) if claimable_amt else cum_deal_a
     unclaimed_sales = round(unclaimed_amt / rate, 4) if unclaimed_amt else 0
     currently_claimed = booked_amt if booked_amt else claimed_amt
 
@@ -1196,17 +1242,17 @@ def _build_ppt_summary_sheet(ws, *, site_name, start, end, week_number, manual, 
         (
             '來人', visit_total, '組',
             '本週成交', deals.get('units'), deals.get('parking'), deals.get('amount'),
-            '累計成交', cum_units, cum_parking, cum_amount,
+            '累計成交', cum_deal_u, cum_deal_p, cum_deal_a,
         ),
         (
             '來電', phone_sum, '通',
             '本週簽約', signings.get('units'), signings.get('parking'), signings.get('amount'),
-            '累計簽約', cum_units, cum_parking, cum_amount,
+            '累計簽約', cum_sign_u, cum_sign_p, cum_sign_a,
         ),
         (
             '回訪', return_total, '組',
             '本週實進', purchases.get('units'), purchases.get('parking'), purchases.get('amount'),
-            '', '', '', '',
+            '累計買進', cum_buy_u, cum_buy_p, cum_buy_a,
         ),
     ]
     for row in visit_rows:
@@ -1239,7 +1285,7 @@ def _build_ppt_summary_sheet(ws, *, site_name, start, end, week_number, manual, 
         ws.cell(ws.max_row, col).border = thin
 
     commission_rows = [
-        ('累積銷售金額', cum_units, cum_parking, cum_amount, ''),
+        ('累積銷售金額', sold_u, sold_p, sold_a, ''),
         ('請佣銷售金額', claimable_units, claimable_parking, comm_sales_amount, ''),
         ('可請佣戶數車位', claimable_units, claimable_parking, claimable_amt, ''),
         (
@@ -1343,6 +1389,9 @@ def build_weekly_excel(site_name: str, start, end, week_number, manual: dict, au
     deals = manual.get('deals') or {}
     signings = manual.get('signings') or {}
     purchases = manual.get('purchases') or {}
+    deals_cum = manual.get('dealsCum') or {}
+    signings_cum = manual.get('signingsCum') or {}
+    purchases_cum = manual.get('purchasesCum') or {}
     unreported = manual.get('unreported') or {}
 
     # —— PPT摘要（對齊既有週報投影片首頁）——
@@ -1375,8 +1424,12 @@ def build_weekly_excel(site_name: str, start, end, week_number, manual: dict, au
         ('本週來人(組)', t.get('total', 0), '實際來人(組)', t.get('actualTotal', t.get('total', 0))),
         ('本週新客／回訪', f"{t.get('new', 0)} / {t.get('return', 0)}", '本週來電(通)', phone_sum),
         ('本週成交(戶/車/萬)', f"{deals.get('units', 0)}/{deals.get('parking', 0)}/{deals.get('amount', 0)}",
-         '本週簽約(戶/車/萬)', f"{signings.get('units', 0)}/{signings.get('parking', 0)}/{signings.get('amount', 0)}"),
+         '累計成交(戶/車/萬)', f"{deals_cum.get('units', 0)}/{deals_cum.get('parking', 0)}/{deals_cum.get('amount', 0)}"),
+        ('本週簽約(戶/車/萬)', f"{signings.get('units', 0)}/{signings.get('parking', 0)}/{signings.get('amount', 0)}",
+         '累計簽約(戶/車/萬)', f"{signings_cum.get('units', 0)}/{signings_cum.get('parking', 0)}/{signings_cum.get('amount', 0)}"),
         ('本週買進(戶/車/萬)', f"{purchases.get('units', 0)}/{purchases.get('parking', 0)}/{purchases.get('amount', 0)}",
+         '累計買進(戶/車/萬)', f"{purchases_cum.get('units', 0)}/{purchases_cum.get('parking', 0)}/{purchases_cum.get('amount', 0)}"),
+        ('未報(戶/車/萬)', f"{unreported.get('units', 0)}/{unreported.get('parking', 0)}/{unreported.get('amount', 0)}",
          '客資成交筆數', t.get('deal', 0)),
         ('本月來人／成交', f"{(p.get('month') or {}).get('visits', 0)} / {(p.get('month') or {}).get('deals', 0)}",
          '本年來人／成交', f"{(p.get('year') or {}).get('visits', 0)} / {(p.get('year') or {}).get('deals', 0)}"),
@@ -1469,6 +1522,8 @@ def build_weekly_excel(site_name: str, start, end, week_number, manual: dict, au
         ('已售底價(萬)', 'soldBasePrice'),
         ('住宅總戶', 'residentialTotal'), ('住宅已售', 'residentialSold'),
         ('事務所總戶', 'officeTotal'), ('事務所已售', 'officeSold'),
+        ('店鋪總戶', 'shopTotal'), ('店鋪已售', 'shopSold'),
+        ('店面總戶', 'storefrontTotal'), ('店面已售', 'storefrontSold'),
     ]:
         ws.append([label, inv_m.get(key, 0)])
     ws.append(['戶數去化率%', inv['unitRate']])
@@ -1483,7 +1538,11 @@ def build_weekly_excel(site_name: str, start, end, week_number, manual: dict, au
     matrix = auto.get('commissionMatrix') or {}
     if matrix:
         ws.append(['【可請／已請／未請矩陣】'])
-        ws.append(['區塊', '戶／車', '4.85%(萬)', '3%保留(萬)', '97%可請(萬)'])
+        cards_labels = matrix.get('labels') or {}
+        rate_h = cards_labels.get('claimable') or '佣金(萬)'
+        ret_h = cards_labels.get('retention') or '保留(萬)'
+        pay_h = cards_labels.get('payable') or '可請(萬)'
+        ws.append(['區塊', '戶／車', rate_h, ret_h, pay_h])
         _style_header(ws, ws.max_row)
         for key, label in (
             ('claimable', '可請總金額'),
@@ -1537,18 +1596,23 @@ def build_weekly_excel(site_name: str, start, end, week_number, manual: dict, au
 
     # —— 客況（僅納入週報者）——
     ws = wb.create_sheet('本週客況')
-    ws.append(['納入', '日期', '類型', '姓名', '電話', '區域', '媒體', '職業', '年齡', '來源',
-               '誠意度', '銷售1', '銷售2', '共同', '成交', '成交金額', '退戶', '洽談'])
+    ws.append(['納入', '日期', '類型', '姓名', '區域', '媒體', '職業', '年齡',
+               '介紹戶別', '洽談內容', '未購因素', '誠意度', '銷售1', '銷售2', '共同', '成交', '成交金額', '退戶'])
     _style_header(ws)
     for v in auto.get('visitors') or []:
         ws.append([
-            '是', v.get('date'), v.get('visitType'), v.get('customerName'), v.get('phone'),
-            v.get('region'), v.get('media'), v.get('occupation'), v.get('age'), v.get('source'),
+            '是', v.get('date'), v.get('visitType'), v.get('customerName'),
+            v.get('region'), v.get('media'), v.get('occupation'), v.get('age'),
+            v.get('introUnit'), v.get('discussion'), v.get('notPurchasedReason'),
             v.get('sincerity'), v.get('salesperson1'), v.get('salesperson2'),
             '是' if v.get('isCoManaged') else '否',
             '是' if v.get('isDeal') else '否', v.get('dealAmount'),
-            '是' if v.get('isRefund') else '否', v.get('discussion'),
+            '是' if v.get('isRefund') else '否',
         ])
+    for cell in ws['J'] + ws['K']:
+        cell.alignment = Alignment(wrap_text=True, vertical='top')
+    ws.column_dimensions['J'].width = 50
+    ws.column_dimensions['K'].width = 22
 
     ws = wb.create_sheet('回訪與有望客')
     ws.append(['【回訪】'])

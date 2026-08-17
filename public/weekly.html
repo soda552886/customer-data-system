@@ -31,17 +31,23 @@
         </div>
         <div class="form-group">
           <label for="weekNumber">週次</label>
-          <input type="number" id="weekNumber" min="1" max="99" placeholder="例如 86">
+          <input type="number" id="weekNumber" min="-99" max="999" placeholder="例如 1">
+        </div>
+        <div class="form-group">
+          <label for="week1Start">本案第 1 週起始日</label>
+          <input type="date" id="week1Start">
         </div>
         <div class="form-group">
           <label>區間</label>
           <div id="weekRangeLabel" class="current-site-label">—</div>
         </div>
       </div>
+      <p class="hint">「本案第 1 週起始日」請選該案場第一份週報的週一（會自動對齊週一）。設定後載入未存檔的週次會自動算第 2、3…週；已儲存的週報週次不會被改寫。</p>
       <div class="form-actions">
         <button type="button" id="loadWeekBtn" class="btn btn-primary">載入本週資料</button>
         <button type="button" id="prevWeekBtn" class="btn btn-outline">上一週</button>
         <button type="button" id="nextWeekBtn" class="btn btn-outline">下一週</button>
+        <button type="button" id="saveWeek1Btn" class="btn btn-secondary">儲存第 1 週起始日</button>
       </div>
     </section>
 
@@ -57,9 +63,26 @@
             <button type="button" id="saveWeekBtn" class="btn btn-primary">儲存週報</button>
             <button type="button" id="exportWeekBtn" class="btn btn-secondary">匯出 Excel</button>
             <button type="button" id="exportCsvBtn" class="btn btn-outline">匯出 CSV</button>
+            <a class="btn btn-outline" href="/budget.html">預算花費</a>
           </div>
         </div>
         <div id="kpiGrid" class="stats-grid"></div>
+      </section>
+
+      <section class="card">
+        <h2>檢討與區域個案（手填）</h2>
+        <div class="form-group full-width">
+          <label for="reviewNotes">成交檢討</label>
+          <textarea id="reviewNotes" rows="4" placeholder="本週報售、未報戶、月／年統計說明…"></textarea>
+        </div>
+        <div class="form-group full-width" style="margin-top:1rem;">
+          <label for="competitorNotes">區域個案分析</label>
+          <textarea id="competitorNotes" rows="4" placeholder="例如：名軒海樂地 16/1、合康植芯 4/0…"></textarea>
+        </div>
+        <div class="form-group full-width" style="margin-top:1rem;">
+          <label for="weekMemo">備註</label>
+          <textarea id="weekMemo" rows="2"></textarea>
+        </div>
       </section>
 
       <section class="card">
@@ -161,7 +184,7 @@
 
       <section class="card">
         <h2>成交／簽約／買進／未報</h2>
-        <p class="hint">可手填，或按「從銷售總表帶入」自動帶入。成交／簽約／買進金額＝實際房價＋車售；未報金額＝合約總價。</p>
+        <p class="hint">可手填，或按「從銷售總表帶入」自動帶入本週與累計。成交／簽約／買進金額＝實際房價＋車售；未報為目前尚未改成已報的戶數（不分本週／累計），金額＝合約總價。</p>
         <div class="form-actions" style="margin-bottom:0.75rem;">
           <button type="button" id="fillFromSalesBtn" class="btn btn-secondary">從銷售總表帶入</button>
           <a class="btn btn-outline" href="/sales.html" id="openSalesFromWeekly">開啟銷售總表</a>
@@ -206,22 +229,6 @@
       </section>
 
       <section class="card">
-        <h2>檢討與區域個案（手填）</h2>
-        <div class="form-group full-width">
-          <label for="reviewNotes">成交檢討</label>
-          <textarea id="reviewNotes" rows="4" placeholder="本週報售、未報戶、月／年統計說明…"></textarea>
-        </div>
-        <div class="form-group full-width" style="margin-top:1rem;">
-          <label for="competitorNotes">區域個案分析</label>
-          <textarea id="competitorNotes" rows="4" placeholder="例如：名軒海樂地 16/1、合康植芯 4/0…"></textarea>
-        </div>
-        <div class="form-group full-width" style="margin-top:1rem;">
-          <label for="weekMemo">備註</label>
-          <textarea id="weekMemo" rows="2"></textarea>
-        </div>
-      </section>
-
-      <section class="card">
         <h2>本週回訪／有望客（依選取）</h2>
         <div class="weekly-split">
           <div>
@@ -241,8 +248,9 @@
           <table class="data-table" id="visitorTable">
             <thead>
               <tr>
-                <th>日期</th><th>類型</th><th>姓名</th><th>電話</th><th>區域</th>
-                <th>媒體</th><th>職業</th><th>年齡</th><th>誠意度</th><th>銷售</th><th>洽談</th>
+                <th>日期</th><th>類型</th><th>姓名</th><th>區域</th>
+                <th>媒體</th><th>職業</th><th>年齡</th><th>介紹戶別</th>
+                <th>洽談內容</th><th>未購因素</th><th>誠意度</th><th>銷售</th>
               </tr>
             </thead>
             <tbody></tbody>

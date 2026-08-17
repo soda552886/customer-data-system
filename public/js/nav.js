@@ -1,6 +1,6 @@
 const APP_SWITCHER_ITEMS = [
-  { id: 'customers', label: '客資系統', href: '/', match: (path) => !path.startsWith('/weekly') && path !== '/sales.html' },
-  { id: 'weekly', label: '週報系統', href: '/weekly.html', match: (path) => path === '/weekly.html' || path === '/sales.html', perm: 'manage_weekly_reports' },
+  { id: 'customers', label: '客資系統', href: '/', match: (path) => !path.startsWith('/weekly') && path !== '/sales.html' && path !== '/budget.html' },
+  { id: 'weekly', label: '週報系統', href: '/weekly.html', match: (path) => path === '/weekly.html' || path === '/sales.html' || path === '/budget.html', perm: 'manage_weekly_reports' },
 ];
 
 const NAV_ITEMS = [
@@ -13,6 +13,7 @@ const NAV_ITEMS = [
   { href: '/users.html', label: '人員管理', perm: 'manage_users', app: 'customers' },
   { href: '/weekly.html', label: '週報工作台', perm: 'manage_weekly_reports', app: 'weekly' },
   { href: '/sales.html', label: '銷售總表', perm: 'manage_weekly_reports', app: 'weekly' },
+  { href: '/budget.html', label: '預算花費', perm: 'manage_weekly_reports', app: 'weekly' },
 ];
 
 window.currentUser = null;
@@ -23,7 +24,7 @@ function hasPerm(user, perm) {
 }
 
 function currentApp(path) {
-  return (path === '/weekly.html' || path === '/sales.html') ? 'weekly' : 'customers';
+  return (path === '/weekly.html' || path === '/sales.html' || path === '/budget.html') ? 'weekly' : 'customers';
 }
 
 function ensureAppSwitcher(activePath) {

@@ -23,25 +23,247 @@ RECORD_TYPES = {
 
 STATUS_ACTIVE = {'deal', 'unreported', 'signing', 'purchase'}
 
-# 案場請佣預設（可於單筆覆寫）
+# 案場請佣預設（可於單筆覆寫；各工地可在銷售總表「本案場請佣設定」改寫）
 SITE_COMMISSION_DEFAULTS = {
     'libao_duoyi': {
         'rate': 0.0485,
         'payableRatio': 0.97,
         'retentionRatio': 0.03,
+        'scheme': 'simple',
         'label': '鐸藝預設：底價×4.85%，本期可請97%，保留款3%',
     },
     '_default': {
         'rate': 0.0485,
         'payableRatio': 0.97,
         'retentionRatio': 0.03,
+        'scheme': 'simple',
         'label': '預設：底價×4.85%，本期可請97%，保留款3%',
     },
 }
 
+DEDUCTION_LABEL_DEFAULTS = [
+    {'key': 'surcharge', 'label': '附加費'},
+    {'key': 'applianceGift', 'label': '家電禮券'},
+    {'key': 'pickupVoucher', 'label': '提貨券'},
+    {'key': 'decoration', 'label': '裝潢'},
+    {'key': 'companyLoanInterest', 'label': '公司貸利息'},
+]
 
-def commission_defaults_for_site(site_id: str) -> dict:
-    return dict(SITE_COMMISSION_DEFAULTS.get(site_id) or SITE_COMMISSION_DEFAULTS['_default'])
+
+def default_sales_settings() -> dict:
+    return {
+        'rate': 0.0485,
+        'payableRatio': 0.97,
+        'retentionRatio': 0.03,
+        'scheme': 'simple',
+        'handoverRetention': 0.005,
+        'tiers': [
+            {'paidPct': 6, 'claimPct': 2},
+            {'paidPct': 8, 'claimPct': 3},
+        ],
+        'deductionLabels': [dict(x) for x in DEDUCTION_LABEL_DEFAULTS],
+        'label': '預設：底價×4.85%，本期可請97%，保留款3%',
+    }
+
+
+def _ratio_from_any(val, default=0.0) -> float:
+    """接受 0.0485 或 4.85；小於等於 1 視為比例。"""
+    if val in (None, ''):
+        return float(default or 0)
+    try:
+        v = float(val)
+    except (TypeError, ValueError):
+        return float(default or 0)
+    if v > 1:
+        return v / 100.0
+    return v
+
+
+def _pct_to_ratio(val, default_ratio=0.0) -> float:
+    """表單百分比 → 比例。0.5 代表 0.5%。"""
+    if val in (None, ''):
+        return float(default_ratio or 0)
+    try:
+        return float(val) / 100.0
+    except (TypeError, ValueError):
+        return float(default_ratio or 0)
+
+
+def _ratio_to_pct(ratio, fallback=0.0) -> float:
+    v = float(ratio or 0)
+    if v <= 0:
+        return float(fallback or 0)
+    return round(v * 100.0, 4) if v <= 1 else round(v, 4)
+
+
+def _normalize_tiers(raw) -> list[dict]:
+    out = []
+    if isinstance(raw, str):
+        rows = []
+        for line in raw.replace('；', '\n').splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            parts = [p.strip() for p in line.replace('，', ',').replace('/', ',').split(',') if p.strip()]
+            if len(parts) >= 2:
+                rows.append({'paidPct': parts[0], 'claimPct': parts[1]})
+        raw = rows
+    if not isinstance(raw, (list, tuple)):
+        return [{'paidPct': 6, 'claimPct': 2}, {'paidPct': 8, 'claimPct': 3}]
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        try:
+            paid = float(item.get('paidPct', item.get('paid')))
+            claim = float(item.get('claimPct', item.get('claim')))
+        except (TypeError, ValueError):
+            continue
+        out.append({'paidPct': paid, 'claimPct': claim})
+    out.sort(key=lambda x: x['paidPct'])
+    return out or [{'paidPct': 6, 'claimPct': 2}, {'paidPct': 8, 'claimPct': 3}]
+
+
+def _normalize_deduction_labels(raw) -> list[dict]:
+    by_key = {d['key']: d['label'] for d in DEDUCTION_LABEL_DEFAULTS}
+    if isinstance(raw, dict):
+        for key, label in raw.items():
+            if key in by_key and str(label or '').strip():
+                by_key[key] = str(label).strip()
+    elif isinstance(raw, (list, tuple)):
+        for item in raw:
+            if isinstance(item, dict):
+                key = str(item.get('key') or '').strip()
+                label = str(item.get('label') or '').strip()
+                if key in by_key and label:
+                    by_key[key] = label
+    return [{'key': k, 'label': by_key[k]} for k in (
+        'surcharge', 'applianceGift', 'pickupVoucher', 'decoration', 'companyLoanInterest',
+    )]
+
+
+def format_commission_label(settings: dict) -> str:
+    rate = _ratio_to_pct(settings.get('rate'), 4.85)
+    if (settings.get('scheme') or 'simple') == 'payment_tiers':
+        ho = _ratio_to_pct(settings.get('handoverRetention'), 0.5)
+        bits = [
+            f'繳{t["paidPct"]:g}%可請{t["claimPct"]:g}%'
+            for t in (settings.get('tiers') or [])
+        ]
+        extra = '；'.join(bits) if bits else '依繳款成數解鎖'
+        return f'佣金總額{rate:g}%、交屋保留{ho:g}%；{extra}（各期不再另扣保留款）'
+    pay = _ratio_to_pct(settings.get('payableRatio'), 97)
+    ret = _ratio_to_pct(settings.get('retentionRatio'), 3)
+    return f'底價×{rate:g}%，本期可請{pay:g}%，保留款{ret:g}%'
+
+
+def parse_sales_settings(raw) -> dict:
+    base = default_sales_settings()
+    data = raw
+    if isinstance(raw, str):
+        try:
+            data = json.loads(raw or '{}')
+        except (TypeError, json.JSONDecodeError):
+            data = {}
+    if not isinstance(data, dict):
+        data = {}
+    scheme = str(data.get('scheme') or base['scheme']).strip() or 'simple'
+    if scheme not in ('simple', 'payment_tiers'):
+        scheme = 'simple'
+    out = {
+        **base,
+        'scheme': scheme,
+        'rate': _ratio_from_any(data.get('rate'), base['rate']),
+        'payableRatio': _ratio_from_any(data.get('payableRatio'), base['payableRatio']),
+        'retentionRatio': _ratio_from_any(data.get('retentionRatio'), base['retentionRatio']),
+        'handoverRetention': _ratio_from_any(data.get('handoverRetention'), base['handoverRetention']),
+        'tiers': _normalize_tiers(data.get('tiers', base['tiers'])),
+        'deductionLabels': _normalize_deduction_labels(data.get('deductionLabels', base['deductionLabels'])),
+    }
+    # 過大的交屋保留（例如誤存 0.5＝50%）改視為百分比 0.5%
+    if out['handoverRetention'] > 0.05:
+        out['handoverRetention'] = out['handoverRetention'] / 100.0 if out['handoverRetention'] <= 5 else 0.005
+    out['label'] = str(data.get('label') or '').strip() or format_commission_label(out)
+    return out
+
+
+def normalize_sales_settings_from_api(body: dict) -> dict:
+    base = default_sales_settings()
+    data = body if isinstance(body, dict) else {}
+    scheme = str(data.get('scheme') or base['scheme']).strip() or 'simple'
+    if scheme not in ('simple', 'payment_tiers'):
+        scheme = 'simple'
+    out = {
+        **base,
+        'scheme': scheme,
+        'rate': _pct_to_ratio(data.get('ratePct'), base['rate']) if data.get('ratePct') not in (None, '') else _ratio_from_any(data.get('rate'), base['rate']),
+        'payableRatio': _pct_to_ratio(data.get('payablePct'), base['payableRatio']) if data.get('payablePct') not in (None, '') else _ratio_from_any(data.get('payableRatio'), base['payableRatio']),
+        'retentionRatio': _pct_to_ratio(data.get('retentionPct'), base['retentionRatio']) if data.get('retentionPct') not in (None, '') else _ratio_from_any(data.get('retentionRatio'), base['retentionRatio']),
+        'handoverRetention': _pct_to_ratio(data.get('handoverPct'), base['handoverRetention']) if data.get('handoverPct') not in (None, '') else _ratio_from_any(data.get('handoverRetention'), base['handoverRetention']),
+        'tiers': _normalize_tiers(data.get('tiers') or data.get('tiersText') or base['tiers']),
+        'deductionLabels': _normalize_deduction_labels(data.get('deductionLabels')),
+    }
+    out['label'] = format_commission_label(out)
+    return out
+
+
+def sales_settings_public(settings: dict) -> dict:
+    s = parse_sales_settings(settings)
+    return {
+        **s,
+        'ratePct': _ratio_to_pct(s['rate'], 4.85),
+        'payablePct': _ratio_to_pct(s['payableRatio'], 97),
+        'retentionPct': _ratio_to_pct(s['retentionRatio'], 3),
+        'handoverPct': _ratio_to_pct(s['handoverRetention'], 0.5),
+        'labels': commission_matrix_labels(s),
+    }
+
+
+def commission_matrix_labels(settings: dict) -> dict:
+    s = parse_sales_settings(settings)
+    rate = _ratio_to_pct(s['rate'], 4.85)
+    if s.get('scheme') == 'payment_tiers':
+        ho = _ratio_to_pct(s['handoverRetention'], 0.5)
+        return {
+            'claimable': f'{rate:g}%總佣',
+            'retention': f'交屋保留 {ho:g}%',
+            'payable': '已解鎖可請',
+        }
+    pay = _ratio_to_pct(s['payableRatio'], 97)
+    ret = _ratio_to_pct(s['retentionRatio'], 3)
+    return {
+        'claimable': f'{rate:g}%',
+        'retention': f'{ret:g}%保留',
+        'payable': f'{pay:g}%可請',
+    }
+
+
+def commission_defaults_for_site(site_id: str, conn: Optional[sqlite3.Connection] = None) -> dict:
+    raw = None
+    if conn and site_id and site_id != '_default':
+        try:
+            row = conn.execute('SELECT sales_settings FROM sites WHERE id = ?', (site_id,)).fetchone()
+        except sqlite3.OperationalError:
+            row = None
+        if row:
+            try:
+                raw = row['sales_settings']
+            except (KeyError, IndexError, TypeError):
+                raw = None
+    if raw:
+        return sales_settings_public(raw)
+    hard = SITE_COMMISSION_DEFAULTS.get(site_id) or SITE_COMMISSION_DEFAULTS['_default']
+    return sales_settings_public(hard)
+
+
+def _unlocked_claim_pct(paid_pct: float, tiers: list[dict]) -> float:
+    unlocked = 0.0
+    for item in sorted(tiers or [], key=lambda x: float(x.get('paidPct') or 0)):
+        try:
+            if paid_pct + 1e-9 >= float(item.get('paidPct') or 0):
+                unlocked = float(item.get('claimPct') or 0)
+        except (TypeError, ValueError):
+            continue
+    return unlocked
 
 
 def _round4(val) -> float:
@@ -50,10 +272,7 @@ def _round4(val) -> float:
 
 def _as_ratio(val: float) -> float:
     """接受 0.0485 或 4.85（百分比）寫法。"""
-    v = float(val or 0)
-    if v > 1:
-        return v / 100.0
-    return v
+    return _ratio_from_any(val, 0)
 
 
 def compute_commission(
@@ -62,9 +281,10 @@ def compute_commission(
     base_total: float,
     actual_total: float,
     body: dict,
+    settings: Optional[dict] = None,
 ) -> dict:
-    """依底價／成交價自動算請佣；填期別或日期後已請＝97%可請金額。"""
-    defaults = commission_defaults_for_site(site_id)
+    """依底價／成交價自動算請佣。一般案場用本期可請／保留款；繳款成數方案依已繳%解鎖。"""
+    defaults = parse_sales_settings(settings or commission_defaults_for_site(site_id))
     mode = str(body.get('commissionBaseMode') or 'base').strip().lower()
     if mode not in ('base', 'deal'):
         mode = 'base'
@@ -72,6 +292,12 @@ def compute_commission(
     payable_ratio = _as_ratio(_num(body.get('commissionPayableRatio'), defaults['payableRatio']))
     retention_ratio = _as_ratio(_num(body.get('commissionRetentionRatio'), defaults['retentionRatio']))
     deduction = max(_num(body.get('commissionDeduction')), 0)
+    scheme = defaults.get('scheme') or 'simple'
+
+    extra = body.get('extra') if isinstance(body.get('extra'), dict) else {}
+    if extra.get('customerPaidPct') in (None, '') and body.get('customerPaidPct') not in (None, ''):
+        extra = dict(extra)
+        extra['customerPaidPct'] = _num(body.get('customerPaidPct'))
 
     suggested = base_total if mode == 'base' else actual_total
     # 有明確覆寫時用覆寫值（對應 Excel 紅字改拉成交價／特殊金額）
@@ -80,30 +306,39 @@ def compute_commission(
     else:
         sales_amount = suggested
 
-    claimable = max(sales_amount * rate - deduction, 0)
-    payable = claimable * payable_ratio
-    retention = claimable * retention_ratio
-
     period = str(body.get('commissionPeriod') or '').strip()
     claim_date = _parse_date(body.get('commissionClaimDate'))
     is_claimed = bool(period or claim_date)
-    claimed = payable if is_claimed else 0.0
-    unclaimed = max(claimable - claimed, 0)
 
-    # 請佣總表匯入：若檔案已有可請／已請／未請實數，優先採用（期別仍決定已請狀態）
-    extra = body.get('extra') if isinstance(body.get('extra'), dict) else {}
-    if extra.get('importClaimable') not in (None, ''):
-        claimable = max(_num(extra.get('importClaimable')), 0)
+    if scheme == 'payment_tiers':
+        paid_pct = _num(body.get('customerPaidPct'), _num(extra.get('customerPaidPct')))
+        unlocked_pct = _unlocked_claim_pct(paid_pct, defaults.get('tiers') or [])
+        handover_ratio = float(defaults.get('handoverRetention') or 0.005)
+        claimable = max(sales_amount * rate - deduction, 0)
+        payable = max(sales_amount * (unlocked_pct / 100.0), 0)
+        retention = max(sales_amount * handover_ratio, 0)
+        claimed = payable if is_claimed else 0.0
+        unclaimed = max(claimable - claimed - retention, 0)
+        payable_ratio = (unlocked_pct / 100.0 / rate) if rate else 0
+        retention_ratio = (handover_ratio / rate) if rate else 0
+    else:
+        claimable = max(sales_amount * rate - deduction, 0)
+        payable = claimable * payable_ratio
+        retention = claimable * retention_ratio
         claimed = payable if is_claimed else 0.0
         unclaimed = max(claimable - claimed, 0)
+
+    # 請佣總表匯入：若檔案已有可請／已請／未請實數，優先採用（期別仍決定已請狀態）
+    if extra.get('importClaimable') not in (None, ''):
+        claimable = max(_num(extra.get('importClaimable')), 0)
     if extra.get('importPayable') not in (None, ''):
         payable = max(_num(extra.get('importPayable')), 0)
-    else:
+    elif scheme != 'payment_tiers':
         payable = claimable * payable_ratio
     if extra.get('importRetention') not in (None, ''):
         retention = max(_num(extra.get('importRetention')), 0)
-    else:
-        # 保留款一律＝可請佣（4.85%）× 3%，避免匯入的 97% 四捨五入讓 3% 對不上
+    elif scheme != 'payment_tiers':
+        # 保留款一律＝可請佣 × 保留比例，避免匯入的 97% 四捨五入讓 3% 對不上
         retention = claimable * retention_ratio
     if extra.get('importClaimed') not in (None, ''):
         claimed = max(_num(extra.get('importClaimed')), 0)
@@ -112,6 +347,8 @@ def compute_commission(
         claimed = payable if is_claimed else 0.0
     if extra.get('importUnclaimed') not in (None, ''):
         unclaimed = max(_num(extra.get('importUnclaimed')), 0)
+    elif scheme == 'payment_tiers':
+        unclaimed = max(claimable - claimed - retention, 0)
     else:
         unclaimed = max(claimable - claimed, 0)
 
@@ -265,25 +502,36 @@ def _comm_bucket():
     }
 
 
-def _round_bucket(b: dict, *, derive_from_claimable: bool = True) -> dict:
+def _round_bucket(b: dict, *, derive_from_claimable: bool = True, settings: Optional[dict] = None) -> dict:
+    cfg = parse_sales_settings(settings) if settings else default_sales_settings()
+    payable_ratio = float(cfg.get('payableRatio') or 0.97)
+    retention_ratio = float(cfg.get('retentionRatio') or 0.03)
     claimable = round(b['claimable'], 4)
+    if (cfg.get('scheme') == 'payment_tiers') or not derive_from_claimable:
+        return {
+            'units': round(b['units'], 2),
+            'parking': round(b['parking'], 2),
+            'claimable': claimable,
+            'retention': round(b['retention'], 4),
+            'payable': round(b['payable'], 4),
+        }
     if derive_from_claimable and claimable > 0:
         return {
             'units': round(b['units'], 2),
             'parking': round(b['parking'], 2),
             'claimable': claimable,
-            'retention': round(claimable * 0.03, 4),
-            'payable': round(claimable * 0.97, 4),
+            'retention': round(claimable * retention_ratio, 4),
+            'payable': round(claimable * payable_ratio, 4),
         }
     payable = round(b['payable'], 4)
-    if derive_from_claimable and payable > 0 and claimable <= 0:
-        claimable = round(payable / 0.97, 4)
+    if derive_from_claimable and payable > 0 and claimable <= 0 and payable_ratio:
+        claimable = round(payable / payable_ratio, 4)
     return {
         'units': round(b['units'], 2),
         'parking': round(b['parking'], 2),
         'claimable': claimable,
-        'retention': round(claimable * 0.03, 4) if claimable else round(b['retention'], 4),
-        'payable': round(claimable * 0.97, 4) if claimable else payable,
+        'retention': round(claimable * retention_ratio, 4) if claimable else round(b['retention'], 4),
+        'payable': round(claimable * payable_ratio, 4) if claimable else payable,
     }
 
 
@@ -347,6 +595,10 @@ def sync_commission_batches(conn: sqlite3.Connection, site_id: str):
 
 
 def _period_deal_totals(conn: sqlite3.Connection, site_id: str, period_name: str) -> dict:
+    settings = commission_defaults_for_site(site_id, conn=conn)
+    payable_ratio = float(settings.get('payableRatio') or 0.97)
+    retention_ratio = float(settings.get('retentionRatio') or 0.03)
+    scheme = settings.get('scheme') or 'simple'
     rows = conn.execute(
         '''
         SELECT units, parking_count, commission_payable, commission_claimable,
@@ -370,11 +622,11 @@ def _period_deal_totals(conn: sqlite3.Connection, site_id: str, period_name: str
     for r in rows:
         p = _num(r['commission_payable'])
         c = _num(r['commission_claimable'])
-        if p <= 0 and c > 0:
-            p = c * 0.97
+        if p <= 0 and c > 0 and scheme != 'payment_tiers':
+            p = c * payable_ratio
         ret = _num(r['commission_retention'])
-        if ret <= 0 and c > 0:
-            ret = c * 0.03
+        if ret <= 0 and c > 0 and scheme != 'payment_tiers':
+            ret = c * retention_ratio
         payable += p
         claimable += c
         retention += ret
@@ -466,6 +718,7 @@ def list_commission_batches(conn: sqlite3.Connection, site_id: str) -> list[dict
             'status': status,
             'bookedTotal': _round4(booked_total),
             'claimable': totals['claimable'],
+            'retention': totals['retention'],
             'units': totals['units'],
             'parking': totals['parking'],
             'dealCount': totals['dealCount'],
@@ -797,6 +1050,12 @@ def row_to_deal(row) -> dict:
         extra = json.loads(row['extra'] or '{}')
     except (TypeError, json.JSONDecodeError):
         extra = {}
+    house_base = row['house_base_price'] or 0
+    parking_base = row['parking_base_price'] or 0
+    base_total = row['base_price'] or 0
+    house_base_display = house_base
+    if house_base == 0 and parking_base == 0 and base_total:
+        house_base_display = base_total
     return {
         'id': row['id'],
         'siteId': row['site_id'],
@@ -825,8 +1084,8 @@ def row_to_deal(row) -> dict:
         'pickupVoucher': row['pickup_voucher'] or 0,
         'decoration': row['decoration'] or 0,
         'companyLoanInterest': row['company_loan_interest'] or 0,
-        'houseBasePrice': row['house_base_price'] or 0,
-        'parkingBasePrice': row['parking_base_price'] or 0,
+        'houseBasePrice': house_base_display,
+        'parkingBasePrice': parking_base,
         'baseTotal': row['base_price'] or 0,
         'excessPrice': _calc_excess_price(
             row['total_price'],
@@ -920,7 +1179,7 @@ def get_sales_deal(conn: sqlite3.Connection, deal_id: int, site_id: Optional[str
     return row_to_deal(row) if row else None
 
 
-def normalize_deal_payload(body: dict, site_id: str = '') -> dict:
+def normalize_deal_payload(body: dict, site_id: str = '', settings: Optional[dict] = None) -> dict:
     record_type = str(body.get('recordType') or 'deal').strip()
     if record_type not in RECORD_TYPES:
         record_type = 'deal'
@@ -985,11 +1244,18 @@ def normalize_deal_payload(body: dict, site_id: str = '') -> dict:
         parking_count = _num(body.get('parkingCount'))
 
     site = site_id or str(body.get('siteId') or '').strip()
+    extra = body.get('extra') if isinstance(body.get('extra'), dict) else {}
+    extra = dict(extra)
+    if body.get('customerPaidPct') not in (None, ''):
+        extra['customerPaidPct'] = _num(body.get('customerPaidPct'))
+    body_for_comm = dict(body)
+    body_for_comm['extra'] = extra
     comm = compute_commission(
         site_id=site,
         base_total=base_total,
         actual_total=actual_total,
-        body=body,
+        body=body_for_comm,
+        settings=settings,
     )
 
     return {
@@ -1048,15 +1314,14 @@ def normalize_deal_payload(body: dict, site_id: str = '') -> dict:
         'next_month_parking': _num(body.get('nextMonthParking')),
         'customer_id': int(body['customerId']) if body.get('customerId') not in (None, '') else None,
         'memo': str(body.get('memo') or '').strip(),
-        'extra': json.dumps(
-            body.get('extra') if isinstance(body.get('extra'), dict) else {},
-            ensure_ascii=False,
-        ),
+        'extra': json.dumps(extra, ensure_ascii=False),
     }
 
 
 def create_sales_deal(conn: sqlite3.Connection, site_id: str, body: dict, user_id=None) -> int:
-    data = normalize_deal_payload(body, site_id=site_id)
+    data = normalize_deal_payload(
+        body, site_id=site_id, settings=commission_defaults_for_site(site_id, conn=conn),
+    )
     cur = conn.execute(
         '''
         INSERT INTO sales_deals (
@@ -1126,7 +1391,14 @@ def update_sales_deal(conn: sqlite3.Connection, deal_id: int, site_id: str, body
     ).fetchone()
     if not existing:
         return False
-    data = normalize_deal_payload(body, site_id=site_id)
+    existing_deal = get_sales_deal(conn, deal_id, site_id) or {}
+    old_extra = existing_deal.get('extra') if isinstance(existing_deal.get('extra'), dict) else {}
+    new_extra = body.get('extra') if isinstance(body.get('extra'), dict) else {}
+    payload = dict(body)
+    payload['extra'] = {**old_extra, **new_extra}
+    data = normalize_deal_payload(
+        payload, site_id=site_id, settings=commission_defaults_for_site(site_id, conn=conn),
+    )
     conn.execute(
         '''
         UPDATE sales_deals SET
@@ -1208,12 +1480,40 @@ def _in_range(date_s: Optional[str], start, end) -> bool:
     return start <= d <= end
 
 
+def _on_or_before(date_s: Optional[str], end, *, include_blank=True) -> bool:
+    parsed = _parse_date(date_s)
+    if not parsed:
+        return include_blank
+    try:
+        d = datetime.strptime(parsed, '%Y-%m-%d').date()
+    except ValueError:
+        return include_blank
+    return d <= end
+
+
 def _block():
     return {'units': 0.0, 'parking': 0.0, 'amount': 0.0}
 
 
+def _product_group(product_type: str) -> str:
+    text = str(product_type or '')
+    if '店面' in text:
+        return 'storefront'
+    if '店鋪' in text or '店舖' in text:
+        return 'shop'
+    if '事務' in text or '辦公' in text:
+        return 'office'
+    if text.strip():
+        return 'residential'
+    return ''
+
+
 def aggregate_for_weekly(conn: sqlite3.Connection, site_id: str, start, end) -> dict:
     """彙總銷售總表 → 週報成交／簽約／買進／未報／請佣／去化建議值。"""
+    settings = commission_defaults_for_site(site_id, conn=conn)
+    payable_ratio = float(settings.get('payableRatio') or 0.97)
+    retention_ratio = float(settings.get('retentionRatio') or 0.03)
+    scheme = settings.get('scheme') or 'simple'
     rows = conn.execute(
         'SELECT * FROM sales_deals WHERE site_id = ?',
         (site_id,),
@@ -1222,6 +1522,9 @@ def aggregate_for_weekly(conn: sqlite3.Connection, site_id: str, start, end) -> 
     deals = _block()
     signings = _block()
     purchases = _block()
+    deals_cum = _block()
+    signings_cum = _block()
+    purchases_cum = _block()
     unreported = _block()
     refunds = _block()
 
@@ -1251,6 +1554,8 @@ def aggregate_for_weekly(conn: sqlite3.Connection, site_id: str, start, end) -> 
     sold_base = 0.0
     residential_sold = 0.0
     office_sold = 0.0
+    shop_sold = 0.0
+    storefront_sold = 0.0
 
     week_deal_rows = []
 
@@ -1291,10 +1596,14 @@ def aggregate_for_weekly(conn: sqlite3.Connection, site_id: str, start, end) -> 
                 sold_parking += parking
                 sold_amount += actual_amount
                 sold_base += base
-                pt = str(row['product_type'] or '')
-                if '事務' in pt or '辦公' in pt:
+                pt_group = _product_group(row['product_type'])
+                if pt_group == 'office':
                     office_sold += units
-                elif pt:
+                elif pt_group == 'shop':
+                    shop_sold += units
+                elif pt_group == 'storefront':
+                    storefront_sold += units
+                elif pt_group == 'residential':
                     residential_sold += units
 
             claimable = _num(row['commission_claimable'])
@@ -1309,10 +1618,10 @@ def aggregate_for_weekly(conn: sqlite3.Connection, site_id: str, start, end) -> 
                 if 'commission_unclaimed' in row.keys()
                 else max(claimable - claimed, 0)
             )
-            if payable <= 0 and claimable > 0:
-                payable = claimable * 0.97
-            if claimable > 0:
-                retention = claimable * 0.03
+            if payable <= 0 and claimable > 0 and scheme != 'payment_tiers':
+                payable = claimable * payable_ratio
+            if claimable > 0 and scheme != 'payment_tiers':
+                retention = claimable * retention_ratio
             payable_amount += payable
             retention_amount += retention
             claimable_amount += claimable
@@ -1349,6 +1658,13 @@ def aggregate_for_weekly(conn: sqlite3.Connection, site_id: str, start, end) -> 
         elif rt == 'refund' and _in_range(report_d or sign_d, start, end):
             add(refunds, units, parking, amount)
 
+        if rt == 'deal' and _on_or_before(report_d or sign_d or deposit_d, end):
+            add(deals_cum, units, parking, amount)
+        elif rt == 'signing' and _on_or_before(owner_sign_d or sign_d or report_d, end):
+            add(signings_cum, units, parking, amount)
+        elif rt == 'purchase' and _on_or_before(report_d or sign_d or deposit_d, end):
+            add(purchases_cum, units, parking, amount)
+
     def round_block(b):
         return {
             'units': round(b['units'], 2),
@@ -1377,11 +1693,13 @@ def aggregate_for_weekly(conn: sqlite3.Connection, site_id: str, start, end) -> 
         parking_b = _num(b.get('parking'))
         payable_b = _num(b.get('amountPayable'))
         claimable_b = _num(b.get('claimable'))
-        if claimable_b <= 0 and payable_b > 0:
-            claimable_b = payable_b / 0.97
-        retention_b = claimable_b * 0.03
-        if payable_b <= 0:
-            payable_b = claimable_b * 0.97
+        if claimable_b <= 0 and payable_b > 0 and scheme != 'payment_tiers' and payable_ratio:
+            claimable_b = payable_b / payable_ratio
+        retention_b = _num(b.get('retention'))
+        if scheme != 'payment_tiers':
+            retention_b = claimable_b * retention_ratio
+            if payable_b <= 0:
+                payable_b = claimable_b * payable_ratio
         next_month_units += units_b
         next_month_parking += parking_b
         next_month_amount += payable_b
@@ -1390,10 +1708,11 @@ def aggregate_for_weekly(conn: sqlite3.Connection, site_id: str, start, end) -> 
         booked_amount = booked_from_batches
 
     commission_matrix = {
-        'claimable': _round_bucket(matrix_all),
-        'claimed': _round_bucket(matrix_claimed),
-        'unclaimed': _round_bucket(matrix_unclaimed),
-        'forecast': _round_bucket(matrix_forecast),
+        'claimable': _round_bucket(matrix_all, settings=settings),
+        'claimed': _round_bucket(matrix_claimed, settings=settings),
+        'unclaimed': _round_bucket(matrix_unclaimed, settings=settings),
+        'forecast': _round_bucket(matrix_forecast, settings=settings),
+        'labels': commission_matrix_labels(settings),
         'totals': {
             'bookedAmount': round(booked_amount, 4),
             'sellableAmount': round(sellable_amount, 4),
@@ -1402,8 +1721,11 @@ def aggregate_for_weekly(conn: sqlite3.Connection, site_id: str, start, end) -> 
 
     return {
         'deals': round_block(deals),
+        'dealsCum': round_block(deals_cum),
         'signings': round_block(signings),
+        'signingsCum': round_block(signings_cum),
         'purchases': round_block(purchases),
+        'purchasesCum': round_block(purchases_cum),
         'unreported': round_block(unreported),
         'refunds': round_block(refunds),
         'commission': {
@@ -1434,6 +1756,8 @@ def aggregate_for_weekly(conn: sqlite3.Connection, site_id: str, start, end) -> 
             'soldBasePrice': round(max(sold_base, 0), 2),
             'residentialSold': round(max(residential_sold, 0), 2),
             'officeSold': round(max(office_sold, 0), 2),
+            'shopSold': round(max(shop_sold, 0), 2),
+            'storefrontSold': round(max(storefront_sold, 0), 2),
         },
         'weekDealCount': len(week_deal_rows),
         'weekDeals': week_deal_rows[:50],

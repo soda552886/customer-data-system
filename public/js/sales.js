@@ -6,9 +6,22 @@ let commissionDefaults = {
   rate: 0.0485,
   payableRatio: 0.97,
   retentionRatio: 0.03,
+  scheme: 'simple',
+  handoverRetention: 0.005,
+  tiers: [{ paidPct: 6, claimPct: 2 }, { paidPct: 8, claimPct: 3 }],
+  deductionLabels: [],
+  labels: { claimable: '4.85%', retention: '3%保留', payable: '97%可請' },
   label: '預設：底價×4.85%，本期可請97%，保留款3%',
 };
 let salesAmountManual = false;
+
+const DEDUCTION_FIELDS = [
+  { key: 'surcharge', inputId: 'fSurcharge', settingId: 'ssLabelSurcharge', fallback: '附加費' },
+  { key: 'applianceGift', inputId: 'fApplianceGift', settingId: 'ssLabelAppliance', fallback: '家電禮券' },
+  { key: 'pickupVoucher', inputId: 'fPickupVoucher', settingId: 'ssLabelPickup', fallback: '提貨券' },
+  { key: 'decoration', inputId: 'fDecoration', settingId: 'ssLabelDecoration', fallback: '裝潢' },
+  { key: 'companyLoanInterest', inputId: 'fCompanyLoanInterest', settingId: 'ssLabelCompany', fallback: '公司貸利息' },
+];
 
 function showToast(msg, type = 'success') {
   const toast = document.getElementById('toast');
@@ -37,6 +50,96 @@ function pctFromRatio(ratio, fallback) {
   return roundMoney(v > 1 ? v : v * 100);
 }
 
+function formatPctLabel(ratio, fallback) {
+  const n = pctFromRatio(ratio, fallback);
+  if (!Number.isFinite(n)) return String(fallback);
+  return String(Math.round(n * 10000) / 10000);
+}
+
+function commissionCardLabels(defaults) {
+  const d = defaults || commissionDefaults;
+  if (d.labels && d.labels.claimable) return d.labels;
+  if ((d.scheme || 'simple') === 'payment_tiers') {
+    return {
+      claimable: `${formatPctLabel(d.rate, 4.85)}%總佣`,
+      retention: `交屋保留 ${formatPctLabel(d.handoverRetention, 0.5)}%`,
+      payable: '已解鎖可請',
+    };
+  }
+  return {
+    claimable: `${formatPctLabel(d.rate, 4.85)}%`,
+    retention: `${formatPctLabel(d.retentionRatio, 3)}%保留`,
+    payable: `${formatPctLabel(d.payableRatio, 97)}%可請`,
+  };
+}
+
+function syncCommissionSchemeUI(defaults) {
+  const scheme = (defaults || commissionDefaults).scheme || 'simple';
+  document.body.classList.toggle('commission-scheme-simple', scheme !== 'payment_tiers');
+  document.body.classList.toggle('commission-scheme-tiers', scheme === 'payment_tiers');
+}
+
+function fillSiteSettingsForm(defaults) {
+  const d = defaults || commissionDefaults;
+  const schemeEl = document.getElementById('ssScheme');
+  if (!schemeEl) return;
+  schemeEl.value = d.scheme === 'payment_tiers' ? 'payment_tiers' : 'simple';
+  document.getElementById('ssRatePct').value = pctFromRatio(d.rate, 4.85);
+  document.getElementById('ssPayablePct').value = pctFromRatio(d.payableRatio, 97);
+  document.getElementById('ssRetentionPct').value = pctFromRatio(d.retentionRatio, 3);
+  document.getElementById('ssHandoverPct').value = pctFromRatio(d.handoverRetention, 0.5);
+  const tiers = d.tiers || [];
+  document.getElementById('ssTiersText').value = tiers
+    .map((t) => `${t.paidPct},${t.claimPct}`)
+    .join('\n');
+  (d.deductionLabels || []).forEach((item) => {
+    const field = DEDUCTION_FIELDS.find((f) => f.key === item.key);
+    if (field) document.getElementById(field.settingId).value = item.label || field.fallback;
+  });
+  const hint = document.getElementById('ssSettingsHint');
+  if (hint) hint.textContent = d.label || '';
+}
+
+function collectSiteSettings() {
+  const labels = DEDUCTION_FIELDS.map((f) => ({
+    key: f.key,
+    label: (document.getElementById(f.settingId)?.value || f.fallback).trim() || f.fallback,
+  }));
+  return {
+    scheme: document.getElementById('ssScheme').value || 'simple',
+    ratePct: numberValue('ssRatePct'),
+    payablePct: numberValue('ssPayablePct'),
+    retentionPct: numberValue('ssRetentionPct'),
+    handoverPct: numberValue('ssHandoverPct'),
+    tiersText: document.getElementById('ssTiersText').value,
+    deductionLabels: labels,
+  };
+}
+
+function applyDeductionLabels(labels) {
+  const map = {};
+  (labels || []).forEach((item) => {
+    if (item && item.key) map[item.key] = item.label;
+  });
+  DEDUCTION_FIELDS.forEach((f) => {
+    const el = document.querySelector(`label[for="${f.inputId}"]`);
+    if (el) el.textContent = map[f.key] || f.fallback;
+  });
+  const names = DEDUCTION_FIELDS.map((f) => map[f.key] || f.fallback);
+  const excess = document.querySelector('label[for="fExcessPrice"]');
+  if (excess) excess.textContent = `超價＝合約總價−底總−${names.join('−')}`;
+}
+
+function applyCommissionResultLabels(defaults) {
+  const labels = commissionCardLabels(defaults);
+  const claimable = document.getElementById('lCommClaimable');
+  const payable = document.getElementById('lCommPayable');
+  const retention = document.getElementById('lCommRetention');
+  if (claimable) claimable.textContent = `可請佣金額 ${labels.claimable}(萬)`;
+  if (payable) payable.textContent = `${labels.payable}(萬)`;
+  if (retention) retention.textContent = `${labels.retention}(萬)`;
+}
+
 function applyCommissionDefaultsToForm(defaults) {
   if (!defaults) return;
   commissionDefaults = { ...commissionDefaults, ...defaults };
@@ -44,7 +147,11 @@ function applyCommissionDefaultsToForm(defaults) {
   document.getElementById('fCommPayablePct').value = pctFromRatio(defaults.payableRatio, 97);
   document.getElementById('fCommRetentionPct').value = pctFromRatio(defaults.retentionRatio, 3);
   const hint = document.getElementById('commDefaultsHint');
-  if (hint && defaults.label) hint.textContent = defaults.label;
+  if (hint) hint.textContent = defaults.label || '';
+  syncCommissionSchemeUI(defaults);
+  fillSiteSettingsForm(defaults);
+  applyDeductionLabels(defaults.deductionLabels);
+  applyCommissionResultLabels(defaults);
 }
 
 function syncCommSalesAmountStyle() {
@@ -96,15 +203,30 @@ function calculateCommission() {
   const rate = ratePct > 1 ? ratePct / 100 : ratePct;
   const payableRatio = payablePct > 1 ? payablePct / 100 : payablePct;
   const retentionRatio = retentionPct > 1 ? retentionPct / 100 : retentionPct;
-
-  const claimable = Math.max(salesAmount * rate - deduction, 0);
-  const payable = claimable * payableRatio;
-  const retention = claimable * retentionRatio;
   const period = document.getElementById('fCommPeriod').value.trim();
   const claimDate = document.getElementById('fCommClaimDate').value;
   const isClaimed = Boolean(period || claimDate);
+  const scheme = commissionDefaults.scheme || 'simple';
+
+  let claimable = Math.max(salesAmount * rate - deduction, 0);
+  let payable = claimable * payableRatio;
+  let retention = claimable * retentionRatio;
+  if (scheme === 'payment_tiers') {
+    const paidPct = numberValue('fCustomerPaidPct');
+    const tiers = (commissionDefaults.tiers || []).slice()
+      .sort((a, b) => Number(a.paidPct) - Number(b.paidPct));
+    let unlockedPct = 0;
+    tiers.forEach((t) => {
+      if (paidPct + 1e-9 >= Number(t.paidPct)) unlockedPct = Number(t.claimPct) || 0;
+    });
+    const handoverRatio = Number(commissionDefaults.handoverRetention) || 0.005;
+    payable = salesAmount * (unlockedPct / 100);
+    retention = salesAmount * handoverRatio;
+  }
   const claimed = isClaimed ? payable : 0;
-  const unclaimed = Math.max(claimable - claimed, 0);
+  const unclaimed = scheme === 'payment_tiers'
+    ? Math.max(claimable - claimed - retention, 0)
+    : Math.max(claimable - claimed, 0);
   const status = isClaimed ? '已請' : '未請';
 
   document.getElementById('fCommClaimable').value = roundMoney(claimable);
@@ -235,6 +357,10 @@ function collectForm() {
     nextMonthClaimable: 0,
     nextMonthUnits: 0,
     nextMonthParking: 0,
+    customerPaidPct: numberValue('fCustomerPaidPct'),
+    extra: {
+      customerPaidPct: numberValue('fCustomerPaidPct'),
+    },
     memo: document.getElementById('fMemo').value.trim(),
   };
 }
@@ -248,6 +374,13 @@ function fillForm(rec) {
   document.getElementById('fUnitNo').value = rec?.unitNo || '';
   document.getElementById('fCustomerName').value = rec?.customerName || '';
   document.getElementById('fProductType').value = rec?.productType || '';
+  if (rec?.productType) {
+    const sel = document.getElementById('fProductType');
+    if (![...sel.options].some((o) => o.value === rec.productType)) {
+      sel.appendChild(new Option(rec.productType, rec.productType));
+      sel.value = rec.productType;
+    }
+  }
   document.getElementById('fAreaPing').value = rec?.areaPing || 0;
   document.getElementById('fUnits').value = rec?.units ?? 1;
   document.getElementById('fParkingNo1').value = rec?.parkingNo1 || '';
@@ -260,9 +393,8 @@ function fillForm(rec) {
   document.getElementById('fPickupVoucher').value = rec?.pickupVoucher ?? 0;
   document.getElementById('fDecoration').value = rec?.decoration ?? 0;
   document.getElementById('fCompanyLoanInterest').value = rec?.companyLoanInterest ?? 0;
-  document.getElementById('fHouseBasePrice').value =
-    rec?.houseBasePrice || rec?.baseTotal || rec?.basePrice || 0;
-  document.getElementById('fParkingBasePrice').value = rec?.parkingBasePrice || 0;
+  document.getElementById('fHouseBasePrice').value = rec?.houseBasePrice ?? 0;
+  document.getElementById('fParkingBasePrice').value = rec?.parkingBasePrice ?? 0;
   document.getElementById('fDepositDate').value = toDateInput(
     rec?.depositDate || rec?.ownerSaleReportDate || rec?.reportDate,
   );
@@ -290,6 +422,7 @@ function fillForm(rec) {
     document.getElementById('fCommRetentionPct').value = pctFromRatio(rec.commissionRetentionRatio, 3);
   }
   document.getElementById('fCommDeduction').value = rec?.commissionDeduction || 0;
+  document.getElementById('fCustomerPaidPct').value = rec?.extra?.customerPaidPct ?? 0;
   document.getElementById('fCommPeriod').value = rec?.commissionPeriod || '';
   document.getElementById('fCommClaimDate').value = toDateInput(rec?.commissionClaimDate);
   document.getElementById('fCommBooked').value = rec?.commissionBooked || 0;
@@ -359,13 +492,14 @@ function renderCommissionMatrix(summary) {
   ];
   el.innerHTML = cards.map((c) => {
     const b = m[c.key] || {};
+    const labels = m.labels || commissionCardLabels(commissionDefaults);
     return `<div class="commission-matrix-card" data-tone="${c.key}">
       <h3>${escapeHtml(c.title)}</h3>
       <div class="upc">${fmtNum(b.units)}戶／${fmtNum(b.parking)}車</div>
       <dl>
-        <dt>4.85%</dt><dd>${fmtNum(b.claimable)} 萬</dd>
-        <dt>3%保留</dt><dd>${fmtNum(b.retention)} 萬</dd>
-        <dt>97%可請</dt><dd>${fmtNum(b.payable)} 萬</dd>
+        <dt>${escapeHtml(labels.claimable)}</dt><dd>${fmtNum(b.claimable)} 萬</dd>
+        <dt>${escapeHtml(labels.retention)}</dt><dd>${fmtNum(b.retention)} 萬</dd>
+        <dt>${escapeHtml(labels.payable)}</dt><dd>${fmtNum(b.payable)} 萬</dd>
       </dl>
     </div>`;
   }).join('');
@@ -679,7 +813,7 @@ async function importSales(file) {
     return;
   }
   if (!file) return;
-  if (!confirm(`確定將「${file.name}」匯入目前案場？重複資料會自動略過。`)) return;
+  if (!confirm(`確定將「${file.name}」匯入目前案場？已存在的訂單會更新房底／車底／附加費等欄位。`)) return;
 
   const btn = document.getElementById('importSalesBtn');
   const originalText = btn.textContent;
@@ -702,11 +836,13 @@ async function importSales(file) {
       ? `；失敗 ${json.failed} 筆：${(json.errors || []).slice(0, 3).map((e) => `${e.row} ${e.message}`).join('、')}`
       : '';
     const skippedDetail = formatSkippedImportRows(json.skippedRows);
-    showToast(`新增 ${json.imported} 筆，略過重複 ${json.skipped} 筆${sheetText}${errorText}`,
-      json.failed ? 'error' : 'success');
+    showToast(
+      `新增 ${json.imported || 0} 筆，更新 ${json.updated || 0} 筆，略過檔案內重複 ${json.skipped || 0} 筆${sheetText}${errorText}`,
+      json.failed ? 'error' : 'success',
+    );
     if (skippedDetail) {
       console.info('匯入略過明細：\n' + skippedDetail);
-      alert(`以下 ${json.skipped} 筆被略過（多為訂單編號或戶別＋客戶已存在）：\n\n${skippedDetail}${json.skipped > 5 ? '\n…其餘請看瀏覽器主控台' : ''}`);
+      alert(`以下 ${json.skipped} 筆因檔案內重複被略過：\n\n${skippedDetail}${json.skipped > 5 ? '\n…其餘請看瀏覽器主控台' : ''}`);
     }
     await loadSales();
   } catch {
@@ -853,6 +989,31 @@ async function deleteAllSales() {
   }
 }
 
+async function saveSiteSalesSettings() {
+  const siteId = document.getElementById('salesSite').value;
+  if (!siteId) {
+    showToast('請先選擇案場', 'error');
+    return;
+  }
+  try {
+    const res = await fetch(`/api/sites/${encodeURIComponent(siteId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ salesSettings: collectSiteSettings() }),
+    });
+    const json = await res.json();
+    if (!res.ok) {
+      showToast(json.error || '儲存失敗', 'error');
+      return;
+    }
+    await loadCommissionDefaults(siteId);
+    showToast('已儲存本案場請佣設定');
+    loadSales();
+  } catch {
+    showToast('儲存失敗', 'error');
+  }
+}
+
 async function init() {
   for (let i = 0; i < 50 && !window.navReady; i += 1) {
     await new Promise((r) => setTimeout(r, 20));
@@ -920,8 +1081,13 @@ async function init() {
   });
   [
     'fCommRatePct', 'fCommPayablePct', 'fCommRetentionPct', 'fCommDeduction',
-    'fCommPeriod', 'fCommClaimDate',
-  ].forEach((id) => document.getElementById(id).addEventListener('input', calculateCommission));
+    'fCommPeriod', 'fCommClaimDate', 'fCustomerPaidPct',
+  ].forEach((id) => document.getElementById(id)?.addEventListener('input', calculateCommission));
+  document.getElementById('ssScheme')?.addEventListener('change', () => {
+    document.body.classList.toggle('commission-scheme-simple', document.getElementById('ssScheme').value !== 'payment_tiers');
+    document.body.classList.toggle('commission-scheme-tiers', document.getElementById('ssScheme').value === 'payment_tiers');
+  });
+  document.getElementById('saveSalesSettingsBtn')?.addEventListener('click', saveSiteSalesSettings);
   const currentMonthSel = document.getElementById('fCurrentMonthClaimable');
   if (currentMonthSel) {
     currentMonthSel.addEventListener('change', () => {

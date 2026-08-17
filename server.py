@@ -4,12 +4,14 @@ import json
 import os
 import re
 import sqlite3
+import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import quote
 
 from flask import Flask, jsonify, request, send_from_directory, Response, session, redirect
 from openpyxl import load_workbook
+from werkzeug.utils import secure_filename
 
 from auth import (
     PROTECTED_PAGES, ROLES, get_allowed_site_ids, get_current_user,
@@ -24,16 +26,17 @@ from weekly_reports import (
     build_auto_stats, build_weekly_excel, commission_summary, default_week_number,
     empty_manual_payload, enrich_dims_with_phones, init_weekly_tables, inventory_summary,
     list_weekly_reports, load_weekly_report, merge_manual, monday_of,
-    normalize_phone_calls_detail, phone_total_from_manual, roc_year, upsert_weekly_report,
-    week_bounds, safe_week_number,
+    normalize_phone_calls_detail, normalize_week1_start, phone_total_from_manual, roc_year,
+    upsert_weekly_report, week_bounds, safe_week_number,
 )
 from sales_ledger import (
     RECORD_TYPES as SALES_RECORD_TYPES, aggregate_for_weekly, build_commission_overview_excel,
     build_sales_excel, commission_defaults_for_site, create_sales_deal, delete_all_sales_deals,
     delete_commission_batch, delete_sales_deal, get_sales_deal, init_sales_tables,
-    list_commission_batches, list_sales_deals, parse_deal_date, update_sales_deal,
-    upsert_commission_batch,
+    list_commission_batches, list_sales_deals, normalize_sales_settings_from_api,
+    parse_deal_date, update_sales_deal, upsert_commission_batch,
 )
+from budget import init_budget_tables, load_budget, save_budget
 from field_options import (
     apply_site_field_options, apply_site_hidden_fields, build_site_field_config,
     build_site_field_visibility, build_site_report_export_config,
@@ -45,6 +48,9 @@ from field_options import (
 )
 
 BASE_DIR = Path(__file__).parent
+BUDGET_UPLOAD_DIR = BASE_DIR / 'uploads' / 'budget'
+BUDGET_PHOTO_EXTS = {'.jpg', '.jpeg', '.png', '.gif', '.webp'}
+BUDGET_PHOTO_MAX_BYTES = 8 * 1024 * 1024
 
 _report_cols_path = BASE_DIR / 'config' / 'report_columns.json'
 with open(_report_cols_path, encoding='utf-8') as _rc:
@@ -101,7 +107,10 @@ def init_db():
     init_audit_table(conn)
     init_weekly_tables(conn)
     init_sales_tables(conn)
+    init_budget_tables(conn)
     migrate_retired_roles(conn)
+    _ensure_sites_week1_start(conn)
+    _ensure_sites_sales_settings(conn)
     conn.commit()
 
     count = conn.execute('SELECT COUNT(*) FROM sites').fetchone()[0]
@@ -116,10 +125,28 @@ def init_db():
     conn.close()
 
 
+def _ensure_sites_week1_start(conn: sqlite3.Connection):
+    names = [row[1] for row in conn.execute('PRAGMA table_info(sites)').fetchall()]
+    if 'week1_start' not in names:
+        conn.execute('ALTER TABLE sites ADD COLUMN week1_start TEXT')
+
+
+def _ensure_sites_sales_settings(conn: sqlite3.Connection):
+    names = [row[1] for row in conn.execute('PRAGMA table_info(sites)').fetchall()]
+    if 'sales_settings' not in names:
+        conn.execute('ALTER TABLE sites ADD COLUMN sales_settings TEXT')
+
+
+def _site_week1_start(site):
+    if not site:
+        return None
+    return site.get('week1Start') or site.get('week1_start') or None
+
+
 def load_sites():
     conn = get_db()
     rows = conn.execute('''
-        SELECT s.id, s.name, s.group_type, s.created_at,
+        SELECT s.id, s.name, s.group_type, s.created_at, s.week1_start,
                (SELECT COUNT(*) FROM customers c WHERE c.site_id = s.id) AS customer_count
         FROM sites s ORDER BY s.name
     ''').fetchall()
@@ -127,6 +154,7 @@ def load_sites():
     return [{
         'id': r['id'], 'name': r['name'], 'group': r['group_type'],
         'created_at': r['created_at'], 'customer_count': r['customer_count'],
+        'week1Start': r['week1_start'] or '',
     } for r in rows]
 
 
@@ -151,12 +179,15 @@ def get_site_by_id(site_id):
         return None
     conn = get_db()
     row = conn.execute(
-        'SELECT id, name, group_type FROM sites WHERE id = ?', (site_id,)
+        'SELECT id, name, group_type, week1_start FROM sites WHERE id = ?', (site_id,)
     ).fetchone()
     conn.close()
     if not row:
         return None
-    return {'id': row['id'], 'name': row['name'], 'group': row['group_type']}
+    return {
+        'id': row['id'], 'name': row['name'], 'group': row['group_type'],
+        'week1Start': row['week1_start'] or '',
+    }
 
 
 def get_active_sales_staff(conn, site_id: str) -> list:
@@ -696,6 +727,7 @@ def enforce_auth():
             '/audit-log.html': 'view_audit_logs',
             '/weekly.html': 'manage_weekly_reports',
             '/sales.html': 'manage_weekly_reports',
+            '/budget.html': 'manage_weekly_reports',
         }
         need = page_perms.get(path)
         if need and not user_has_permission(user, need):
@@ -705,6 +737,12 @@ def enforce_auth():
     if path.startswith('/api/'):
         if is_public_api(path, request.method):
             return None
+        conn = get_db()
+        user = get_current_user(conn)
+        conn.close()
+        if not user:
+            return jsonify({'error': '請先登入', 'code': 'AUTH_REQUIRED'}), 401
+    if path.startswith('/uploads/'):
         conn = get_db()
         user = get_current_user(conn)
         conn.close()
@@ -946,6 +984,11 @@ def sales_page():
     return send_from_directory('public', 'sales.html')
 
 
+@app.route('/budget.html')
+def budget_page():
+    return send_from_directory('public', 'budget.html')
+
+
 @app.route('/api/import/template')
 def import_template():
     output = io.StringIO()
@@ -1108,8 +1151,70 @@ def create_site():
         conn.close()
         return jsonify({'error': '此案場名稱已存在'}), 409
     conn.close()
-    site = {'id': site_id, 'name': name, 'group': group}
+    site = {'id': site_id, 'name': name, 'group': group, 'week1Start': ''}
     return jsonify({'success': True, 'site': site}), 201
+
+
+@app.route('/api/sites/<site_id>', methods=['PATCH'])
+def patch_site(site_id):
+    conn, user, err = auth_guard()
+    if err:
+        return err
+    if not (
+        user_has_permission(user, 'manage_weekly_reports')
+        or user_has_permission(user, 'manage_sites')
+    ):
+        conn.close()
+        return jsonify({'error': '權限不足', 'code': 'FORBIDDEN'}), 403
+    denied = ensure_site_access(user, site_id)
+    if denied:
+        conn.close()
+        return denied
+    row = conn.execute(
+        'SELECT id, name, group_type, week1_start FROM sites WHERE id = ?', (site_id,),
+    ).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({'error': '找不到此案場'}), 404
+    body = request.get_json() or {}
+    detail = {}
+    week1 = row['week1_start']
+    if 'week1Start' in body or 'week1_start' in body:
+        week1 = normalize_week1_start(body.get('week1Start', body.get('week1_start')))
+        conn.execute('UPDATE sites SET week1_start = ? WHERE id = ?', (week1, site_id))
+        detail['week1Start'] = week1
+    sales_settings = None
+    if 'salesSettings' in body or 'sales_settings' in body:
+        sales_settings = normalize_sales_settings_from_api(
+            body.get('salesSettings') or body.get('sales_settings') or {},
+        )
+        conn.execute(
+            'UPDATE sites SET sales_settings = ? WHERE id = ?',
+            (json.dumps(sales_settings, ensure_ascii=False), site_id),
+        )
+        detail['salesSettings'] = sales_settings.get('label')
+    if not detail:
+        conn.close()
+        return jsonify({'error': '沒有可更新的欄位'}), 400
+    log_operation(
+        conn, user, 'site_update',
+        f'更新案場設定：{row["name"]}',
+        entity_type='site', entity_id=site_id,
+        site_id=site_id, site_name=row['name'],
+        detail=detail,
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({
+        'success': True,
+        'site': {
+            'id': row['id'],
+            'name': row['name'],
+            'group': row['group_type'],
+            'week1Start': week1 or '',
+            'salesSettings': sales_settings,
+        },
+    })
 
 
 @app.route('/api/sites/<site_id>', methods=['DELETE'])
@@ -1171,13 +1276,189 @@ def weekly_meta():
     today = datetime.now().date()
     start = monday_of(today)
     end = start + timedelta(days=6)
+    site_id = (request.args.get('siteId') or '').strip()
+    origin = None
+    if site_id:
+        denied = ensure_site_access(user, site_id)
+        if denied:
+            conn.close()
+            return denied
+        site = get_site_by_id(site_id)
+        origin = _site_week1_start(site)
     conn.close()
     return jsonify({
         'defaultWeekStart': start.isoformat(),
         'defaultWeekEnd': end.isoformat(),
-        'defaultWeekNumber': default_week_number(start),
+        'defaultWeekNumber': default_week_number(start, origin),
+        'week1Start': origin or '',
         'rocLabel': f'{roc_year(start)}/{start.month}/{start.day}-{roc_year(end)}/{end.month}/{end.day}',
     })
+
+
+@app.route('/api/budget')
+def api_get_budget():
+    conn, user, err = auth_guard('manage_weekly_reports')
+    if err:
+        return err
+    site_id = (request.args.get('siteId') or '').strip()
+    week_start = (request.args.get('weekStart') or '').strip()
+    if not site_id:
+        conn.close()
+        return jsonify({'error': '請提供案場'}), 400
+    denied = ensure_site_access(user, site_id)
+    if denied:
+        conn.close()
+        return denied
+    site = get_site_by_id(site_id)
+    if not site:
+        conn.close()
+        return jsonify({'error': '找不到此案場'}), 404
+    if not week_start:
+        week_start = monday_of(datetime.now().date()).isoformat()
+    try:
+        payload = load_budget(
+            conn, site_id, week_start,
+            site_name=site['name'],
+            origin=_site_week1_start(site),
+        )
+    except ValueError as exc:
+        conn.close()
+        return jsonify({'error': str(exc)}), 400
+    conn.close()
+    return jsonify(payload)
+
+
+@app.route('/api/budget', methods=['PUT'])
+def api_save_budget():
+    conn, user, err = auth_guard('manage_weekly_reports')
+    if err:
+        return err
+    body = request.get_json() or {}
+    site_id = (body.get('siteId') or '').strip()
+    week_start = (body.get('weekStart') or '').strip()
+    if not site_id or not week_start:
+        conn.close()
+        return jsonify({'error': '請提供案場與週起始日'}), 400
+    denied = ensure_site_access(user, site_id)
+    if denied:
+        conn.close()
+        return denied
+    site = get_site_by_id(site_id)
+    if not site:
+        conn.close()
+        return jsonify({'error': '找不到此案場'}), 404
+    try:
+        save_budget(conn, site_id, body, site_name=site['name'])
+        payload = load_budget(
+            conn, site_id, week_start,
+            site_name=site['name'],
+            origin=_site_week1_start(site),
+        )
+    except ValueError as exc:
+        conn.close()
+        return jsonify({'error': str(exc)}), 400
+    log_operation(
+        conn, user, 'budget_save',
+        f'儲存預算花費：{site["name"]} {payload["weekStart"]}',
+        entity_type='budget', entity_id=site_id,
+        site_id=site_id, site_name=site['name'],
+        detail={'weekStart': payload['weekStart']},
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True, **payload})
+
+
+@app.route('/uploads/budget/<path:filename>')
+def serve_budget_upload(filename):
+    conn, user, err = auth_guard('manage_weekly_reports')
+    if err:
+        return err
+    conn.close()
+    safe = Path(filename)
+    if safe.is_absolute() or '..' in safe.parts:
+        return jsonify({'error': '無效檔名'}), 400
+    return send_from_directory(BUDGET_UPLOAD_DIR, str(safe), as_attachment=False)
+
+
+@app.route('/api/budget/photo', methods=['POST'])
+def api_upload_budget_photo():
+    conn, user, err = auth_guard('manage_weekly_reports')
+    if err:
+        return err
+    site_id = (request.form.get('siteId') or '').strip()
+    if not site_id:
+        conn.close()
+        return jsonify({'error': '請提供案場'}), 400
+    denied = ensure_site_access(user, site_id)
+    if denied:
+        conn.close()
+        return denied
+    site = get_site_by_id(site_id)
+    if not site:
+        conn.close()
+        return jsonify({'error': '找不到此案場'}), 404
+    file = request.files.get('file')
+    if not file or not file.filename:
+        conn.close()
+        return jsonify({'error': '請選擇照片'}), 400
+    ext = Path(file.filename).suffix.lower()
+    if ext not in BUDGET_PHOTO_EXTS:
+        conn.close()
+        return jsonify({'error': '僅支援 jpg／png／gif／webp'}), 400
+    raw = file.read()
+    if len(raw) > BUDGET_PHOTO_MAX_BYTES:
+        conn.close()
+        return jsonify({'error': '單張照片請小於 8MB'}), 400
+    BUDGET_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    photo_id = uuid.uuid4().hex
+    stored = f'{photo_id}{ext}'
+    (BUDGET_UPLOAD_DIR / stored).write_bytes(raw)
+    kind = (request.form.get('kind') or 'media').strip()
+    if kind not in ('media', 'map'):
+        kind = 'media'
+    caption = (request.form.get('caption') or '').strip()
+    photo = {
+        'id': photo_id,
+        'filename': secure_filename(file.filename) or stored,
+        'path': stored,
+        'url': f'/uploads/budget/{stored}',
+        'caption': caption,
+        'kind': kind,
+    }
+    log_operation(
+        conn, user, 'budget_photo_upload',
+        f'上傳預算媒體照片：{site["name"]}',
+        entity_type='budget', entity_id=site_id,
+        site_id=site_id, site_name=site['name'],
+        detail={'file': stored, 'kind': kind},
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True, 'photo': photo})
+
+
+@app.route('/api/budget/photo', methods=['DELETE'])
+def api_delete_budget_photo():
+    conn, user, err = auth_guard('manage_weekly_reports')
+    if err:
+        return err
+    body = request.get_json() or {}
+    site_id = (body.get('siteId') or '').strip()
+    rel = (body.get('path') or '').strip()
+    if not site_id or not rel:
+        conn.close()
+        return jsonify({'error': '請提供案場與檔名'}), 400
+    denied = ensure_site_access(user, site_id)
+    if denied:
+        conn.close()
+        return denied
+    safe = Path(rel).name
+    target = BUDGET_UPLOAD_DIR / safe
+    if target.exists() and target.is_file() and target.parent.resolve() == BUDGET_UPLOAD_DIR.resolve():
+        target.unlink()
+    conn.close()
+    return jsonify({'success': True})
 
 
 @app.route('/api/weekly/summary')
@@ -1210,8 +1491,9 @@ def weekly_summary():
 
     week_start_s = start.isoformat()
     week_end_s = end.isoformat()
+    origin = _site_week1_start(site)
     saved = load_weekly_report(conn, site_id, week_start_s)
-    base = empty_manual_payload(start, end)
+    base = empty_manual_payload(start, end, origin=origin)
     manual = merge_manual(base, (saved or {}).get('data') if saved else None)
 
     phone_sum = phone_total_from_manual(manual)
@@ -1225,6 +1507,7 @@ def weekly_summary():
     auto = enrich_dims_with_phones(auto, manual.get('phoneCallsDetail'))
     suggested = aggregate_for_weekly(conn, site_id, start, end)
     history = list_weekly_reports(conn, site_id)
+    commission_defaults = commission_defaults_for_site(site_id, conn=conn)
     conn.close()
 
     return jsonify({
@@ -1232,7 +1515,8 @@ def weekly_summary():
         'siteName': site['name'],
         'weekStart': week_start_s,
         'weekEnd': week_end_s,
-        'weekNumber': manual.get('weekNumber') or default_week_number(start),
+        'weekNumber': manual.get('weekNumber') or default_week_number(start, origin),
+        'week1Start': origin or '',
         'rocLabel': f'{roc_year(start)}/{start.month}/{start.day}-{roc_year(end)}/{end.month}/{end.day}',
         'saved': bool(saved),
         'updatedAt': (saved or {}).get('updatedAt'),
@@ -1240,6 +1524,7 @@ def weekly_summary():
         'auto': auto,
         'suggested': suggested,
         'activeStaff': active_staff,
+        'commissionDefaults': commission_defaults,
         'derived': {
             'inventory': inventory_summary(manual),
             'commission': commission_summary(manual),
@@ -1279,10 +1564,11 @@ def save_weekly_report():
         return jsonify({'error': str(e)}), 400
 
     week_number = manual.get('weekNumber')
+    origin = _site_week1_start(site)
     try:
-        week_number = int(week_number) if week_number not in (None, '') else default_week_number(start)
+        week_number = int(week_number) if week_number not in (None, '') else default_week_number(start, origin)
     except (TypeError, ValueError):
-        week_number = default_week_number(start)
+        week_number = default_week_number(start, origin)
     manual['weekNumber'] = week_number
     manual['phoneCallsDetail'] = normalize_phone_calls_detail(manual.get('phoneCallsDetail'))
     # 若有來電明細，每日來電通數改由明細加總，避免兩套數字不一致。
@@ -1349,7 +1635,8 @@ def export_weekly_csv():
         return jsonify({'error': str(e)}), 400
 
     saved = load_weekly_report(conn, site_id, start.isoformat())
-    base = empty_manual_payload(start, end)
+    origin = _site_week1_start(site)
+    base = empty_manual_payload(start, end, origin=origin)
     manual = merge_manual(base, (saved or {}).get('data') if saved else None)
     phone_sum = phone_total_from_manual(manual)
     auto = build_auto_stats(
@@ -1363,7 +1650,7 @@ def export_weekly_csv():
 
     output = io.StringIO()
     writer = csv.writer(output)
-    week_no = manual.get('weekNumber') or default_week_number(start)
+    week_no = manual.get('weekNumber') or default_week_number(start, origin)
     writer.writerow([f'{site["name"]} 第{week_no}週週報'])
     writer.writerow(['週次區間', f'{start.isoformat()} ~ {end.isoformat()}'])
     writer.writerow([])
@@ -1388,9 +1675,14 @@ def export_weekly_csv():
     for day in manual.get('days') or []:
         writer.writerow([day.get('date'), day.get('weekday'), day.get('weather'), day.get('phoneCalls')])
     writer.writerow([])
-    writer.writerow(['【成交／簽約／買進】'])
+    writer.writerow(['【成交／簽約／買進／未報】'])
     writer.writerow(['項目', '戶', '車', '金額(萬)'])
-    for label, key in [('本週成交', 'deals'), ('本週簽約', 'signings'), ('本週買進', 'purchases'), ('未報', 'unreported')]:
+    for label, key in [
+        ('本週成交', 'deals'), ('累計成交', 'dealsCum'),
+        ('本週簽約', 'signings'), ('累計簽約', 'signingsCum'),
+        ('本週買進', 'purchases'), ('累計買進', 'purchasesCum'),
+        ('未報', 'unreported'),
+    ]:
         block = manual.get(key) or {}
         writer.writerow([label, block.get('units', 0), block.get('parking', 0), block.get('amount', 0)])
     writer.writerow([])
@@ -1437,12 +1729,13 @@ def export_weekly_csv():
         ])
     writer.writerow([])
     writer.writerow(['【本週客況明細（納入週報）】'])
-    writer.writerow(['日期', '類型', '姓名', '電話', '區域', '媒體', '職業', '年齡', '來源', '誠意度', '銷售', '洽談摘要'])
+    writer.writerow(['日期', '類型', '姓名', '區域', '媒體', '職業', '年齡', '介紹戶別', '洽談內容', '未購因素', '誠意度', '銷售'])
     for v in auto['visitors']:
         writer.writerow([
-            v['date'], v['visitType'], v['customerName'], v['phone'], v['region'],
-            v['media'], v.get('occupation'), v.get('age'), v['source'], v['sincerity'],
-            v['salesperson1'], v['discussion'],
+            v['date'], v['visitType'], v['customerName'], v['region'],
+            v['media'], v.get('occupation'), v.get('age'), v.get('introUnit'),
+            v['discussion'], v.get('notPurchasedReason'), v['sincerity'],
+            v['salesperson1'],
         ])
 
     utf8_name = quote(f'{site["name"]}_第{week_no}週週報_{start.isoformat()}.csv')
@@ -1487,7 +1780,8 @@ def export_weekly_xlsx():
         return jsonify({'error': str(e)}), 400
 
     saved = load_weekly_report(conn, site_id, start.isoformat())
-    base = empty_manual_payload(start, end)
+    origin = _site_week1_start(site)
+    base = empty_manual_payload(start, end, origin=origin)
     manual = merge_manual(base, (saved or {}).get('data') if saved else None)
     phone_sum = phone_total_from_manual(manual)
     auto = build_auto_stats(
@@ -1501,7 +1795,7 @@ def export_weekly_xlsx():
     auto['commissionMatrix'] = sales_summary.get('commissionMatrix')
     conn.close()
 
-    week_no = safe_week_number(manual.get('weekNumber'), start)
+    week_no = safe_week_number(manual.get('weekNumber'), start, origin)
     try:
         content = build_weekly_excel(site['name'], start, end, week_no, manual, auto)
     except Exception as exc:
@@ -1525,9 +1819,9 @@ def sales_meta():
     conn, user, err = auth_guard('manage_weekly_reports')
     if err:
         return err
-    conn.close()
     site_id = (request.args.get('siteId') or '').strip()
-    defaults = commission_defaults_for_site(site_id) if site_id else commission_defaults_for_site('_default')
+    defaults = commission_defaults_for_site(site_id or '_default', conn=conn)
+    conn.close()
     return jsonify({
         'recordTypes': [{'id': k, 'label': v} for k, v in SALES_RECORD_TYPES.items()],
         'commissionDefaults': defaults,
@@ -1617,7 +1911,7 @@ SALES_IMPORT_ALIASES = {
     'houseBasePrice': ['房底', '底價房地', '房底價'],
     'parkingBasePrice': ['車底', '底價車位', '車底價'],
     'basePrice': ['底價總價', '底總萬', '底總', '總底價', '房車總底', '房車總底價'],
-    'surcharge': ['附加費', '其它費用', '其他費用', '請款需扣除'],
+    'surcharge': ['附加費', '其它費用', '其他費用', '請款需扣除', '冷氣', '交屋折價款', '交屋折價', '建材設備'],
     'applianceGift': ['家電禮券', '家電禮'],
     'pickupVoucher': ['提貨券'],
     'decoration': ['裝潢', '裝潢費用'],
@@ -1792,6 +2086,8 @@ def _sales_import_payload(row, normalized_headers, sheet_name=''):
         payload['houseSalePrice'] = actual
     if not payload.get('houseBasePrice') and get('basePrice'):
         payload['basePrice'] = get('basePrice')
+        if not payload.get('parkingBasePrice'):
+            payload['houseBasePrice'] = get('basePrice')
     if get('excessPrice') not in (None, ''):
         payload['excessPrice'] = _sales_import_num(get('excessPrice'))
 
@@ -2173,6 +2469,7 @@ def api_import_sales():
         return jsonify({'error': '請選擇要匯入的 Excel 或 CSV 檔案'}), 400
 
     imported = 0
+    updated = 0
     skipped = 0
     errors = []
     skipped_rows = []
@@ -2242,22 +2539,31 @@ def api_import_sales():
                             duplicate = existing_unit_customer[pair_key]
                             skip_reason = '相同戶別＋客戶已存在於系統'
                     if duplicate:
-                        skipped += 1
-                        entry = {
-                            'row': row_ref,
-                            'orderNo': order_no,
-                            'unitNo': unit_no,
-                            'customerName': customer_name,
-                            'reason': skip_reason,
-                        }
                         if skip_reason.startswith('檔案內'):
-                            entry['matchRow'] = duplicate if isinstance(duplicate, str) else None
-                        else:
-                            entry['existingId'] = duplicate['id']
-                            entry['existingOrderNo'] = duplicate['order_no']
-                            entry['existingUnitNo'] = duplicate['unit_no']
-                            entry['existingCustomerName'] = duplicate['customer_name']
-                        skipped_rows.append(entry)
+                            skipped += 1
+                            skipped_rows.append({
+                                'row': row_ref,
+                                'orderNo': order_no,
+                                'unitNo': unit_no,
+                                'customerName': customer_name,
+                                'reason': skip_reason,
+                                'matchRow': duplicate if isinstance(duplicate, str) else None,
+                            })
+                            continue
+                        deal_id = duplicate['id']
+                        existing_deal = get_sales_deal(conn, deal_id, site_id) or {}
+                        old_extra = existing_deal.get('extra') if isinstance(existing_deal.get('extra'), dict) else {}
+                        new_extra = payload.get('extra') if isinstance(payload.get('extra'), dict) else {}
+                        payload['extra'] = {**old_extra, **new_extra}
+                        update_sales_deal(
+                            conn, deal_id, site_id, payload,
+                            user_id=user.get('id') if user else None,
+                        )
+                        updated += 1
+                        if order_no:
+                            seen_orders[order_no] = row_ref
+                        elif unit_key or name_key:
+                            seen_unit_customer[(unit_key, name_key)] = row_ref
                         continue
                     new_id = create_sales_deal(
                         conn, site_id, payload,
@@ -2289,11 +2595,11 @@ def api_import_sales():
             }), 400
         log_operation(
             conn, user, 'sales_import',
-            f'匯入銷售總表：新增 {imported} 筆、略過重複 {skipped} 筆、失敗 {len(errors)} 筆',
+            f'匯入銷售總表：新增 {imported} 筆、更新 {updated} 筆、略過檔案內重複 {skipped} 筆、失敗 {len(errors)} 筆',
             entity_type='sales_deal', site_id=site_id,
             site_name=(get_site_by_id(site_id) or {}).get('name'),
             detail={
-                'filename': file.filename, 'imported': imported,
+                'filename': file.filename, 'imported': imported, 'updated': updated,
                 'skipped': skipped, 'failed': len(errors),
                 'sheets': recognized_sheets,
             },
@@ -2302,6 +2608,7 @@ def api_import_sales():
         return jsonify({
             'success': True,
             'imported': imported,
+            'updated': updated,
             'skipped': skipped,
             'skippedRows': skipped_rows[:50],
             'failed': len(errors),

@@ -35,7 +35,7 @@ ROLE_PERMISSIONS = {
 PROTECTED_PAGES = frozenset({
     '/search.html', '/sites.html', '/users.html',
     '/site-fields.html', '/field-options.html', '/audit-log.html',
-    '/weekly.html', '/sales.html',
+    '/weekly.html', '/sales.html', '/budget.html',
 })
 
 PUBLIC_API_PREFIXES = (
