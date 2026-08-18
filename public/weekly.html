@@ -213,7 +213,7 @@
 
       <section class="card">
         <h2>銷售成交比（客資自動）</h2>
-        <p class="hint">接客、成交與退戶僅統計新客，不含回訪。成交比＝累計接待÷累計成交（例如 18.2:1 代表接 18.2 組成交 1 組）。已離職人員請至「欄位選項 → 該案場 → 銷售人員（在職狀態）」取消勾選；取消後累計併入「前期銷售」。共同經營（勾選或填銷售2）組數／成交各算 0.5。</p>
+        <p class="hint">接客、成交與退戶僅統計新客，不含回訪。成交比＝累計接待÷累計成交。累計成交／成交金額／退戶可手填；按「從銷售總表帶入」會把合計成交戶數與金額寫進合計列。共同經營組數／成交各算 0.5。已離職人員取消勾選後累計併入「前期銷售」。</p>
         <div class="table-wrap">
           <table class="data-table" id="conversionTable">
             <thead>
@@ -244,8 +244,22 @@
 
       <section class="card">
         <h2>本週客況明細（已納入週報）</h2>
+        <h3 class="section-title">新客</h3>
         <div class="table-wrap">
-          <table class="data-table" id="visitorTable">
+          <table class="data-table" id="visitorTableNew">
+            <thead>
+              <tr>
+                <th>日期</th><th>類型</th><th>姓名</th><th>區域</th>
+                <th>媒體</th><th>職業</th><th>年齡</th><th>介紹戶別</th>
+                <th>洽談內容</th><th>未購因素</th><th>誠意度</th><th>銷售</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <h3 class="section-title" style="margin-top:1.25rem;">回訪</h3>
+        <div class="table-wrap">
+          <table class="data-table" id="visitorTableReturn">
             <thead>
               <tr>
                 <th>日期</th><th>類型</th><th>姓名</th><th>區域</th>

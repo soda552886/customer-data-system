@@ -232,6 +232,7 @@ def empty_manual_payload(start, end, week_number=None, origin=None):
         'purchases': {'units': 0, 'parking': 0, 'amount': 0},
         'purchasesCum': {'units': 0, 'parking': 0, 'amount': 0},
         'unreported': {'units': 0, 'parking': 0, 'amount': 0},
+        'unsignedCum': {'units': 0, 'parking': 0, 'amount': 0},
         'commission': {
             'sellableUnits': 0,
             'sellableParking': 0,

@@ -256,7 +256,7 @@ function syncCurrentMonthClaimable() {
   const parkingEl = document.getElementById('fNextMonthParking');
   const amtEl = document.getElementById('fNextMonthAmt');
   if (!unitsEl || !parkingEl || !amtEl) return;
-  const parking = ['fParkingNo1', 'fParkingNo2']
+  const parking = ['fParkingNo1', 'fParkingNo2', 'fParkingNo3']
     .filter((id) => document.getElementById(id).value.trim()).length;
   unitsEl.value = numberValue('fUnits') || 1;
   parkingEl.value = parking;
@@ -328,6 +328,9 @@ function collectForm() {
     units: Number(document.getElementById('fUnits').value) || 1,
     parkingNo1: document.getElementById('fParkingNo1').value.trim(),
     parkingNo2: document.getElementById('fParkingNo2').value.trim(),
+    parkingNo3: document.getElementById('fParkingNo3').value.trim(),
+    builderCompany: document.getElementById('fBuilderCompany').value.trim(),
+    community: document.getElementById('fCommunity').value.trim(),
     houseSalePrice: numberValue('fHouseSalePrice'),
     parkingSalePrice: numberValue('fParkingSalePrice'),
     surcharge: numberValue('fSurcharge'),
@@ -360,6 +363,9 @@ function collectForm() {
     customerPaidPct: numberValue('fCustomerPaidPct'),
     extra: {
       customerPaidPct: numberValue('fCustomerPaidPct'),
+      parkingNo3: document.getElementById('fParkingNo3').value.trim(),
+      builderCompany: document.getElementById('fBuilderCompany').value.trim(),
+      community: document.getElementById('fCommunity').value.trim(),
     },
     memo: document.getElementById('fMemo').value.trim(),
   };
@@ -372,6 +378,8 @@ function fillForm(rec) {
   document.getElementById('fRecordType').value = rec?.recordType || 'deal';
   document.getElementById('fOrderNo').value = rec?.orderNo || '';
   document.getElementById('fUnitNo').value = rec?.unitNo || '';
+  document.getElementById('fBuilderCompany').value = rec?.builderCompany || rec?.extra?.builderCompany || '';
+  document.getElementById('fCommunity').value = rec?.community || rec?.extra?.community || '';
   document.getElementById('fCustomerName').value = rec?.customerName || '';
   document.getElementById('fProductType').value = rec?.productType || '';
   if (rec?.productType) {
@@ -385,6 +393,7 @@ function fillForm(rec) {
   document.getElementById('fUnits').value = rec?.units ?? 1;
   document.getElementById('fParkingNo1').value = rec?.parkingNo1 || '';
   document.getElementById('fParkingNo2').value = rec?.parkingNo2 || '';
+  document.getElementById('fParkingNo3').value = rec?.parkingNo3 || rec?.extra?.parkingNo3 || '';
   document.getElementById('fHouseSalePrice').value =
     rec?.houseSalePrice || rec?.contractTotal || rec?.totalPrice || 0;
   document.getElementById('fParkingSalePrice').value = rec?.parkingSalePrice || 0;
@@ -719,7 +728,7 @@ function renderTable(rows) {
   const tfoot = document.getElementById('salesTableTotal');
   document.getElementById('salesTotalBadge').textContent = String(rows.length);
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="19" class="empty-row">尚無銷售明細，請按「新增明細」</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="22" class="empty-row">尚無銷售明細，請按「新增明細」</td></tr>';
     tfoot.innerHTML = '';
     return;
   }
@@ -729,14 +738,17 @@ function renderTable(rows) {
     return `<tr>
       <td>${escapeHtml(r.recordTypeLabel || r.recordType)}</td>
       <td>${escapeHtml(r.orderNo)}</td>
+      <td>${escapeHtml(r.builderCompany || '')}</td>
+      <td>${escapeHtml(r.community || '')}</td>
       <td>${escapeHtml(r.unitNo)}</td>
       <td>${escapeHtml(r.customerName)}</td>
-      <td>${escapeHtml([r.parkingNo1, r.parkingNo2].filter(Boolean).join('／'))}</td>
+      <td>${escapeHtml([r.parkingNo1, r.parkingNo2, r.parkingNo3].filter(Boolean).join('／'))}</td>
       <td>${r.contractTotal ?? r.totalPrice ?? 0}</td>
       <td>${r.actualTotalPrice ?? 0}</td>
       <td>${r.houseBasePrice ?? 0}</td>
       <td>${r.parkingBasePrice ?? 0}</td>
       <td>${r.baseTotal ?? r.basePrice ?? 0}</td>
+      <td>${r.surcharge ?? 0}</td>
       <td${salesAmtClass}>${r.commissionSalesAmount ?? 0}</td>
       <td>${r.commissionClaimable ?? 0}</td>
       <td>${r.commissionClaimed ?? 0}</td>
@@ -756,12 +768,13 @@ function renderTable(rows) {
     0,
   ));
   tfoot.innerHTML = `<tr class="sales-total-row">
-    <th colspan="5">合計（${rows.length} 筆）</th>
+    <th colspan="7">合計（${rows.length} 筆）</th>
     <th>${sum('contractTotal', 'totalPrice')}</th>
     <th>${sum('actualTotalPrice')}</th>
     <th>${sum('houseBasePrice')}</th>
     <th>${sum('parkingBasePrice')}</th>
     <th>${sum('baseTotal', 'basePrice')}</th>
+    <th>${sum('surcharge')}</th>
     <th>${sum('commissionSalesAmount')}</th>
     <th>${sum('commissionClaimable')}</th>
     <th>${sum('commissionClaimed')}</th>
@@ -1103,7 +1116,7 @@ async function init() {
       }
     });
   }
-  ['fUnits', 'fParkingNo1', 'fParkingNo2'].forEach((id) => {
+  ['fUnits', 'fParkingNo1', 'fParkingNo2', 'fParkingNo3'].forEach((id) => {
     document.getElementById(id).addEventListener('input', syncCurrentMonthClaimable);
   });
   document.getElementById('fCommissionBookedStatus').addEventListener('change', () => {

@@ -17,7 +17,7 @@
   <main class="container container-wide">
     <section class="card">
       <h2>預算花費</h2>
-      <p class="hint">本頁分三塊：①全案總預算發包請款 ②本週花費與媒體執行 ③業主版預算。全案表與業主版表單位皆為「萬」；週媒體執行費用為「元」。媒體％與人事％依「總銷售基數」自動算出該欄預算。</p>
+      <p class="hint">本頁分三塊：①全案總預算發包請款 ②本週花費與媒體執行 ③業主版預算（可選）。全案表與業主版表單位皆為「萬」；週媒體執行費用為「元」。廣告預算％與人事％依「總銷售基數」自動算出該欄預算。</p>
       <div class="search-grid">
         <div class="form-group">
           <label for="budgetSite">案場 <span class="required">*</span></label>
@@ -36,7 +36,7 @@
           <input type="number" step="0.01" id="salesBaseWan" value="0">
         </div>
         <div class="form-group">
-          <label for="salesFeePct">媒體比例(%)</label>
+          <label for="salesFeePct">廣告預算比例(%)</label>
           <input type="number" step="0.001" id="salesFeePct" value="2.375">
         </div>
         <div class="form-group">
@@ -50,7 +50,13 @@
         <div class="form-group">
           <label class="budget-check">
             <input type="checkbox" id="showReferralFee">
-            顯示「介紹費」欄（世界都心預設開啟）
+            顯示「介紹費」欄
+          </label>
+        </div>
+        <div class="form-group">
+          <label class="budget-check">
+            <input type="checkbox" id="showOwnerBudget">
+            顯示業主版預算（世界都心預設開啟）
           </label>
         </div>
       </div>
@@ -72,8 +78,8 @@
       <section class="card">
         <div class="budget-banner">廣告預算執行花費</div>
         <h3 class="section-title">全案總預算發包請款 <span id="execSiteLabel"></span></h3>
-        <p class="hint">單位皆為萬。列：預算／已發包金額／已請款金額／尚可發包（預算 − 已發包）。圓餅圖依「已請款金額」繪製，不含媒體％池與總預算彙總欄。</p>
-        <div class="table-wrap">
+        <p class="hint">單位皆為萬。廣告預算％的已發包／已請款＝現場＋銷售工具＋招牌＋企劃媒體＋其他；總預算的已發包／已請款＝廣告預算％＋人事預算。尚可發包＝預算 − 已發包。</p>
+        <div class="table-wrap budget-table-fit">
           <table class="data-table budget-grid" id="execBudgetTable"></table>
         </div>
         <div class="budget-pie-wrap">
@@ -125,11 +131,11 @@
         </div>
       </section>
 
-      <section class="card">
+      <section class="card" id="ownerBudgetSection">
         <div class="budget-banner">業主版預算</div>
         <h3 class="section-title">業主版預算 <span id="ownerSiteLabel"></span></h3>
-        <p class="hint">給業主看的分類表，單位皆為萬。尚可發包＝預算 − 已發包金額。</p>
-        <div class="table-wrap">
+        <p class="hint">僅需要提供業主版本的案場再勾選上方「顯示業主版預算」。單位皆為萬。尚可發包＝預算 − 已發包金額。</p>
+        <div class="table-wrap budget-table-fit">
           <table class="data-table budget-grid" id="ownerBudgetTable"></table>
         </div>
       </section>

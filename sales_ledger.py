@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import io
+import re
 import sqlite3
 from datetime import date, datetime
 from typing import Optional
@@ -1050,12 +1051,17 @@ def row_to_deal(row) -> dict:
         extra = json.loads(row['extra'] or '{}')
     except (TypeError, json.JSONDecodeError):
         extra = {}
-    house_base = row['house_base_price'] or 0
-    parking_base = row['parking_base_price'] or 0
-    base_total = row['base_price'] or 0
+    house_base = row['house_base_price'] or extra.get('houseBasePrice') or 0
+    parking_base = row['parking_base_price'] or extra.get('parkingBasePrice') or 0
+    base_total = row['base_price'] or extra.get('baseTotal') or extra.get('basePrice') or 0
     house_base_display = house_base
     if house_base == 0 and parking_base == 0 and base_total:
         house_base_display = base_total
+    parking_no3 = extra.get('parkingNo3') or ''
+    if not parking_no3 and (row['parking_nos'] or ''):
+        parts = [x.strip() for x in re.split(r'[、,，/／]', row['parking_nos'] or '') if x.strip()]
+        if len(parts) > 2:
+            parking_no3 = parts[2]
     return {
         'id': row['id'],
         'siteId': row['site_id'],
@@ -1071,6 +1077,9 @@ def row_to_deal(row) -> dict:
         'parkingNos': row['parking_nos'] or '',
         'parkingNo1': row['parking_no1'] or '',
         'parkingNo2': row['parking_no2'] or '',
+        'parkingNo3': parking_no3,
+        'builderCompany': extra.get('builderCompany') or '',
+        'community': extra.get('community') or '',
         'listPrice': row['list_price'] or 0,
         'basePrice': row['base_price'] or 0,
         'totalPrice': row['total_price'] or 0,
@@ -1079,11 +1088,11 @@ def row_to_deal(row) -> dict:
         'parkingSalePrice': row['parking_sale_price'] or 0,
         'actualHousePrice': row['actual_house_price'] or 0,
         'actualTotalPrice': row['actual_total_price'] or 0,
-        'surcharge': row['surcharge'] or 0,
-        'applianceGift': row['appliance_gift'] or 0,
-        'pickupVoucher': row['pickup_voucher'] or 0,
-        'decoration': row['decoration'] or 0,
-        'companyLoanInterest': row['company_loan_interest'] or 0,
+        'surcharge': row['surcharge'] or extra.get('surcharge') or 0,
+        'applianceGift': row['appliance_gift'] or extra.get('applianceGift') or 0,
+        'pickupVoucher': row['pickup_voucher'] or extra.get('pickupVoucher') or 0,
+        'decoration': row['decoration'] or extra.get('decoration') or 0,
+        'companyLoanInterest': row['company_loan_interest'] or extra.get('companyLoanInterest') or 0,
         'houseBasePrice': house_base_display,
         'parkingBasePrice': parking_base,
         'baseTotal': row['base_price'] or 0,
@@ -1203,8 +1212,10 @@ def normalize_deal_payload(body: dict, site_id: str = '', settings: Optional[dic
     contract_total = house_sale + parking_sale
     parking_no1 = str(body.get('parkingNo1') or '').strip()
     parking_no2 = str(body.get('parkingNo2') or '').strip()
-    parking_nos = '、'.join(x for x in (parking_no1, parking_no2) if x)
-    parking_count = sum(1 for x in (parking_no1, parking_no2) if x)
+    extra_in = body.get('extra') if isinstance(body.get('extra'), dict) else {}
+    parking_no3 = str(body.get('parkingNo3') or extra_in.get('parkingNo3') or '').strip()
+    parking_nos = '、'.join(x for x in (parking_no1, parking_no2, parking_no3) if x)
+    parking_count = sum(1 for x in (parking_no1, parking_no2, parking_no3) if x)
     if explicit_total > 0:
         if contract_total <= 0:
             contract_total = explicit_total
@@ -1246,6 +1257,9 @@ def normalize_deal_payload(body: dict, site_id: str = '', settings: Optional[dic
     site = site_id or str(body.get('siteId') or '').strip()
     extra = body.get('extra') if isinstance(body.get('extra'), dict) else {}
     extra = dict(extra)
+    extra['parkingNo3'] = parking_no3
+    extra['builderCompany'] = str(body.get('builderCompany') or extra.get('builderCompany') or '').strip()
+    extra['community'] = str(body.get('community') or extra.get('community') or '').strip()
     if body.get('customerPaidPct') not in (None, ''):
         extra['customerPaidPct'] = _num(body.get('customerPaidPct'))
     body_for_comm = dict(body)
@@ -1645,24 +1659,26 @@ def aggregate_for_weekly(conn: sqlite3.Connection, site_id: str, start, end) -> 
             block['parking'] += p
             block['amount'] += a
 
-        if rt == 'deal' and _in_range(report_d or sign_d or deposit_d, start, end):
+        sale_d = report_d
+        sign_report_d = owner_sign_d or sign_d
+
+        if rt in ('deal', 'signing') and _in_range(sale_d, start, end):
             add(deals, units, parking, amount)
             week_deal_rows.append(row_to_deal(row))
-        elif rt == 'signing' and _in_range(owner_sign_d or sign_d or report_d, start, end):
+        if rt == 'signing' and _in_range(sign_report_d, start, end):
             add(signings, units, parking, amount)
-        elif rt == 'purchase' and _in_range(report_d or sign_d or deposit_d, start, end):
+        elif rt == 'purchase' and _in_range(sale_d or report_d or sign_d or deposit_d, start, end):
             add(purchases, units, parking, amount)
         elif rt == 'unreported':
-            # 未報是目前狀態，不受成交／簽約日期限制；改成已報後才移出。
             add(unreported, units, parking, amount)
         elif rt == 'refund' and _in_range(report_d or sign_d, start, end):
             add(refunds, units, parking, amount)
 
-        if rt == 'deal' and _on_or_before(report_d or sign_d or deposit_d, end):
+        if rt in ('deal', 'signing') and _on_or_before(sale_d, end):
             add(deals_cum, units, parking, amount)
-        elif rt == 'signing' and _on_or_before(owner_sign_d or sign_d or report_d, end):
+        if rt == 'signing' and _on_or_before(sign_report_d, end):
             add(signings_cum, units, parking, amount)
-        elif rt == 'purchase' and _on_or_before(report_d or sign_d or deposit_d, end):
+        elif rt == 'purchase' and _on_or_before(sale_d or report_d or sign_d or deposit_d, end):
             add(purchases_cum, units, parking, amount)
 
     def round_block(b):
@@ -1724,6 +1740,11 @@ def aggregate_for_weekly(conn: sqlite3.Connection, site_id: str, start, end) -> 
         'dealsCum': round_block(deals_cum),
         'signings': round_block(signings),
         'signingsCum': round_block(signings_cum),
+        'unsignedCum': round_block({
+            'units': max(deals_cum['units'] - signings_cum['units'], 0),
+            'parking': max(deals_cum['parking'] - signings_cum['parking'], 0),
+            'amount': max(deals_cum['amount'] - signings_cum['amount'], 0),
+        }),
         'purchases': round_block(purchases),
         'purchasesCum': round_block(purchases_cum),
         'unreported': round_block(unreported),

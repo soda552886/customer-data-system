@@ -78,10 +78,10 @@ def default_media_items() -> list[dict]:
     return []
 
 
-def site_wants_referral(site_name: str, saved: Optional[dict]) -> bool:
+def site_wants_owner_budget(site_name: str, saved: Optional[dict]) -> bool:
     data = saved if isinstance(saved, dict) else {}
-    if 'showReferralFee' in data:
-        return bool(data.get('showReferralFee'))
+    if 'showOwnerBudget' in data:
+        return bool(data.get('showOwnerBudget'))
     return '世界都心' in _text(site_name)
 
 
@@ -99,6 +99,7 @@ def default_project_payload(*, include_referral=False) -> dict:
         'salesFeePct': 2.375,
         'rewardPct': 1.0,
         'showReferralFee': include_referral,
+        'showOwnerBudget': include_referral,
         'ownerCategories': default_owner_categories(),
         'execCategories': exec_cats,
         'weekExtraFields': default_week_extra_fields(),
@@ -156,6 +157,7 @@ def _dump_project(project: dict) -> dict:
         'salesFeePct': project['salesFeePct'],
         'rewardPct': project['rewardPct'],
         'showReferralFee': bool(project.get('showReferralFee')),
+        'showOwnerBudget': bool(project.get('showOwnerBudget')),
         'ownerCategories': project['ownerCategories'],
         'execCategories': project['execCategories'],
         'weekExtraFields': project['weekExtraFields'],
@@ -166,6 +168,7 @@ def _dump_project(project: dict) -> dict:
                 'name': c.get('name'),
                 'status': c.get('status') or '',
                 'openingCumulative': _num(c.get('openingCumulative')),
+                'photos': _normalize_photos(c),
             }
             for c in project.get('mediaCatalog') or []
         ],
@@ -342,6 +345,7 @@ def normalize_project(saved: Optional[dict], site_name='') -> dict:
                 'status': _text(item.get('status')),
                 'weekCost': 0,
                 'openingCumulative': _num(item.get('openingCumulative')),
+                'photos': _normalize_photos(item),
             })
         catalog = cleaned_cat or base['mediaCatalog']
 
@@ -351,6 +355,7 @@ def normalize_project(saved: Optional[dict], site_name='') -> dict:
         'salesFeePct': _num(data.get('salesFeePct'), 2.375),
         'rewardPct': _num(data.get('rewardPct'), 1.0),
         'showReferralFee': show_referral,
+        'showOwnerBudget': site_wants_owner_budget(site_name, data),
         'ownerCategories': owner_cats,
         'execCategories': exec_cats,
         'weekExtraFields': extra_fields,
@@ -366,7 +371,7 @@ def normalize_project(saved: Optional[dict], site_name='') -> dict:
     for cat in project['execCategories']:
         if cat['key'] == 'salesFee':
             cat['ratePct'] = project['salesFeePct']
-            cat['label'] = f'媒體 {project["salesFeePct"]:g}%'
+            cat['label'] = f'廣告預算 {project["salesFeePct"]:g}%'
             cat['inPie'] = False
         elif cat['key'] == 'reward':
             cat['ratePct'] = project['rewardPct']
@@ -508,11 +513,12 @@ def _week_rows(conn, site_id: str) -> list[dict]:
     return out
 
 
-def assemble_week_view(project: dict, week: dict, history: list[dict], week_start: str) -> dict:
+def assemble_week_view(project: dict, week: dict, history: list[dict], week_start: str, *, week_saved=False) -> dict:
     media = []
     week_media_total = 0.0
     opening = {c['name']: _num(c.get('openingCumulative')) for c in project['mediaCatalog']}
     prior = dict(opening)
+    prior_photos = {c['name']: _normalize_photos(c) for c in project['mediaCatalog']}
     for rec in history:
         if rec['weekStart'] >= week_start:
             continue
@@ -526,15 +532,23 @@ def assemble_week_view(project: dict, week: dict, history: list[dict], week_star
             if not name:
                 continue
             prior[name] = _num(prior.get(name), opening.get(name, 0)) + _num(item.get('weekCost'))
+            photos = _normalize_photos(item)
+            if photos:
+                prior_photos[name] = photos
     for item in week['mediaItems']:
         name = item['name']
         week_cost = _num(item.get('weekCost'))
         base = _num(prior.get(name), opening.get(name, item.get('openingCumulative') or 0))
         week_media_total += week_cost
+        if week_saved and isinstance(item.get('photos'), list):
+            photos = _normalize_photos(item)
+        else:
+            photos = _normalize_photos(item) or prior_photos.get(name) or []
         media.append({
             **item,
             'weekCost': week_cost,
             'cumulative': round(base + week_cost, 2),
+            'photos': photos,
         })
     extras = dict(week['extras'])
     extra_lines = []
@@ -598,7 +612,7 @@ def load_budget(conn: sqlite3.Connection, site_id: str, week_start: str, *, site
         project['mediaCatalog'],
     )
     history = _week_rows(conn, site_id)
-    week_view = assemble_week_view(project, week, history, week_start)
+    week_view = assemble_week_view(project, week, history, week_start, week_saved=bool(week_row))
     owner_rows = enrich_amount_rows(
         project['ownerCategories'], project['owner'], project['salesBaseWan'], contracted=True,
     )
@@ -690,12 +704,16 @@ def save_budget(conn: sqlite3.Connection, site_id: str, body: dict, *, site_name
                 catalog[known[name]]['openingCumulative'] = opening
                 if status:
                     catalog[known[name]]['status'] = status
+                photos = _normalize_photos(item)
+                if photos or 'photos' in item:
+                    catalog[known[name]]['photos'] = photos
             else:
                 catalog.append({
                     'name': name,
                     'status': status,
                     'weekCost': 0,
                     'openingCumulative': opening,
+                    'photos': _normalize_photos(item),
                 })
                 known[name] = len(catalog) - 1
         merged_project['mediaCatalog'] = catalog

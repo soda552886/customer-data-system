@@ -62,8 +62,24 @@ function yuanToWan(val) {
   return (Number(val) || 0) / WAN;
 }
 
-function totalColClass(key, extra = '') {
-  return [key === 'total' ? 'budget-total-col' : '', extra].filter(Boolean).join(' ');
+function isSumCat(cat) {
+  return cat?.key === 'salesFee' || cat?.key === 'total';
+}
+
+function execManualKeys() {
+  return (current?.project?.execCategories || [])
+    .filter((c) => ['onsite', 'tools', 'signboard', 'planning', 'other'].includes(c.key))
+    .map((c) => c.key);
+}
+
+function execAmountWan(kind, key) {
+  return Number(document.querySelector(`[data-exec-${kind}="${key}"]`)?.value) || 0;
+}
+
+function wanInput(prefix, kind, key, value, extraClass = '', readonly = false) {
+  const ro = readonly ? 'readonly' : '';
+  const cls = extraClass ? ` class="${extraClass}"` : '';
+  return `<input type="number" step="0.01"${cls} ${ro} data-${prefix}-${kind}="${key}" value="${fmtWan(value)}">`;
 }
 
 async function loadSites() {
@@ -119,7 +135,7 @@ function syncRateLabels() {
   (project.execCategories || []).forEach((c) => {
     if (c.key === 'salesFee') {
       c.ratePct = fee;
-      c.label = `媒體 ${fee}%`;
+      c.label = `廣告預算 ${fee}%`;
       c.inPie = false;
     } else if (c.key === 'reward') {
       c.ratePct = reward;
@@ -168,25 +184,25 @@ function renderOwnerTable() {
       ? calcRateWan(c.ratePct)
       : (rows[c.key]?.budgetWan ?? 0);
     const ro = (c.kind === 'rate' || c.kind === 'rate_sum') ? 'readonly' : '';
-    return `<td><input type="number" step="0.01" ${ro} data-owner-budget="${c.key}" value="${fmtWan(wan)}"> <span class="unit">萬</span></td>`;
+    return `<td><input type="number" step="0.01" ${ro} data-owner-budget="${c.key}" value="${fmtWan(wan)}"></td>`;
   }).join('');
   const contractedCells = cats.map((c) => {
     const val = yuanToWan(rows[c.key]?.contracted);
-    return `<td><input type="number" step="0.01" class="budget-hot" data-owner-contracted="${c.key}" value="${fmtWan(val)}"> <span class="unit">萬</span></td>`;
+    return `<td><input type="number" step="0.01" class="budget-hot" data-owner-contracted="${c.key}" value="${fmtWan(val)}"></td>`;
   }).join('');
   const invoicedCells = cats.map((c) => {
     const val = yuanToWan(rows[c.key]?.invoiced);
-    return `<td><input type="number" step="0.01" data-owner-invoiced="${c.key}" value="${fmtWan(val)}"> <span class="unit">萬</span></td>`;
+    return `<td><input type="number" step="0.01" data-owner-invoiced="${c.key}" value="${fmtWan(val)}"></td>`;
   }).join('');
   const remainCells = cats.map((c) => {
     const remain = yuanToWan(rows[c.key]?.remainContract);
-    return `<td class="${moneyClass(remain)}" data-owner-remain="${c.key}">${fmtWan(remain)} <span class="unit">萬</span></td>`;
+    return `<td class="${moneyClass(remain)}" data-owner-remain="${c.key}">${fmtWan(remain)}</td>`;
   }).join('');
   table.innerHTML = `${head}<tbody>
-    <tr><th>預算</th>${budgetCells}</tr>
-    <tr><th>已發包金額</th>${contractedCells}</tr>
-    <tr><th>已請款金額</th>${invoicedCells}</tr>
-    <tr><th>尚可發包</th>${remainCells}</tr>
+    <tr><th>預算（萬）</th>${budgetCells}</tr>
+    <tr><th>已發包金額（萬）</th>${contractedCells}</tr>
+    <tr><th>已請款金額（萬）</th>${invoicedCells}</tr>
+    <tr><th>尚可發包（萬）</th>${remainCells}</tr>
   </tbody>`;
 }
 
@@ -206,28 +222,30 @@ function renderExecTable() {
       : (rows[c.key]?.budgetWan ?? 0);
     const ro = (c.kind === 'rate' || c.kind === 'rate_sum') ? 'readonly' : '';
     const highlight = totalColClass(c.key);
-    return `<td class="${highlight}"><input type="number" step="0.01" ${ro} data-exec-budget="${c.key}" value="${fmtWan(wan)}"> <span class="unit">萬</span></td>`;
+    return `<td class="${highlight}">${wanInput('exec', 'budget', c.key, wan, '', ro === 'readonly')}</td>`;
   }).join('');
   const contractedCells = cats.map((c) => {
     const val = yuanToWan(rows[c.key]?.contracted);
     const highlight = totalColClass(c.key);
-    return `<td class="${highlight}"><input type="number" step="0.01" class="budget-hot" data-exec-contracted="${c.key}" value="${fmtWan(val)}"> <span class="unit">萬</span></td>`;
+    const summed = isSumCat(c);
+    return `<td class="${highlight}">${wanInput('exec', 'contracted', c.key, val, 'budget-hot', summed)}</td>`;
   }).join('');
   const invCells = cats.map((c) => {
     const val = yuanToWan(rows[c.key]?.invoiced);
     const highlight = totalColClass(c.key);
-    return `<td class="${highlight}"><input type="number" step="0.01" data-exec-invoiced="${c.key}" value="${fmtWan(val)}"> <span class="unit">萬</span></td>`;
+    const summed = isSumCat(c);
+    return `<td class="${highlight}">${wanInput('exec', 'invoiced', c.key, val, '', summed)}</td>`;
   }).join('');
   const remainCells = cats.map((c) => {
     const remain = yuanToWan(rows[c.key]?.remainContract);
     const highlight = totalColClass(c.key, moneyClass(remain));
-    return `<td class="${highlight}" data-exec-remain="${c.key}">${fmtWan(remain)} <span class="unit">萬</span></td>`;
+    return `<td class="${highlight}" data-exec-remain="${c.key}">${fmtWan(remain)}</td>`;
   }).join('');
   table.innerHTML = `${head}<tbody>
-    <tr><th>預算</th>${budgetCells}</tr>
-    <tr><th>已發包金額</th>${contractedCells}</tr>
-    <tr><th>已請款金額</th>${invCells}</tr>
-    <tr><th>尚可發包</th>${remainCells}</tr>
+    <tr><th>預算（萬）</th>${budgetCells}</tr>
+    <tr><th>已發包金額（萬）</th>${contractedCells}</tr>
+    <tr><th>已請款金額（萬）</th>${invCells}</tr>
+    <tr><th>尚可發包（萬）</th>${remainCells}</tr>
   </tbody>`;
 }
 
@@ -328,9 +346,9 @@ function renderPhotoBlock(item, idx) {
       <a href="${escapeHtml(p.url)}" target="_blank" rel="noopener">
         <img src="${escapeHtml(p.url)}" alt="${escapeHtml(p.caption || item.name)}">
       </a>
-      <figcaption>
+      <figcaption title="${escapeHtml(p.caption || p.filename || '')}">
         <span class="budget-photo-kind">${photoKindLabel(p.kind)}</span>
-        ${escapeHtml(p.caption || p.filename || '')}
+        <span class="budget-photo-caption">${escapeHtml(p.caption || p.filename || '')}</span>
       </figcaption>
       <button type="button" class="link-btn" data-photo-del="${idx}" data-photo-id="${escapeHtml(p.id)}">刪照片</button>
     </figure>
@@ -396,7 +414,7 @@ function renderPhotoGallery() {
             <a href="${escapeHtml(p.url)}" target="_blank" rel="noopener">
               <img src="${escapeHtml(p.url)}" alt="${escapeHtml(p.caption || g.name)}">
             </a>
-            <figcaption>${photoKindLabel(p.kind)} ${escapeHtml(p.caption || '')}</figcaption>
+            <figcaption title="${escapeHtml(p.caption || '')}">${photoKindLabel(p.kind)} ${escapeHtml(p.caption || '')}</figcaption>
           </figure>
         `).join('')}
       </div>
@@ -425,7 +443,7 @@ function refreshDerived() {
     const remainEl = document.querySelector(`[data-owner-remain="${c.key}"]`);
     if (remainEl) {
       const remain = wan - contracted;
-      remainEl.innerHTML = `${fmtWan(remain)} <span class="unit">萬</span>`;
+      remainEl.textContent = fmtWan(remain);
       remainEl.className = moneyClass(remain);
     }
   });
@@ -439,11 +457,28 @@ function refreshDerived() {
       budgetEl.value = fmtWan(calcRateWan(c.ratePct));
     }
     const wan = Number(budgetEl?.value) || 0;
-    const contracted = Number(document.querySelector(`[data-exec-contracted="${c.key}"]`)?.value) || 0;
+    let contracted = Number(document.querySelector(`[data-exec-contracted="${c.key}"]`)?.value) || 0;
+    let invoiced = Number(document.querySelector(`[data-exec-invoiced="${c.key}"]`)?.value) || 0;
+    if (c.key === 'salesFee') {
+      const keys = execManualKeys();
+      contracted = keys.reduce((s, k) => s + execAmountWan('contracted', k), 0);
+      invoiced = keys.reduce((s, k) => s + execAmountWan('invoiced', k), 0);
+      const conEl = document.querySelector('[data-exec-contracted="salesFee"]');
+      const invEl = document.querySelector('[data-exec-invoiced="salesFee"]');
+      if (conEl) conEl.value = fmtWan(contracted);
+      if (invEl) invEl.value = fmtWan(invoiced);
+    } else if (c.key === 'total') {
+      contracted = execAmountWan('contracted', 'salesFee') + execAmountWan('contracted', 'reward');
+      invoiced = execAmountWan('invoiced', 'salesFee') + execAmountWan('invoiced', 'reward');
+      const conEl = document.querySelector('[data-exec-contracted="total"]');
+      const invEl = document.querySelector('[data-exec-invoiced="total"]');
+      if (conEl) conEl.value = fmtWan(contracted);
+      if (invEl) invEl.value = fmtWan(invoiced);
+    }
     const remainEl = document.querySelector(`[data-exec-remain="${c.key}"]`);
     if (remainEl) {
       const remain = wan - contracted;
-      remainEl.innerHTML = `${fmtWan(remain)} <span class="unit">萬</span>`;
+      remainEl.textContent = fmtWan(remain);
       remainEl.className = totalColClass(c.key, moneyClass(remain));
     }
   });
@@ -510,6 +545,8 @@ function renderAll(payload) {
   document.getElementById('rewardPct').value = payload.project.rewardPct || 1;
   document.getElementById('ownerBudgetPct').value = payload.project.ownerBudgetPct || 2.375;
   document.getElementById('showReferralFee').checked = !!payload.project.showReferralFee;
+  document.getElementById('showOwnerBudget').checked = !!payload.project.showOwnerBudget;
+  document.getElementById('ownerBudgetSection').classList.toggle('hidden', !payload.project.showOwnerBudget);
   document.getElementById('budgetWeekStart').value = payload.weekStart;
   updateWeekLabel(payload);
   mediaItems = (payload.week.mediaItems || []).map((item) => ({
@@ -545,6 +582,7 @@ function collectPayload() {
       rewardPct: Number(document.getElementById('rewardPct').value) || 0,
       ownerBudgetPct: Number(document.getElementById('ownerBudgetPct').value) || 0,
       showReferralFee: document.getElementById('showReferralFee').checked,
+      showOwnerBudget: document.getElementById('showOwnerBudget').checked,
       ownerCategories: project.ownerCategories,
       execCategories: project.execCategories,
       weekExtraFields: extraItems.map((i) => ({ key: i.key, label: i.label })),
@@ -731,6 +769,10 @@ async function init() {
   });
   document.getElementById('showReferralFee').addEventListener('change', (e) => {
     applyReferralColumn(e.target.checked);
+  });
+  document.getElementById('showOwnerBudget').addEventListener('change', (e) => {
+    if (current?.project) current.project.showOwnerBudget = e.target.checked;
+    document.getElementById('ownerBudgetSection').classList.toggle('hidden', !e.target.checked);
   });
   document.getElementById('budgetWorkspace').addEventListener('input', (e) => {
     if (e.target.matches('input') && e.target.type !== 'file') refreshDerived();

@@ -259,13 +259,30 @@ function collectManualFromForm(baseManual) {
     });
   }
 
-  ['deals', 'dealsCum', 'signings', 'signingsCum', 'purchases', 'purchasesCum', 'unreported'].forEach((key) => {
+  ['deals', 'dealsCum', 'signings', 'signingsCum', 'unsignedCum', 'purchases', 'purchasesCum', 'unreported'].forEach((key) => {
     manual[key] = manual[key] || { units: 0, parking: 0, amount: 0 };
     ['units', 'parking', 'amount'].forEach((f) => {
       const el = document.querySelector(`[data-block="${key}"][data-field="${f}"]`);
       if (el) manual[key][f] = Number(el.value) || 0;
     });
   });
+  const dealsCum = manual.dealsCum || {};
+  const signingsCum = manual.signingsCum || {};
+  manual.unsignedCum = {
+    units: Math.max((Number(dealsCum.units) || 0) - (Number(signingsCum.units) || 0), 0),
+    parking: Math.max((Number(dealsCum.parking) || 0) - (Number(signingsCum.parking) || 0), 0),
+    amount: Math.max((Number(dealsCum.amount) || 0) - (Number(signingsCum.amount) || 0), 0),
+  };
+
+  const conversionManual = {};
+  document.querySelectorAll('[data-conv][data-cf]').forEach((el) => {
+    const name = el.getAttribute('data-conv');
+    const field = el.getAttribute('data-cf');
+    if (!name || !field) return;
+    conversionManual[name] = conversionManual[name] || {};
+    conversionManual[name][field] = Number(el.value) || 0;
+  });
+  if (Object.keys(conversionManual).length) manual.conversionManual = conversionManual;
 
   manual.inventory = manual.inventory || {};
   [
@@ -503,24 +520,38 @@ function renderDealInputs(manual) {
     { key: 'dealsCum', title: '累計成交', amountHint: '實際房價＋車售', cum: true },
     { key: 'signings', title: '本週簽約', amountHint: '實際房價＋車售' },
     { key: 'signingsCum', title: '累計簽約', amountHint: '實際房價＋車售', cum: true },
+    { key: 'unsignedCum', title: '累計未簽約', amountHint: '累計成交 − 累計簽約', cum: true, computed: true },
     { key: 'purchases', title: '本週買進', amountHint: '實際房價＋車售' },
     { key: 'purchasesCum', title: '累計買進', amountHint: '實際房價＋車售', cum: true },
     { key: 'unreported', title: '未報', amountHint: '合約總價' },
   ];
   document.getElementById('dealInputs').innerHTML = blocks.map((b) => {
     const v = manual[b.key] || {};
+    const ro = b.computed ? 'readonly' : '';
     return `
       <div class="deal-input-row${b.cum ? ' is-cum' : ''}">
         <div class="deal-input-label">${escapeHtml(b.title)}</div>
         <div class="form-group"><label>戶</label>
-          <input type="number" min="0" data-block="${b.key}" data-field="units" value="${Number(v.units) || 0}"></div>
+          <input type="number" min="0" ${ro} data-block="${b.key}" data-field="units" value="${Number(v.units) || 0}"></div>
         <div class="form-group"><label>車</label>
-          <input type="number" min="0" data-block="${b.key}" data-field="parking" value="${Number(v.parking) || 0}"></div>
+          <input type="number" min="0" ${ro} data-block="${b.key}" data-field="parking" value="${Number(v.parking) || 0}"></div>
         <div class="form-group"><label>金額(萬) <span class="field-hint-inline">${escapeHtml(b.amountHint)}</span></label>
-          <input type="number" min="0" step="0.01" data-block="${b.key}" data-field="amount" value="${Number(v.amount) || 0}"></div>
+          <input type="number" min="0" step="0.01" ${ro} data-block="${b.key}" data-field="amount" value="${Number(v.amount) || 0}"></div>
       </div>
     `;
   }).join('');
+  document.querySelectorAll('#dealInputs input').forEach((el) => {
+    el.addEventListener('input', syncUnsignedCum);
+  });
+  syncUnsignedCum();
+}
+
+function syncUnsignedCum() {
+  const val = (block, field) => Number(document.querySelector(`[data-block="${block}"][data-field="${field}"]`)?.value) || 0;
+  ['units', 'parking', 'amount'].forEach((field) => {
+    const el = document.querySelector(`[data-block="unsignedCum"][data-field="${field}"]`);
+    if (el) el.value = Math.max(val('dealsCum', field) - val('signingsCum', field), 0);
+  });
 }
 
 function renderInventory(manual, derived) {
@@ -675,24 +706,34 @@ function refreshDerivedFromForm() {
   ]);
 }
 
-function renderConversion(auto) {
+function renderConversion(auto, manual) {
   const tbody = document.querySelector('#conversionTable tbody');
   const rows = auto.conversion || [];
+  const overrides = (manual || current?.manual || {}).conversionManual || {};
   if (!rows.length) {
     tbody.innerHTML = '<tr><td colspan="10" class="empty-row">尚無銷售資料</td></tr>';
     return;
   }
+  const convInput = (name, field, value) =>
+    `<input type="number" step="0.01" class="table-input" data-conv="${escapeHtml(name)}" data-cf="${field}" value="${Number(value) || 0}">`;
   tbody.innerHTML = rows.map((r) => {
     const bold = r.name === '合計' || r.name === '前期銷售';
     const name = bold ? `<strong>${escapeHtml(r.name)}</strong>` : escapeHtml(r.name);
+    const ov = overrides[r.name] || {};
+    const visits = ov.visits != null && ov.visits !== '' ? ov.visits : r.visits;
+    const deals = ov.deals != null && ov.deals !== '' ? ov.deals : r.deals;
+    const amount = ov.amount != null && ov.amount !== '' ? ov.amount : (r.amount ?? 0);
+    const refunds = ov.refunds != null && ov.refunds !== '' ? ov.refunds : (r.refunds ?? 0);
+    const refundAmount = ov.refundAmount != null && ov.refundAmount !== '' ? ov.refundAmount : (r.refundAmount ?? 0);
+    const rate = Number(deals) ? `${Math.round((Number(visits) / Number(deals)) * 10) / 10}:1` : '—';
     return `<tr>
       <td>${name}</td>
-      <td>${r.visits}</td>
-      <td>${r.deals}</td>
-      <td><strong>${escapeHtml(r.rate ?? '—')}</strong></td>
-      <td>${r.amount ?? 0}</td>
-      <td>${r.refunds ?? 0}</td>
-      <td>${r.refundAmount ?? 0}</td>
+      <td>${convInput(r.name, 'visits', visits)}</td>
+      <td>${convInput(r.name, 'deals', deals)}</td>
+      <td><strong>${escapeHtml(rate)}</strong></td>
+      <td>${convInput(r.name, 'amount', amount)}</td>
+      <td>${convInput(r.name, 'refunds', refunds)}</td>
+      <td>${convInput(r.name, 'refundAmount', refundAmount)}</td>
       <td>${r.weekVisits}</td>
       <td>${r.weekDeals}</td>
       <td>${r.weekAmount ?? 0}</td>
@@ -826,14 +867,8 @@ function updateVisitorSelectSummary() {
     total ? `已選 ${selected} / 實際 ${total} 組` : '';
 }
 
-function renderVisitors(auto) {
-  const tbody = document.querySelector('#visitorTable tbody');
-  const rows = auto.visitors || [];
-  if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="12" class="empty-row">本週尚無納入週報的客資</td></tr>';
-    return;
-  }
-  tbody.innerHTML = rows.map((v) => `<tr>
+function visitorRowHtml(v) {
+  return `<tr>
     <td class="cell-date">${escapeHtml(v.date)}</td>
     <td>${escapeHtml(v.visitType)}</td>
     <td>${escapeHtml(v.customerName)}</td>
@@ -846,7 +881,24 @@ function renderVisitors(auto) {
     <td class="cell-wrap">${escapeHtml(v.notPurchasedReason || '')}</td>
     <td>${escapeHtml(v.sincerity)}</td>
     <td>${escapeHtml(v.salesperson1)}${v.isCoManaged ? '＋' + escapeHtml(v.salesperson2 || '') : ''}</td>
-  </tr>`).join('');
+  </tr>`;
+}
+
+function fillVisitorTable(tableId, rows, emptyText) {
+  const tbody = document.querySelector(`#${tableId} tbody`);
+  if (!tbody) return;
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="12" class="empty-row">${emptyText}</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = rows.map(visitorRowHtml).join('');
+}
+
+function renderVisitors(auto) {
+  const rows = auto.visitors || [];
+  const isReturn = (v) => (v.visitType || '') === '回訪';
+  fillVisitorTable('visitorTableNew', rows.filter((v) => !isReturn(v)), '本週尚無納入週報的新客');
+  fillVisitorTable('visitorTableReturn', rows.filter(isReturn), '本週尚無納入週報的回訪');
 }
 
 function renderHistory(history) {
@@ -881,9 +933,24 @@ function applySuggestedFromSales() {
     return;
   }
   const manual = collectManualFromForm(current.manual);
-  ['deals', 'dealsCum', 'signings', 'signingsCum', 'purchases', 'purchasesCum', 'unreported'].forEach((key) => {
+  ['deals', 'dealsCum', 'signings', 'signingsCum', 'unsignedCum', 'purchases', 'purchasesCum', 'unreported'].forEach((key) => {
     if (s[key]) manual[key] = { ...manual[key], ...s[key] };
   });
+  if (s.dealsCum && s.signingsCum) {
+    manual.unsignedCum = {
+      units: Math.max((s.dealsCum.units || 0) - (s.signingsCum.units || 0), 0),
+      parking: Math.max((s.dealsCum.parking || 0) - (s.signingsCum.parking || 0), 0),
+      amount: Math.max((s.dealsCum.amount || 0) - (s.signingsCum.amount || 0), 0),
+    };
+  }
+  manual.conversionManual = {
+    ...(manual.conversionManual || {}),
+    合計: {
+      ...(manual.conversionManual || {})['合計'],
+      deals: s.dealsCum?.units ?? 0,
+      amount: s.dealsCum?.amount ?? 0,
+    },
+  };
   if (s.commission) {
     manual.commission = { ...manual.commission, ...s.commission };
   }
@@ -893,6 +960,7 @@ function applySuggestedFromSales() {
   current.manual = manual;
   current.commissionMatrix = s.commissionMatrix || null;
   renderDealInputs(manual);
+  renderConversion(current.auto, manual);
   renderInventory(manual, null);
   renderCommission(manual, null);
   document.getElementById('salesSuggestHint').textContent =
@@ -969,7 +1037,7 @@ function renderAll(payload) {
   document.getElementById('reviewNotes').value = manual.reviewNotes || '';
   document.getElementById('competitorNotes').value = manual.competitorNotes || '';
   document.getElementById('weekMemo').value = manual.memo || '';
-  renderConversion(auto);
+  renderConversion(auto, manual);
   renderVisitorMini('returnList', auto.returnVisits, '本週尚無回訪');
   renderVisitorMini('hopeList', auto.hopeCustomers, '本週尚無有望客');
   renderVisitors(auto);

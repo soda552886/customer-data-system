@@ -1893,7 +1893,9 @@ SALES_IMPORT_ALIASES = {
     'productType': ['產品類型', '產品', '用途', '建物型態', '建物型態'],
     'areaPing': ['坪數', '建物坪數', '戶別坪數'],
     'parkingNo1': ['車位1', '車位號碼1', '車位編號1', '編號1', '汽車1'],
-    'parkingNo2': ['車位2', '車位號碼2', '車位編號2', '編號2', '汽車2'],
+    'parkingNo3': ['車位3', '車位號碼3', '車位編號3', '編號3', '汽車3'],
+    'builderCompany': ['建設公司', '建商', '建設'],
+    'community': ['社區', '社區名稱', '建案社區'],
     'parkingNos': ['車位號碼', '車位'],
     'houseSalePrice': [
         '房售價未含其他費用', '實際房價', '房售價萬', '房屋成交價', '房售價',
@@ -2053,6 +2055,7 @@ def _sales_import_payload(row, normalized_headers, sheet_name=''):
         parts = [x.strip() for x in re.split(r'[、,，/／;；]+', parking_nos) if x.strip()]
         payload['parkingNo1'] = parts[0] if parts else ''
         payload['parkingNo2'] = parts[1] if len(parts) > 1 else ''
+        payload['parkingNo3'] = parts[2] if len(parts) > 2 else ''
 
     contract = _sales_import_num(get('totalPrice'))
     actual = _sales_import_num(get('actualTotalPrice'))
@@ -2073,7 +2076,7 @@ def _sales_import_payload(row, normalized_headers, sheet_name=''):
             surcharge_sum += extra_val
         else:
             surcharge_sum += _sales_import_num(payload.get(extra_key))
-    has_parking = bool(payload.get('parkingNo1') or payload.get('parkingNo2'))
+    has_parking = bool(payload.get('parkingNo1') or payload.get('parkingNo2') or payload.get('parkingNo3'))
     if has_parking and parking <= 0 and contract > house > 0:
         diff = round(contract - house, 4)
         if diff > 0.01 and abs(diff - surcharge_sum) > 0.01:
