@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>查接待客戶 - 得意佳</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <header class="header">
+    <div class="header-inner">
+      <h1><span class="brand">得意佳</span>客戶資料管理系統</h1>
+      <nav id="mainNav"></nav>
+    </div>
+  </header>
+
+  <main class="container container-wide">
+    <section class="card">
+      <h2>查看自己接待過的客戶（僅檢視）</h2>
+      <p class="hint">不必登入即可查詢。此頁只能看、不能改、不能刪。電話號碼不顯示。</p>
+      <div class="search-grid">
+        <div class="form-group">
+          <label for="lookupSite">案場 <span class="required">*</span></label>
+          <select id="lookupSite"><option value="">請選擇案場</option></select>
+        </div>
+        <div class="form-group">
+          <label for="lookupStaff">銷售人員 <span class="required">*</span></label>
+          <select id="lookupStaff"><option value="">請先選案場</option></select>
+        </div>
+      </div>
+      <div class="form-actions">
+        <button type="button" id="lookupBtn" class="btn btn-primary">查詢接待紀錄</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h3>接待紀錄 <span id="lookupCount" class="hint"></span></h3>
+      <div class="table-wrap">
+        <table class="data-table" id="lookupTable">
+          <thead>
+            <tr>
+              <th>日期</th><th>類型</th><th>姓名</th><th>區域</th><th>媒體</th>
+              <th>職業</th><th>年齡</th><th>誠意</th><th>討論／狀況</th><th>銷售</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td colspan="10" class="empty-row">請選擇案場與銷售人員後查詢</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="/js/nav.js"></script>
+  <script src="/js/staff-lookup.js"></script>
+</body>
+</html>

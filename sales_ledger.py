@@ -91,8 +91,13 @@ def _pct_to_ratio(val, default_ratio=0.0) -> float:
 
 
 def _ratio_to_pct(ratio, fallback=0.0) -> float:
-    v = float(ratio or 0)
-    if v <= 0:
+    if ratio in (None, ''):
+        return float(fallback or 0)
+    try:
+        v = float(ratio)
+    except (TypeError, ValueError):
+        return float(fallback or 0)
+    if v < 0:
         return float(fallback or 0)
     return round(v * 100.0, 4) if v <= 1 else round(v, 4)
 
@@ -128,15 +133,20 @@ def _normalize_deduction_labels(raw) -> list[dict]:
     by_key = {d['key']: d['label'] for d in DEDUCTION_LABEL_DEFAULTS}
     if isinstance(raw, dict):
         for key, label in raw.items():
-            if key in by_key and str(label or '').strip():
-                by_key[key] = str(label).strip()
+            if key in by_key:
+                by_key[key] = str(label or '').strip()
     elif isinstance(raw, (list, tuple)):
+        seen = set()
         for item in raw:
-            if isinstance(item, dict):
-                key = str(item.get('key') or '').strip()
-                label = str(item.get('label') or '').strip()
-                if key in by_key and label:
-                    by_key[key] = label
+            if not isinstance(item, dict):
+                continue
+            key = str(item.get('key') or '').strip()
+            if key in by_key:
+                by_key[key] = str(item.get('label') or '').strip()
+                seen.add(key)
+        # 列表有送來的項目才覆寫；未出現的鍵維持預設
+        if seen:
+            pass
     return [{'key': k, 'label': by_key[k]} for k in (
         'surcharge', 'applianceGift', 'pickupVoucher', 'decoration', 'companyLoanInterest',
     )]
@@ -1786,14 +1796,10 @@ def aggregate_for_weekly(conn: sqlite3.Connection, site_id: str, start, end) -> 
     }
 
 
-def build_sales_excel(site_name: str, rows: list[dict]) -> bytes:
-    """匯出目前篩選到的銷售明細，並於最後一列加總金額。"""
-    wb = Workbook()
-    ws = wb.active
-    ws.title = '銷售總表'
-    headers = [
-        '類型', '訂單編號', '戶別', '客戶', '產品類型', '坪數',
-        '車位1', '車位2', '房售價(萬)', '車位售價(萬)', '合約總價(萬)', '實際成交總價(萬)',
+def sales_export_headers() -> list[str]:
+    return [
+        '類型', '訂單編號', '建設公司', '社區', '戶別', '客戶', '產品類型', '坪數',
+        '車位1', '車位2', '車位3', '房售價(萬)', '車位售價(萬)', '合約總價(萬)', '實際成交總價(萬)',
         '附加費(萬)', '家電禮券(萬)', '提貨券(萬)', '裝潢(萬)', '公司貸利息(萬)',
         '房底(萬)', '車底(萬)', '底總(萬)', '超價(萬)', '下訂日', '補足日', '簽約日',
         '請佣計價方式', '請佣銷售金額(萬)', '可請佣(萬)', '本期可請97%(萬)',
@@ -1802,6 +1808,39 @@ def build_sales_excel(site_name: str, rows: list[dict]) -> bytes:
         '預計本月可請金額(萬)', '業主報售日', '業主報簽日',
         '銷售人員1', '銷售人員2', '備註',
     ]
+
+
+def sales_export_row_values(row: dict) -> list:
+    return [
+        row.get('recordTypeLabel') or row.get('recordType'), row.get('orderNo'),
+        row.get('builderCompany'), row.get('community'),
+        row.get('unitNo'), row.get('customerName'), row.get('productType'),
+        row.get('areaPing'), row.get('parkingNo1'), row.get('parkingNo2'), row.get('parkingNo3'),
+        row.get('houseSalePrice'), row.get('parkingSalePrice'),
+        row.get('contractTotal'), row.get('actualTotalPrice'),
+        row.get('surcharge'), row.get('applianceGift'), row.get('pickupVoucher'),
+        row.get('decoration'), row.get('companyLoanInterest'),
+        row.get('houseBasePrice'), row.get('parkingBasePrice'),
+        row.get('baseTotal'), row.get('excessPrice'),
+        row.get('depositDate'), row.get('supplementDate'), row.get('signDate'),
+        '成交價' if row.get('commissionBaseMode') == 'deal' else '底價',
+        row.get('commissionSalesAmount'), row.get('commissionClaimable'),
+        row.get('commissionPayable'), row.get('commissionRetention'),
+        row.get('commissionClaimed'), row.get('commissionUnclaimed'),
+        row.get('commissionStatus'), row.get('commissionPeriod'),
+        row.get('commissionClaimDate'), row.get('commissionBooked'),
+        row.get('nextMonthUnits'), row.get('nextMonthParking'), row.get('nextMonthClaimable'),
+        row.get('ownerSaleReportDate'), row.get('ownerSignReportDate'),
+        row.get('salesperson1'), row.get('salesperson2'), row.get('memo'),
+    ]
+
+
+def build_sales_excel(site_name: str, rows: list[dict]) -> bytes:
+    """匯出目前篩選到的銷售明細，並於最後一列加總金額。"""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = '銷售總表'
+    headers = sales_export_headers()
     ws.append([f'{site_name} 銷售總表'])
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(headers))
     ws['A1'].font = Font(name='微軟正黑體', bold=True, size=16, color='1A4D7C')
@@ -1823,40 +1862,20 @@ def build_sales_excel(site_name: str, rows: list[dict]) -> bytes:
     for row in rows:
         for key in amount_keys:
             totals[key] += _num(row.get(key))
-        ws.append([
-            row.get('recordTypeLabel') or row.get('recordType'),
-            row.get('orderNo'), row.get('unitNo'), row.get('customerName'),
-            row.get('productType'), row.get('areaPing'), row.get('parkingNo1'), row.get('parkingNo2'),
-            row.get('houseSalePrice'), row.get('parkingSalePrice'),
-            row.get('contractTotal'), row.get('actualTotalPrice'),
-            row.get('surcharge'), row.get('applianceGift'), row.get('pickupVoucher'),
-            row.get('decoration'), row.get('companyLoanInterest'),
-            row.get('houseBasePrice'), row.get('parkingBasePrice'),
-            row.get('baseTotal'), row.get('excessPrice'),
-            row.get('depositDate'), row.get('supplementDate'), row.get('signDate'),
-            '成交價' if row.get('commissionBaseMode') == 'deal' else '底價',
-            row.get('commissionSalesAmount'), row.get('commissionClaimable'), row.get('commissionPayable'),
-            row.get('commissionRetention'), row.get('commissionClaimed'), row.get('commissionUnclaimed'),
-            row.get('commissionStatus'), row.get('commissionPeriod'), row.get('commissionClaimDate'),
-            row.get('commissionBooked'), row.get('nextMonthUnits'), row.get('nextMonthParking'),
-            row.get('nextMonthClaimable'),
-            row.get('ownerSaleReportDate') or row.get('reportDate'),
-            row.get('ownerSignReportDate'),
-            row.get('salesperson1'), row.get('salesperson2'), row.get('memo'),
-        ])
+        ws.append(sales_export_row_values(row))
 
     total_values = [''] * len(headers)
     total_values[0] = '合計'
-    total_values[3] = f'{len(rows)} 筆'
+    total_values[5] = f'{len(rows)} 筆'
     total_columns = {
-        'contractTotal': 10, 'actualTotalPrice': 11,
-        'surcharge': 12, 'applianceGift': 13, 'pickupVoucher': 14,
-        'decoration': 15, 'companyLoanInterest': 16,
-        'houseBasePrice': 17, 'parkingBasePrice': 18, 'baseTotal': 19, 'excessPrice': 20,
-        'commissionSalesAmount': 25, 'commissionClaimable': 26, 'commissionPayable': 27,
-        'commissionRetention': 28, 'commissionClaimed': 29, 'commissionUnclaimed': 30,
-        'commissionBooked': 34, 'nextMonthUnits': 35, 'nextMonthParking': 36,
-        'nextMonthClaimable': 37,
+        'contractTotal': 13, 'actualTotalPrice': 14,
+        'surcharge': 15, 'applianceGift': 16, 'pickupVoucher': 17,
+        'decoration': 18, 'companyLoanInterest': 19,
+        'houseBasePrice': 20, 'parkingBasePrice': 21, 'baseTotal': 22, 'excessPrice': 23,
+        'commissionSalesAmount': 28, 'commissionClaimable': 29, 'commissionPayable': 30,
+        'commissionRetention': 31, 'commissionClaimed': 32, 'commissionUnclaimed': 33,
+        'commissionBooked': 37, 'nextMonthUnits': 38, 'nextMonthParking': 39,
+        'nextMonthClaimable': 40,
     }
     for key, column_idx in total_columns.items():
         total_values[column_idx] = round(totals[key], 4)

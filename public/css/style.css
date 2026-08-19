@@ -1057,7 +1057,12 @@ td.is-deal-mode {
   padding-right: 0.35rem;
 }
 .field-options-grid .option-inactive {
-  opacity: 0.55;
+  opacity: 0.85;
+}
+.staff-departed-select {
+  margin-left: 0.4rem;
+  font-size: 0.85rem;
+  max-width: 10rem;
 }
 .btn-xs {
   border: none;

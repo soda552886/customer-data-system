@@ -853,6 +853,27 @@ def load_weekly_report(conn: sqlite3.Connection, site_id: str, week_start: str):
     }
 
 
+def previous_saved_inventory(conn: sqlite3.Connection, site_id: str, week_start: str) -> Optional[dict]:
+    """帶入上一份已存週報的房屋去化，新週才不會清成空白。"""
+    row = conn.execute(
+        '''
+        SELECT data FROM weekly_reports
+        WHERE site_id = ? AND week_start < ?
+        ORDER BY week_start DESC
+        LIMIT 1
+        ''',
+        (site_id, week_start),
+    ).fetchone()
+    if not row:
+        return None
+    try:
+        data = json.loads(row['data'] or '{}')
+    except (TypeError, json.JSONDecodeError):
+        return None
+    inv = data.get('inventory') if isinstance(data, dict) else None
+    return inv if isinstance(inv, dict) and inv else None
+
+
 def upsert_weekly_report(
     conn: sqlite3.Connection,
     *,

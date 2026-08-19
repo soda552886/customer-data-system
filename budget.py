@@ -516,9 +516,13 @@ def _week_rows(conn, site_id: str) -> list[dict]:
 def assemble_week_view(project: dict, week: dict, history: list[dict], week_start: str, *, week_saved=False) -> dict:
     media = []
     week_media_total = 0.0
-    opening = {c['name']: _num(c.get('openingCumulative')) for c in project['mediaCatalog']}
+    catalog = [
+        c for c in (project.get('mediaCatalog') or [])
+        if isinstance(c, dict) and _text(c.get('name'))
+    ]
+    opening = {_text(c.get('name')): _num(c.get('openingCumulative')) for c in catalog}
     prior = dict(opening)
-    prior_photos = {c['name']: _normalize_photos(c) for c in project['mediaCatalog']}
+    prior_photos = {_text(c.get('name')): _normalize_photos(c) for c in catalog}
     for rec in history:
         if rec['weekStart'] >= week_start:
             continue
@@ -535,8 +539,12 @@ def assemble_week_view(project: dict, week: dict, history: list[dict], week_star
             photos = _normalize_photos(item)
             if photos:
                 prior_photos[name] = photos
-    for item in week['mediaItems']:
-        name = item['name']
+    for item in (week.get('mediaItems') or []):
+        if not isinstance(item, dict):
+            continue
+        name = _text(item.get('name'))
+        if not name:
+            continue
         week_cost = _num(item.get('weekCost'))
         base = _num(prior.get(name), opening.get(name, item.get('openingCumulative') or 0))
         week_media_total += week_cost
@@ -550,7 +558,7 @@ def assemble_week_view(project: dict, week: dict, history: list[dict], week_star
             'cumulative': round(base + week_cost, 2),
             'photos': photos,
         })
-    extras = dict(week['extras'])
+    extras = dict(week.get('extras') or {})
     extra_lines = []
     extra_sum = week_media_total
     extra_lines.append({'key': 'media', 'label': '媒體', 'amount': round(week_media_total, 2), 'fromTable': True})
@@ -558,7 +566,7 @@ def assemble_week_view(project: dict, week: dict, history: list[dict], week_star
     if not isinstance(extra_items, list):
         extra_items = [
             {'key': f['key'], 'label': f['label'], 'amount': _num(extras.get(f['key']))}
-            for f in project['weekExtraFields']
+            for f in (project.get('weekExtraFields') or [])
         ]
     for field in extra_items:
         amt = _num(field.get('amount'))

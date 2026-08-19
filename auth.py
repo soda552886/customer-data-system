@@ -246,6 +246,8 @@ def is_public_api(path: str, method: str) -> bool:
         return True
     if path == '/api/customers/lookup' and method == 'GET':
         return True
+    if path == '/api/customers/staff-lookup' and method == 'GET':
+        return True
     if path in PUBLIC_API_POST_ONLY and method == 'POST':
         return True
     return False

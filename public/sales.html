@@ -108,55 +108,13 @@
     </section>
 
     <section class="card" id="salesSummaryCard">
-      <h2>請佣總覽（可請／已請／未請）</h2>
-      <p class="hint">由銷售明細自動彙總。已請＝已填請佣期別或請佣日期；預計本月可請＝期別「請款月份」等於本月的戶／車／可請金額；已入帳＝期別預計入帳日到期的拆半合計。百分比依上方「本案場請佣設定」顯示。</p>
+      <h2>請佣總覽</h2>
+      <p class="hint">由銷售明細自動彙總。百分比依上方「本案場請佣設定」顯示。</p>
       <div class="form-actions" style="margin-bottom:0.75rem;">
         <button type="button" id="exportCommissionBtn" class="btn btn-secondary">匯出請佣 Excel</button>
-        <span class="hint">含「請佣摘要」「期別服務費」兩張表</span>
       </div>
       <div id="commissionMatrix" class="commission-matrix"></div>
       <div id="salesSummaryGrid" class="stats-grid" style="margin-top:1rem;"></div>
-    </section>
-
-    <section class="card" id="commissionBatchCard">
-      <h2>期別服務費（拆半入帳）</h2>
-      <p class="hint">依銷售單「請佣期別」自動產生列。維護請款月、拆半 50%、兩次預計入帳日與墊款／折讓備註；依預計入帳日到期自動上色（黃＝第一筆到期，綠＝第二筆到期）。點該列「戶／車」數字（例如 3／2）可展開該期戶別明細。</p>
-      <div class="form-actions" style="margin-bottom:0.75rem;">
-        <button type="button" id="addBatchBtn" class="btn btn-secondary">新增期別</button>
-        <button type="button" id="reloadBatchesBtn" class="btn btn-outline">重新同步期別</button>
-      </div>
-      <div class="table-wrap">
-        <table class="data-table" id="commissionBatchTable">
-          <thead>
-            <tr>
-              <th>請款期別</th>
-              <th>請款月份</th>
-              <th>戶／車</th>
-              <th>服務費97%</th>
-              <th>拆半1</th>
-              <th>入帳日1</th>
-              <th>拆半2</th>
-              <th>入帳日2</th>
-              <th>墊款／折讓</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-      </div>
-      <div id="batchDealPanel" class="batch-deal-panel hidden">
-        <h3 class="section-title" id="batchDealTitle">該期戶別</h3>
-        <div class="table-wrap">
-          <table class="data-table" id="batchDealTable">
-            <thead>
-              <tr>
-                <th>戶別</th><th>客戶</th><th>訂單</th><th>戶／車</th><th>97%(萬)</th><th>狀態</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
-        </div>
-      </div>
     </section>
 
     <section class="card hidden" id="salesFormCard">
@@ -403,41 +361,6 @@
             <input type="number" step="0.01" id="fCustomerPaidPct" value="0">
             <small class="field-hint">例：繳 60 萬／成交 1000 萬＝6%；達門檻後解鎖可請%</small>
           </div>
-          <div class="form-group">
-            <label for="fCommPeriod">請佣期別</label>
-            <input type="text" id="fCommPeriod" placeholder="例：第3期／2026-03">
-          </div>
-          <div class="form-group">
-            <label for="fCommClaimDate">請佣日期</label>
-            <input type="date" id="fCommClaimDate">
-          </div>
-          <div class="form-group">
-            <label for="fCommStatus">已請／未請</label>
-            <input type="text" id="fCommStatus" value="未請" readonly>
-          </div>
-          <div class="form-group">
-            <label for="fCommClaimed">已請佣金額(萬)</label>
-            <input type="number" step="0.0001" id="fCommClaimed" value="0" readonly>
-          </div>
-          <div class="form-group">
-            <label for="fCommUnclaimed">未請金額(萬)</label>
-            <input type="number" step="0.0001" id="fCommUnclaimed" value="0" readonly>
-          </div>
-          <div class="form-group">
-            <label for="fCommissionBookedStatus">是否已入帳</label>
-            <select id="fCommissionBookedStatus">
-              <option value="否">否</option>
-              <option value="是">是（自動帶入本期可請97%金額）</option>
-            </select>
-            <span class="field-hint">不必逐戶改成「是」。在上方「期別服務費」填預計入帳日，到期後週報的已入帳金額會自動加總拆半入帳。</span>
-          </div>
-          <div class="form-group">
-            <label for="fCommBooked">已入帳金額(萬)</label>
-            <input type="number" step="0.0001" id="fCommBooked" value="0">
-          </div>
-          <div class="form-group full-width">
-            <p class="hint">「預計本月可請戶數／車位／金額」改由期別「請款月份」＝本月自動加總，不在單戶編輯。週報工作台仍可手動微調。</p>
-          </div>
           <div class="form-group full-width">
             <label for="fMemo">備註</label>
             <input type="text" id="fMemo">
@@ -456,7 +379,7 @@
         <h2>明細列表 <span id="salesTotalBadge" class="badge badge-muted">0</span></h2>
         <button type="button" id="deleteAllSalesBtn" class="btn btn-danger hidden">全部刪除</button>
       </div>
-      <p id="deleteAllSalesHint" class="hint danger-hint hidden">僅最高主管可清空目前案場全部銷售明細與期別服務費；無法復原，請先匯出備份。</p>
+      <p id="deleteAllSalesHint" class="hint danger-hint hidden">僅最高主管可清空目前案場全部銷售明細；無法復原，請先匯出備份。</p>
       <div class="table-wrap table-wrap-scroll">
         <table class="data-table" id="salesTable">
           <thead>
@@ -464,7 +387,7 @@
               <th>類型</th><th>訂單編號</th><th>建設公司</th><th>社區</th><th>戶別</th><th>客戶</th><th>車位</th>
               <th>合約總價</th><th>實際成交總價</th><th>房底</th><th>車底</th><th>底總</th><th>附加費</th>
               <th>請佣銷售金額</th>
-              <th>可請</th><th>已請</th><th>未請</th><th>請佣狀態</th>
+              <th>可請</th>
               <th>業主報售日</th><th>業主報簽日</th><th>銷售</th><th class="col-actions">操作</th>
             </tr>
           </thead>

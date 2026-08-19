@@ -76,20 +76,28 @@ function renderFieldCard(field) {
   const checks = field.allOptions.map((opt) => {
     const custom = isCustomOption(field, opt);
     const on = enabled.has(opt);
+    const departed = (field.staffDeparted || {})[opt] || 'resigned';
     const statusHint = isStaff
-      ? (on ? ' <span class="hint">在職</span>' : ' <span class="hint">已離職</span>')
+      ? (on ? ' <span class="hint">本案在職</span>' : ' <span class="hint">未在本案</span>')
+      : '';
+    const departedSelect = isStaff && !on
+      ? `<select data-staff-departed="${escapeHtml(opt)}" class="staff-departed-select">
+           <option value="resigned"${departed === 'resigned' ? ' selected' : ''}>已離職</option>
+           <option value="transferred"${departed === 'transferred' ? ' selected' : ''}>已調離原工地</option>
+         </select>`
       : '';
     return `
     <label class="checkbox-label${custom ? ' option-custom' : ''}${isStaff && !on ? ' option-inactive' : ''}">
       <input type="checkbox" data-field-key="${escapeHtml(field.key)}" value="${escapeHtml(opt)}" ${on ? 'checked' : ''}>
       ${escapeHtml(opt)}${statusHint}${custom ? ' <span class="hint">自訂</span>' : ''}
+      ${departedSelect}
       ${custom ? `<button type="button" class="btn-xs link-btn" data-field-key="${escapeHtml(field.key)}" data-remove-option="${escapeHtml(opt)}" title="移除自訂選項">✕</button>` : ''}
     </label>
   `;
   }).join('');
 
   const staffHint = isStaff
-    ? '<p class="hint" style="margin:0.5rem 0 0;">勾選＝在職（填寫表單可選）；取消勾選＝已離職（表單自動隱藏，週報成交比累計併入「前期銷售」）。名單勿刪除，保留歷史統計。</p>'
+    ? '<p class="hint" style="margin:0.5rem 0 0;">勾選＝本案在職（填寫表單可選）。取消勾選後請選「已離職」或「已調離原工地」（僅換工地、人還在公司）。未在職名單勿刪，歷史成交才能對到原銷售。</p>'
     : '';
 
   return `
@@ -251,11 +259,30 @@ function toggleFieldOptions(fieldKey, checked) {
   updateFieldCount(fieldKey);
 }
 
+function collectStaffDeparted(field) {
+  const departed = { ...(field.staffDeparted || {}) };
+  document.querySelectorAll('[data-staff-departed]').forEach((sel) => {
+    const name = sel.dataset.staffDeparted;
+    if (name) departed[name] = sel.value || 'resigned';
+  });
+  (field.enabledOptions || []).forEach((name) => { delete departed[name]; });
+  field.staffDeparted = departed;
+  return departed;
+}
+
 function collectOptionsPayload() {
   const payload = {};
   fieldItems.forEach((field) => {
     const boxes = document.querySelectorAll(`#fieldsContainer input[data-field-key="${CSS.escape(field.key)}"]`);
     const selected = Array.from(boxes).filter((cb) => cb.checked).map((cb) => cb.value);
+    if (field.key === '__salesStaff__') {
+      field.enabledOptions = selected;
+      payload[field.key] = {
+        enabled: selected,
+        departed: collectStaffDeparted(field),
+      };
+      return;
+    }
     const defaults = field.defaultOptions || [];
     if (!selected.length) return;
     const sameAsDefaults = (
@@ -507,7 +534,24 @@ document.getElementById('resetOrderBtn').addEventListener('click', async () => {
 });
 
 document.getElementById('fieldsContainer').addEventListener('change', (e) => {
+  if (e.target.matches('[data-staff-departed]')) {
+    const field = fieldItems.find((f) => f.key === '__salesStaff__');
+    if (!field) return;
+    field.staffDeparted = field.staffDeparted || {};
+    field.staffDeparted[e.target.dataset.staffDeparted] = e.target.value || 'resigned';
+    return;
+  }
   if (e.target.matches('input[data-field-key]')) {
+    const field = fieldItems.find((f) => f.key === e.target.dataset.fieldKey);
+    if (field && field.key === '__salesStaff__') {
+      collectStaffDeparted(field);
+      const boxes = document.querySelectorAll(`#fieldsContainer input[data-field-key="${CSS.escape(field.key)}"]`);
+      field.enabledOptions = Array.from(boxes).filter((cb) => cb.checked).map((cb) => cb.value);
+      if (e.target.checked) delete field.staffDeparted[e.target.value];
+      else if (!field.staffDeparted[e.target.value]) field.staffDeparted[e.target.value] = 'resigned';
+      renderFields();
+      return;
+    }
     updateFieldCount(e.target.dataset.fieldKey);
   }
 });

@@ -757,7 +757,9 @@ function fillEditFormData(data) {
           if (!exists) {
             const opt = document.createElement('option');
             opt.value = String(val);
-            opt.textContent = field.dynamicStaff ? `${val}（原銷售／已離職）` : String(val);
+            opt.textContent = field.dynamicStaff
+              ? `${val}${((fieldConfig.staffDeparted || {})[val] === 'transferred') ? '（已調離原工地）' : '（原銷售／已離職）'}`
+              : String(val);
             el.appendChild(opt);
           }
         }

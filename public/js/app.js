@@ -50,6 +50,12 @@ function showToast(msg, type = 'success') {
   setTimeout(() => toast.classList.add('hidden'), 3000);
 }
 
+function staffOffSiteSuffix(name) {
+  const departed = (fieldConfig.staffDeparted || {})[name];
+  if (departed === 'transferred') return '（已調離原工地）';
+  return '（原銷售／已離職）';
+}
+
 function fieldVisible(field) {
   if (field.showFor && !field.showFor.includes(currentVisitType)) return false;
   if (field.sites && !field.sites.includes(currentSiteId)) return false;
@@ -269,7 +275,7 @@ function fillFormData(data) {
       } else {
         const el = document.getElementById(field.key);
         if (!el) return;
-        ensureSelectHasOption(el, val, field.dynamicStaff ? '（原銷售／已離職）' : '');
+        ensureSelectHasOption(el, val, field.dynamicStaff ? staffOffSiteSuffix(val) : '');
         el.value = val;
       }
     });

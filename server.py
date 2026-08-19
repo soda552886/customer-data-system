@@ -26,7 +26,8 @@ from weekly_reports import (
     build_auto_stats, build_weekly_excel, commission_summary, default_week_number,
     empty_manual_payload, enrich_dims_with_phones, init_weekly_tables, inventory_summary,
     list_weekly_reports, load_weekly_report, merge_manual, monday_of,
-    normalize_phone_calls_detail, normalize_week1_start, phone_total_from_manual, roc_year,
+    normalize_phone_calls_detail, normalize_week1_start, phone_total_from_manual,
+    previous_saved_inventory, roc_year,
     upsert_weekly_report, week_bounds, safe_week_number,
 )
 from sales_ledger import (
@@ -34,7 +35,8 @@ from sales_ledger import (
     build_sales_excel, commission_defaults_for_site, create_sales_deal, delete_all_sales_deals,
     delete_commission_batch, delete_sales_deal, get_sales_deal, init_sales_tables,
     list_commission_batches, list_sales_deals, normalize_sales_settings_from_api,
-    parse_deal_date, update_sales_deal, upsert_commission_batch,
+    parse_deal_date, sales_export_headers, sales_export_row_values, update_sales_deal,
+    upsert_commission_batch,
 )
 from budget import init_budget_tables, load_budget, save_budget
 from field_options import (
@@ -44,7 +46,7 @@ from field_options import (
     load_site_option_overrides, load_site_report_export_config,
     normalize_hidden_fields_payload, normalize_report_export_payload, normalize_save_payload,
     save_site_hidden_fields, save_site_option_overrides, save_site_report_export_config,
-    SALES_STAFF_FIELD_KEY, resolve_field_options,
+    SALES_STAFF_FIELD_KEY, resolve_field_options, staff_departed_map,
 )
 
 BASE_DIR = Path(__file__).parent
@@ -122,6 +124,19 @@ def init_db():
             )
         conn.commit()
     seed_initial_admin(conn)
+    conn.execute(
+        "UPDATE sites SET name = '麗寶Métro' WHERE name IN ('圓山Métro', '圓山Metro') OR name LIKE '圓山M%'",
+    )
+    conn.execute(
+        "UPDATE customers SET site_name = '麗寶Métro' WHERE site_name IN ('圓山Métro', '圓山Metro') OR site_name LIKE '圓山M%'",
+    )
+    try:
+        conn.execute(
+            "UPDATE weekly_reports SET site_name = '麗寶Métro' WHERE site_name IN ('圓山Métro', '圓山Metro') OR site_name LIKE '圓山M%'",
+        )
+    except sqlite3.OperationalError:
+        pass
+    conn.commit()
     conn.close()
 
 
@@ -699,7 +714,11 @@ def fields_payload_for_site(conn, site_id: str) -> dict:
     )
     hidden = load_site_hidden_fields(conn, site_id)
     sections = apply_site_hidden_fields(sections, hidden)
-    return {'sections': sections, 'salesStaff': sales_staff}
+    return {
+        'sections': sections,
+        'salesStaff': sales_staff,
+        'staffDeparted': staff_departed_map(overrides),
+    }
 
 
 @app.before_request
@@ -1179,6 +1198,29 @@ def patch_site(site_id):
     body = request.get_json() or {}
     detail = {}
     week1 = row['week1_start']
+    site_name = row['name']
+    if 'name' in body:
+        new_name = (body.get('name') or '').strip()
+        if not new_name:
+            conn.close()
+            return jsonify({'error': '請輸入案場名稱'}), 400
+        if new_name != row['name']:
+            try:
+                conn.execute('UPDATE sites SET name = ? WHERE id = ?', (new_name, site_id))
+            except sqlite3.IntegrityError:
+                conn.close()
+                return jsonify({'error': '此案場名稱已存在'}), 409
+            conn.execute('UPDATE customers SET site_name = ? WHERE site_id = ?', (new_name, site_id))
+            try:
+                conn.execute('UPDATE weekly_reports SET site_name = ? WHERE site_id = ?', (new_name, site_id))
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute('UPDATE sales_deals SET site_name = ? WHERE site_id = ?', (new_name, site_id))
+            except sqlite3.OperationalError:
+                pass
+            site_name = new_name
+            detail['name'] = new_name
     if 'week1Start' in body or 'week1_start' in body:
         week1 = normalize_week1_start(body.get('week1Start', body.get('week1_start')))
         conn.execute('UPDATE sites SET week1_start = ? WHERE id = ?', (week1, site_id))
@@ -1198,9 +1240,9 @@ def patch_site(site_id):
         return jsonify({'error': '沒有可更新的欄位'}), 400
     log_operation(
         conn, user, 'site_update',
-        f'更新案場設定：{row["name"]}',
+        f'更新案場設定：{site_name}',
         entity_type='site', entity_id=site_id,
-        site_id=site_id, site_name=row['name'],
+        site_id=site_id, site_name=site_name,
         detail=detail,
     )
     conn.commit()
@@ -1209,7 +1251,7 @@ def patch_site(site_id):
         'success': True,
         'site': {
             'id': row['id'],
-            'name': row['name'],
+            'name': site_name,
             'group': row['group_type'],
             'week1Start': week1 or '',
             'salesSettings': sales_settings,
@@ -1321,9 +1363,9 @@ def api_get_budget():
             site_name=site['name'],
             origin=_site_week1_start(site),
         )
-    except ValueError as exc:
+    except Exception as exc:
         conn.close()
-        return jsonify({'error': str(exc)}), 400
+        return jsonify({'error': f'載入失敗：{exc}'}), 400
     conn.close()
     return jsonify(payload)
 
@@ -1495,12 +1537,18 @@ def weekly_summary():
     saved = load_weekly_report(conn, site_id, week_start_s)
     base = empty_manual_payload(start, end, origin=origin)
     manual = merge_manual(base, (saved or {}).get('data') if saved else None)
+    if not saved:
+        prev_inv = previous_saved_inventory(conn, site_id, week_start_s)
+        if prev_inv:
+            inv = dict(manual.get('inventory') or {})
+            inv.update(prev_inv)
+            manual['inventory'] = inv
 
     phone_sum = phone_total_from_manual(manual)
     active_staff = get_active_sales_staff(conn, site_id)
     auto = build_auto_stats(
         conn, site_id, start, end,
-        included_visitor_ids=manual.get('includedVisitorIds'),
+        included_visitor_ids=None,
         active_staff=active_staff,
         week_phone_total=phone_sum,
     )
@@ -1515,7 +1563,9 @@ def weekly_summary():
         'siteName': site['name'],
         'weekStart': week_start_s,
         'weekEnd': week_end_s,
-        'weekNumber': manual.get('weekNumber') or default_week_number(start, origin),
+        'weekNumber': default_week_number(start, origin) if origin else (
+            manual.get('weekNumber') or default_week_number(start, origin)
+        ),
         'week1Start': origin or '',
         'rocLabel': f'{roc_year(start)}/{start.month}/{start.day}-{roc_year(end)}/{end.month}/{end.day}',
         'saved': bool(saved),
@@ -1641,7 +1691,7 @@ def export_weekly_csv():
     phone_sum = phone_total_from_manual(manual)
     auto = build_auto_stats(
         conn, site_id, start, end,
-        included_visitor_ids=manual.get('includedVisitorIds'),
+        included_visitor_ids=None,
         active_staff=get_active_sales_staff(conn, site_id),
         week_phone_total=phone_sum,
     )
@@ -1786,7 +1836,7 @@ def export_weekly_xlsx():
     phone_sum = phone_total_from_manual(manual)
     auto = build_auto_stats(
         conn, site_id, start, end,
-        included_visitor_ids=manual.get('includedVisitorIds'),
+        included_visitor_ids=None,
         active_staff=get_active_sales_staff(conn, site_id),
         week_phone_total=phone_sum,
     )
@@ -1852,11 +1902,13 @@ def api_list_sales_deals():
         conn, site_id, record_type=record_type, q=q, limit=limit, offset=offset,
     )
     staff = get_active_sales_staff(conn, site_id)
+    departed = staff_departed_map(load_site_option_overrides(conn, site_id))
     conn.close()
     return jsonify({
         'total': total,
         'records': rows,
         'activeStaff': staff,
+        'staffDeparted': departed,
         'recordTypes': [{'id': k, 'label': v} for k, v in SALES_RECORD_TYPES.items()],
     })
 
@@ -1878,8 +1930,9 @@ def _sales_import_header(value):
 # 請佣總表常見重複欄名：底價區／階段區取最後一次（合約區改用前綴欄名）
 _SALES_HEADER_KEEP_LAST = {
     _sales_import_header(x) for x in (
-        '房底', '車底', '房底價', '車底價',
+        '房底', '車底', '房底價', '車底價', '底價車位', '停車位底價',
         '房車總底', '房車總底價', '房單價', '房底單價',
+        '附加費', '其它費用', '其他費用',
     )
 }
 
@@ -1893,6 +1946,7 @@ SALES_IMPORT_ALIASES = {
     'productType': ['產品類型', '產品', '用途', '建物型態', '建物型態'],
     'areaPing': ['坪數', '建物坪數', '戶別坪數'],
     'parkingNo1': ['車位1', '車位號碼1', '車位編號1', '編號1', '汽車1'],
+    'parkingNo2': ['車位2', '車位號碼2', '車位編號2', '編號2', '汽車2'],
     'parkingNo3': ['車位3', '車位號碼3', '車位編號3', '編號3', '汽車3'],
     'builderCompany': ['建設公司', '建商', '建設'],
     'community': ['社區', '社區名稱', '建案社區'],
@@ -1910,8 +1964,8 @@ SALES_IMPORT_ALIASES = {
         '實際成交總價萬', '實際成交總價',
         '房車售價未含附加及其他費用', '房車售價',
     ],
-    'houseBasePrice': ['房底', '底價房地', '房底價'],
-    'parkingBasePrice': ['車底', '底價車位', '車底價'],
+    'houseBasePrice': ['房底', '底價房地', '房底價', '房屋底價'],
+    'parkingBasePrice': ['車底', '底價車位', '車底價', '車位底價', '停車位底價'],
     'basePrice': ['底價總價', '底總萬', '底總', '總底價', '房車總底', '房車總底價'],
     'surcharge': ['附加費', '其它費用', '其他費用', '請款需扣除', '冷氣', '交屋折價款', '交屋折價', '建材設備'],
     'applianceGift': ['家電禮券', '家電禮'],
@@ -2087,6 +2141,12 @@ def _sales_import_payload(row, normalized_headers, sheet_name=''):
             payload['surcharge'] = contract - actual
     if not payload.get('houseSalePrice') and actual and not payload.get('parkingSalePrice'):
         payload['houseSalePrice'] = actual
+    hb = _sales_import_num_if_col(row, normalized_headers, 'houseBasePrice')
+    pb = _sales_import_num_if_col(row, normalized_headers, 'parkingBasePrice')
+    if hb is not None:
+        payload['houseBasePrice'] = hb
+    if pb is not None:
+        payload['parkingBasePrice'] = pb
     if not payload.get('houseBasePrice') and get('basePrice'):
         payload['basePrice'] = get('basePrice')
         if not payload.get('parkingBasePrice'):
@@ -2378,17 +2438,7 @@ def api_export_sales_csv():
     conn.close()
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow([
-        '類型', '訂單編號', '戶別', '客戶', '產品類型', '坪數', '車位1', '車位2',
-        '房售價(萬)', '車位售價(萬)', '合約總價(萬)', '實際成交總價(萬)',
-        '附加費(萬)', '家電禮券(萬)', '提貨券(萬)', '裝潢(萬)', '公司貸利息(萬)',
-        '房底(萬)', '車底(萬)', '底總(萬)', '超價(萬)', '下訂日', '補足日', '簽約日',
-        '請佣計價方式',
-        '請佣銷售金額(萬)', '可請佣(萬)', '本期可請97%(萬)', '保留款3%(萬)',
-        '已請(萬)', '未請(萬)', '請佣狀態', '請佣期別', '請佣日期', '已入帳金額(萬)',
-        '預計本月可請戶數', '預計本月可請車位', '預計本月可請金額(萬)',
-        '業主報售日', '業主報簽日', '銷售人員1', '銷售人員2', '備註',
-    ])
+    writer.writerow(sales_export_headers())
     total_fields = [
         'houseSalePrice', 'parkingSalePrice', 'contractTotal', 'actualTotalPrice',
         'surcharge', 'applianceGift', 'pickupVoucher', 'decoration', 'companyLoanInterest',
@@ -2401,30 +2451,9 @@ def api_export_sales_csv():
     for row in rows:
         for key in total_fields:
             totals[key] += float(row.get(key) or 0)
-        writer.writerow([
-            row.get('recordTypeLabel') or row.get('recordType'), row.get('orderNo'),
-            row.get('unitNo'), row.get('customerName'), row.get('productType'),
-            row.get('areaPing'), row.get('parkingNo1'), row.get('parkingNo2'),
-            row.get('houseSalePrice'), row.get('parkingSalePrice'),
-            row.get('contractTotal'), row.get('actualTotalPrice'),
-            row.get('surcharge'), row.get('applianceGift'), row.get('pickupVoucher'),
-            row.get('decoration'), row.get('companyLoanInterest'),
-            row.get('houseBasePrice'), row.get('parkingBasePrice'),
-            row.get('baseTotal'), row.get('excessPrice'),
-            row.get('depositDate'), row.get('supplementDate'), row.get('signDate'),
-            '成交價' if row.get('commissionBaseMode') == 'deal' else '底價',
-            row.get('commissionSalesAmount'), row.get('commissionClaimable'),
-            row.get('commissionPayable'), row.get('commissionRetention'),
-            row.get('commissionClaimed'), row.get('commissionUnclaimed'),
-            row.get('commissionStatus'), row.get('commissionPeriod'), row.get('commissionClaimDate'),
-            row.get('commissionBooked'), row.get('nextMonthUnits'), row.get('nextMonthParking'),
-            row.get('nextMonthClaimable'),
-            row.get('ownerSaleReportDate') or row.get('reportDate'),
-            row.get('ownerSignReportDate'),
-            row.get('salesperson1'), row.get('salesperson2'), row.get('memo'),
-        ])
+        writer.writerow(sales_export_row_values(row))
     writer.writerow([
-        '合計', '', '', f'{len(rows)} 筆', '', '', '', '',
+        '合計', '', '', '', '', f'{len(rows)} 筆', '', '', '', '', '',
         round(totals['houseSalePrice'], 4), round(totals['parkingSalePrice'], 4),
         round(totals['contractTotal'], 4), round(totals['actualTotalPrice'], 4),
         round(totals['surcharge'], 4), round(totals['applianceGift'], 4),
@@ -3196,6 +3225,86 @@ def lookup_customer():
         'count': len(matches),
         'record': primary,
         'records': matches,
+    })
+
+
+STAFF_LOOKUP_FIELDS = (
+    'visitDate', 'returnVisitDate', 'firstVisitDate', 'visitType', 'customerName',
+    'region', 'media1', 'media', 'occupation', 'age', 'sincerity', 'introUnit',
+    'discussion', 'notPurchasedReason', 'salesperson1', 'salesperson2', 'isDeal',
+    'isCoManaged',
+)
+
+
+@app.route('/api/customers/staff-lookup')
+def staff_visitor_lookup():
+    site_id = (request.args.get('siteId') or '').strip()
+    salesperson = (request.args.get('salesperson') or '').strip()
+    if not site_id:
+        return jsonify({'error': '請選擇案場'}), 400
+    site = get_site_by_id(site_id)
+    if not site:
+        return jsonify({'error': '找不到此案場'}), 404
+
+    conn = get_db()
+    user = get_current_user(conn)
+    if user:
+        denied = ensure_site_access(user, site_id)
+        if denied:
+            conn.close()
+            return denied
+
+    rows = conn.execute(
+        '''
+        SELECT id, visit_type, visit_date, first_visit_date, data
+        FROM customers
+        WHERE site_id = ?
+        ORDER BY visit_date DESC, id DESC
+        ''',
+        (site_id,),
+    ).fetchall()
+    conn.close()
+
+    names = set()
+    records = []
+    for row in rows:
+        try:
+            data = json.loads(row['data'] or '{}')
+        except (TypeError, json.JSONDecodeError):
+            data = {}
+        s1 = str(data.get('salesperson1') or '').strip()
+        s2 = str(data.get('salesperson2') or '').strip()
+        if s1:
+            names.add(s1)
+        if s2:
+            names.add(s2)
+        if salesperson and salesperson not in (s1, s2):
+            continue
+        if not salesperson:
+            continue
+        rec = {
+            'id': row['id'],
+            'visitType': row['visit_type'] or data.get('visitType') or '',
+            'visitDate': data.get('visitDate') or row['visit_date'] or '',
+            'firstVisitDate': data.get('firstVisitDate') or row['first_visit_date'] or '',
+        }
+        for key in STAFF_LOOKUP_FIELDS:
+            if key not in rec:
+                rec[key] = data.get(key) or ''
+        rec['salesperson1'] = s1
+        rec['salesperson2'] = s2
+        rec.pop('phone', None)
+        records.append(rec)
+
+    staff_names = sorted(names)
+    return jsonify({
+        'siteId': site_id,
+        'siteName': site['name'],
+        'salesperson': salesperson,
+        'staff': staff_names,
+        'count': len(records),
+        'records': records[:800],
+        'readonly': True,
     })
 
 

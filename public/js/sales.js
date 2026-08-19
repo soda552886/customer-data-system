@@ -1,6 +1,7 @@
 let sites = [];
 let recordTypes = [];
 let activeStaff = [];
+let staffDeparted = {};
 let editingId = null;
 let commissionDefaults = {
   rate: 0.0485,
@@ -37,7 +38,7 @@ function escapeHtml(str) {
 }
 
 function numberValue(id) {
-  return Number(document.getElementById(id).value) || 0;
+  return Number(document.getElementById(id)?.value) || 0;
 }
 
 function roundMoney(value) {
@@ -46,7 +47,8 @@ function roundMoney(value) {
 
 function pctFromRatio(ratio, fallback) {
   const v = Number(ratio);
-  if (!Number.isFinite(v) || v <= 0) return fallback;
+  if (!Number.isFinite(v) || v < 0) return fallback;
+  if (v === 0) return 0;
   return roundMoney(v > 1 ? v : v * 100);
 }
 
@@ -94,7 +96,7 @@ function fillSiteSettingsForm(defaults) {
     .join('\n');
   (d.deductionLabels || []).forEach((item) => {
     const field = DEDUCTION_FIELDS.find((f) => f.key === item.key);
-    if (field) document.getElementById(field.settingId).value = item.label || field.fallback;
+    if (field) document.getElementById(field.settingId).value = item.label ?? '';
   });
   const hint = document.getElementById('ssSettingsHint');
   if (hint) hint.textContent = d.label || '';
@@ -103,7 +105,7 @@ function fillSiteSettingsForm(defaults) {
 function collectSiteSettings() {
   const labels = DEDUCTION_FIELDS.map((f) => ({
     key: f.key,
-    label: (document.getElementById(f.settingId)?.value || f.fallback).trim() || f.fallback,
+    label: (document.getElementById(f.settingId)?.value || '').trim(),
   }));
   return {
     scheme: document.getElementById('ssScheme').value || 'simple',
@@ -121,13 +123,21 @@ function applyDeductionLabels(labels) {
   (labels || []).forEach((item) => {
     if (item && item.key) map[item.key] = item.label;
   });
+  const visibleNames = [];
   DEDUCTION_FIELDS.forEach((f) => {
+    const label = map[f.key];
+    const shown = String(label ?? f.fallback).trim();
+    const input = document.getElementById(f.inputId);
+    const wrap = input?.closest('.form-group');
+    if (wrap) wrap.classList.toggle('hidden', !shown);
     const el = document.querySelector(`label[for="${f.inputId}"]`);
-    if (el) el.textContent = map[f.key] || f.fallback;
+    if (el && shown) el.textContent = shown;
+    if (shown) visibleNames.push(shown);
   });
-  const names = DEDUCTION_FIELDS.map((f) => map[f.key] || f.fallback);
   const excess = document.querySelector('label[for="fExcessPrice"]');
-  if (excess) excess.textContent = `超價＝合約總價−底總−${names.join('−')}`;
+  if (excess) excess.textContent = visibleNames.length
+    ? `超價＝合約總價−底總−${visibleNames.join('−')}`
+    : '超價＝合約總價−底總';
 }
 
 function applyCommissionResultLabels(defaults) {
@@ -203,8 +213,8 @@ function calculateCommission() {
   const rate = ratePct > 1 ? ratePct / 100 : ratePct;
   const payableRatio = payablePct > 1 ? payablePct / 100 : payablePct;
   const retentionRatio = retentionPct > 1 ? retentionPct / 100 : retentionPct;
-  const period = document.getElementById('fCommPeriod').value.trim();
-  const claimDate = document.getElementById('fCommClaimDate').value;
+  const period = document.getElementById('fCommPeriod')?.value.trim() || '';
+  const claimDate = document.getElementById('fCommClaimDate')?.value || '';
   const isClaimed = Boolean(period || claimDate);
   const scheme = commissionDefaults.scheme || 'simple';
 
@@ -223,21 +233,24 @@ function calculateCommission() {
     payable = salesAmount * (unlockedPct / 100);
     retention = salesAmount * handoverRatio;
   }
-  const claimed = isClaimed ? payable : 0;
-  const unclaimed = scheme === 'payment_tiers'
-    ? Math.max(claimable - claimed - retention, 0)
-    : Math.max(claimable - claimed, 0);
-  const status = isClaimed ? '已請' : '未請';
 
   document.getElementById('fCommClaimable').value = roundMoney(claimable);
   document.getElementById('fCommPayable').value = roundMoney(payable);
   document.getElementById('fCommRetention').value = roundMoney(retention);
-  document.getElementById('fCommClaimed').value = roundMoney(claimed);
-  document.getElementById('fCommUnclaimed').value = roundMoney(unclaimed);
+  const claimedEl = document.getElementById('fCommClaimed');
+  const unclaimedEl = document.getElementById('fCommUnclaimed');
   const statusEl = document.getElementById('fCommStatus');
-  statusEl.value = status;
-  statusEl.classList.toggle('comm-status-claimed', isClaimed);
-  statusEl.classList.toggle('comm-status-open', !isClaimed);
+  if (claimedEl) claimedEl.value = roundMoney(isClaimed ? payable : 0);
+  if (unclaimedEl) {
+    unclaimedEl.value = roundMoney(scheme === 'payment_tiers'
+      ? Math.max(claimable - (isClaimed ? payable : 0) - retention, 0)
+      : Math.max(claimable - (isClaimed ? payable : 0), 0));
+  }
+  if (statusEl) {
+    statusEl.value = isClaimed ? '已請' : '未請';
+    statusEl.classList.toggle('comm-status-claimed', isClaimed);
+    statusEl.classList.toggle('comm-status-open', !isClaimed);
+  }
   syncCommSalesAmountStyle();
   syncBookedAmount();
   syncCurrentMonthClaimable();
@@ -302,6 +315,11 @@ function fillTypeSelects() {
   });
 }
 
+function staffOffSiteLabel(name) {
+  if ((staffDeparted || {})[name] === 'transferred') return `${name}（已調離原工地）`;
+  return `${name}（原銷售／已離職）`;
+}
+
 function fillStaffSelects() {
   ['fSales1', 'fSales2'].forEach((id) => {
     const sel = document.getElementById(id);
@@ -309,7 +327,7 @@ function fillStaffSelects() {
     sel.innerHTML = '<option value="">未填</option>';
     activeStaff.forEach((name) => sel.appendChild(new Option(name, name)));
     if (cur && ![...sel.options].some((o) => o.value === cur)) {
-      sel.appendChild(new Option(`${cur}（原銷售／已離職）`, cur));
+      sel.appendChild(new Option(staffOffSiteLabel(cur), cur));
     }
     sel.value = cur;
   });
@@ -354,8 +372,8 @@ function collectForm() {
     commissionPayableRatio: numberValue('fCommPayablePct') / 100,
     commissionRetentionRatio: numberValue('fCommRetentionPct') / 100,
     commissionDeduction: numberValue('fCommDeduction'),
-    commissionPeriod: document.getElementById('fCommPeriod').value.trim(),
-    commissionClaimDate: document.getElementById('fCommClaimDate').value || null,
+    commissionPeriod: document.getElementById('fCommPeriod')?.value.trim() || '',
+    commissionClaimDate: document.getElementById('fCommClaimDate')?.value || null,
     commissionBooked: numberValue('fCommBooked'),
     nextMonthClaimable: 0,
     nextMonthUnits: 0,
@@ -432,11 +450,16 @@ function fillForm(rec) {
   }
   document.getElementById('fCommDeduction').value = rec?.commissionDeduction || 0;
   document.getElementById('fCustomerPaidPct').value = rec?.extra?.customerPaidPct ?? 0;
-  document.getElementById('fCommPeriod').value = rec?.commissionPeriod || '';
-  document.getElementById('fCommClaimDate').value = toDateInput(rec?.commissionClaimDate);
-  document.getElementById('fCommBooked').value = rec?.commissionBooked || 0;
-  document.getElementById('fCommissionBookedStatus').value =
-    Number(rec?.commissionBooked || 0) > 0 ? '是' : '否';
+  const periodEl = document.getElementById('fCommPeriod');
+  if (periodEl) periodEl.value = rec?.commissionPeriod || '';
+  const claimDateEl = document.getElementById('fCommClaimDate');
+  if (claimDateEl) claimDateEl.value = toDateInput(rec?.commissionClaimDate);
+  const bookedEl = document.getElementById('fCommBooked');
+  if (bookedEl) bookedEl.value = rec?.commissionBooked || 0;
+  const bookedStatusEl = document.getElementById('fCommissionBookedStatus');
+  if (bookedStatusEl) {
+    bookedStatusEl.value = Number(rec?.commissionBooked || 0) > 0 ? '是' : '否';
+  }
   document.getElementById('fMemo').value = rec?.memo || '';
 
   salesAmountManual = false;
@@ -458,7 +481,7 @@ function ensureStaffOption(selId, name) {
   if (!name) return;
   const sel = document.getElementById(selId);
   if (![...sel.options].some((o) => o.value === name)) {
-    sel.appendChild(new Option(`${name}（原銷售／已離職）`, name));
+    sel.appendChild(new Option(staffOffSiteLabel(name), name));
   }
 }
 
@@ -728,7 +751,7 @@ function renderTable(rows) {
   const tfoot = document.getElementById('salesTableTotal');
   document.getElementById('salesTotalBadge').textContent = String(rows.length);
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="22" class="empty-row">尚無銷售明細，請按「新增明細」</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="19" class="empty-row">尚無銷售明細，請按「新增明細」</td></tr>';
     tfoot.innerHTML = '';
     return;
   }
@@ -751,9 +774,6 @@ function renderTable(rows) {
       <td>${r.surcharge ?? 0}</td>
       <td${salesAmtClass}>${r.commissionSalesAmount ?? 0}</td>
       <td>${r.commissionClaimable ?? 0}</td>
-      <td>${r.commissionClaimed ?? 0}</td>
-      <td>${r.commissionUnclaimed ?? 0}</td>
-      <td>${escapeHtml(r.commissionStatus || '未請')}</td>
       <td class="cell-date">${escapeHtml(r.ownerSaleReportDate || r.reportDate || '')}</td>
       <td class="cell-date">${escapeHtml(r.ownerSignReportDate || '')}</td>
       <td>${escapeHtml(sales)}</td>
@@ -777,9 +797,7 @@ function renderTable(rows) {
     <th>${sum('surcharge')}</th>
     <th>${sum('commissionSalesAmount')}</th>
     <th>${sum('commissionClaimable')}</th>
-    <th>${sum('commissionClaimed')}</th>
-    <th>${sum('commissionUnclaimed')}</th>
-    <th colspan="5" class="col-actions"></th>
+    <th colspan="4" class="col-actions"></th>
   </tr>`;
   tbody.querySelectorAll('[data-edit]').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -893,6 +911,7 @@ async function loadSales() {
     }
     recordTypes = listJson.recordTypes || recordTypes;
     activeStaff = listJson.activeStaff || [];
+    staffDeparted = listJson.staffDeparted || {};
     fillTypeSelects();
     fillStaffSelects();
     renderTable(listJson.records || []);
@@ -976,7 +995,7 @@ async function deleteAllSales() {
     return;
   }
   const count = document.getElementById('salesTotalBadge')?.textContent || '0';
-  if (!confirm(`確定清空「${siteName}」全部銷售明細（目前約 ${count} 筆）與期別服務費？\n此操作無法復原，請先匯出備份。`)) {
+  if (!confirm(`確定清空「${siteName}」全部銷售明細（目前約 ${count} 筆）？\n此操作無法復原，請先匯出備份。`)) {
     return;
   }
   const confirmCode = prompt('請輸入 DELETE ALL 確認清空：');
@@ -1119,11 +1138,12 @@ async function init() {
   ['fUnits', 'fParkingNo1', 'fParkingNo2', 'fParkingNo3'].forEach((id) => {
     document.getElementById(id).addEventListener('input', syncCurrentMonthClaimable);
   });
-  document.getElementById('fCommissionBookedStatus').addEventListener('change', () => {
+  document.getElementById('fCommissionBookedStatus')?.addEventListener('change', () => {
     if (document.getElementById('fCommissionBookedStatus').value === '是') {
       syncBookedAmount();
     } else {
-      document.getElementById('fCommBooked').value = 0;
+      const booked = document.getElementById('fCommBooked');
+      if (booked) booked.value = 0;
     }
   });
 

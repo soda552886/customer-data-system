@@ -545,8 +545,9 @@ function renderAll(payload) {
   document.getElementById('rewardPct').value = payload.project.rewardPct || 1;
   document.getElementById('ownerBudgetPct').value = payload.project.ownerBudgetPct || 2.375;
   document.getElementById('showReferralFee').checked = !!payload.project.showReferralFee;
-  document.getElementById('showOwnerBudget').checked = !!payload.project.showOwnerBudget;
-  document.getElementById('ownerBudgetSection').classList.toggle('hidden', !payload.project.showOwnerBudget);
+  const ownerCb = document.getElementById('showOwnerBudget');
+  if (ownerCb) ownerCb.checked = !!payload.project.showOwnerBudget;
+  document.getElementById('ownerBudgetSection')?.classList.toggle('hidden', !payload.project.showOwnerBudget);
   document.getElementById('budgetWeekStart').value = payload.weekStart;
   updateWeekLabel(payload);
   mediaItems = (payload.week.mediaItems || []).map((item) => ({
@@ -582,7 +583,7 @@ function collectPayload() {
       rewardPct: Number(document.getElementById('rewardPct').value) || 0,
       ownerBudgetPct: Number(document.getElementById('ownerBudgetPct').value) || 0,
       showReferralFee: document.getElementById('showReferralFee').checked,
-      showOwnerBudget: document.getElementById('showOwnerBudget').checked,
+      showOwnerBudget: !!document.getElementById('showOwnerBudget')?.checked,
       ownerCategories: project.ownerCategories,
       execCategories: project.execCategories,
       weekExtraFields: extraItems.map((i) => ({ key: i.key, label: i.label })),
@@ -618,8 +619,9 @@ async function loadBudget() {
       return;
     }
     renderAll(json);
-  } catch {
-    showToast('載入失敗', 'error');
+    showToast('已載入預算花費');
+  } catch (err) {
+    showToast(err?.message ? `載入失敗：${err.message}` : '載入失敗', 'error');
   }
 }
 

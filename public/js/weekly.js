@@ -76,9 +76,10 @@ function syncWeek1StartField() {
 }
 
 function applySuggestedWeekNumber() {
+  const origin = document.getElementById('week1Start')?.value || currentSite()?.week1Start;
   const n = weekNumberFromOrigin(
     document.getElementById('weekStart')?.value,
-    currentSite()?.week1Start,
+    origin,
   );
   if (n == null || !Number.isFinite(n)) return;
   document.getElementById('weekNumber').value = n;
@@ -278,7 +279,7 @@ function collectManualFromForm(baseManual) {
   document.querySelectorAll('[data-conv][data-cf]').forEach((el) => {
     const name = el.getAttribute('data-conv');
     const field = el.getAttribute('data-cf');
-    if (!name || !field) return;
+    if (!name || !field || name === '合計') return;
     conversionManual[name] = conversionManual[name] || {};
     conversionManual[name][field] = Number(el.value) || 0;
   });
@@ -306,7 +307,7 @@ function collectManualFromForm(baseManual) {
     if (el) manual.commission[f] = Number(el.value) || 0;
   });
 
-  manual.includedVisitorIds = collectSelectedVisitorIds();
+  manual.includedVisitorIds = null;
 
   manual.reviewNotes = document.getElementById('reviewNotes').value;
   manual.competitorNotes = document.getElementById('competitorNotes').value;
@@ -346,16 +347,77 @@ function calcInventoryDerived(inv) {
 function calcCommissionDerived(c) {
   const n = (k) => Number(c[k]) || 0;
   const round4 = (x) => Math.round(x * 10000) / 10000;
+  const claimed = n('claimedAmount');
+  const booked = n('bookedAmount');
   return {
-    unclaimedAmount: round4(n('unclaimedAmount') || Math.max(n('claimableAmount') - n('claimedAmount'), 0)),
-    unclaimedUnits: n('unclaimedUnits') || Math.max(n('claimableUnits') - n('claimedUnits'), 0),
-    unclaimedParking: n('unclaimedParking') || Math.max(n('claimableParking') - n('claimedParking'), 0),
-    payableAmount: round4(n('payableAmount') || n('claimableAmount') * (current?.commissionDefaults?.payableRatio || 0.97)),
+    unclaimedAmount: round4(Math.max(n('claimableAmount') - claimed, 0)),
+    unclaimedUnits: Math.max(n('claimableUnits') - n('claimedUnits'), 0),
+    unclaimedParking: Math.max(n('claimableParking') - n('claimedParking'), 0),
+    payableAmount: round4(n('claimableAmount')),
     retentionAmount: round4(n('retentionAmount') || n('claimableAmount') * (current?.commissionDefaults?.retentionRatio || 0.03)),
-    bookedAmount: round4(n('bookedAmount')),
+    bookedAmount: round4(booked),
+    unbookedAmount: round4(Math.max(claimed - booked, 0)),
     nextMonthUnits: n('nextMonthUnits'),
     nextMonthParking: n('nextMonthParking'),
     nextMonthAmount: round4(n('nextMonthAmount')),
+  };
+}
+
+function splitKeyedCommission(amount, defaults) {
+  const d = defaults || current?.commissionDefaults || {};
+  const payableRatio = Number(d.payableRatio);
+  const retentionRatio = Number(d.retentionRatio);
+  const keyed = Number(amount) || 0;
+  const scheme = d.scheme || 'simple';
+  if (scheme === 'payment_tiers') {
+    const ho = Number(d.handoverRetention) || 0;
+    return {
+      claimable: keyed,
+      payable: keyed,
+      retention: keyed * ho,
+    };
+  }
+  const payR = Number.isFinite(payableRatio) && payableRatio > 0 ? payableRatio : 1;
+  const retR = Number.isFinite(retentionRatio) ? retentionRatio : 0;
+  const total = keyed / payR;
+  return {
+    claimable: Math.round(total * 10000) / 10000,
+    payable: Math.round(keyed * 10000) / 10000,
+    retention: Math.round(total * retR * 10000) / 10000,
+  };
+}
+
+function matrixFromManualCommission(manual) {
+  const c = (manual || {}).commission || {};
+  const n = (k) => Number(c[k]) || 0;
+  const defaults = current?.commissionDefaults || {};
+  const labels = defaults.labels || {
+    claimable: '佣金', retention: '保留', payable: '可請',
+  };
+  const claimableAmt = splitKeyedCommission(n('claimableAmount'), defaults);
+  const claimedAmt = splitKeyedCommission(n('claimedAmount'), defaults);
+  const forecastAmt = splitKeyedCommission(n('nextMonthAmount'), defaults);
+  const unclaimedAmt = {
+    claimable: Math.round((claimableAmt.claimable - claimedAmt.claimable) * 10000) / 10000,
+    payable: Math.round((claimableAmt.payable - claimedAmt.payable) * 10000) / 10000,
+    retention: Math.round((claimableAmt.retention - claimedAmt.retention) * 10000) / 10000,
+  };
+  return {
+    labels,
+    claimable: {
+      units: n('claimableUnits'), parking: n('claimableParking'), ...claimableAmt,
+    },
+    claimed: {
+      units: n('claimedUnits'), parking: n('claimedParking'), ...claimedAmt,
+    },
+    unclaimed: {
+      units: Math.max(n('claimableUnits') - n('claimedUnits'), 0),
+      parking: Math.max(n('claimableParking') - n('claimedParking'), 0),
+      ...unclaimedAmt,
+    },
+    forecast: {
+      units: n('nextMonthUnits'), parking: n('nextMonthParking'), ...forecastAmt,
+    },
   };
 }
 
@@ -416,11 +478,17 @@ function renderDaily(auto, manual) {
   const days = manual.days || [];
   const phoneByDay = phoneCountByDay(manual, auto.phoneByDay || {});
   const tbody = document.querySelector('#dailyTable tbody');
+  const totals = { new: 0, return: 0, total: 0, deal: 0, phones: 0 };
   tbody.innerHTML = byDay.map((d, i) => {
     const m = days[i] || {};
     const phones = phoneByDay[d.date] != null
       ? phoneByDay[d.date]
       : (Number(m.phoneCalls) || 0);
+    totals.new += Number(d.new) || 0;
+    totals.return += Number(d.return) || 0;
+    totals.total += Number(d.total) || 0;
+    totals.deal += Number(d.deal) || 0;
+    totals.phones += Number(phones) || 0;
     return `<tr>
       <td class="cell-date">${escapeHtml(d.date)}</td>
       <td>${escapeHtml(d.weekday)}</td>
@@ -432,6 +500,18 @@ function renderDaily(auto, manual) {
       <td><select class="table-input" data-field="weather">${optionHtml(WEATHER_OPTIONS, m.weather || '')}</select></td>
     </tr>`;
   }).join('');
+  const tfoot = document.querySelector('#dailyTable tfoot');
+  if (tfoot) {
+    tfoot.innerHTML = `<tr>
+      <td colspan="2"><strong>本週合計（自動加總）</strong></td>
+      <td><strong>${totals.new}</strong></td>
+      <td><strong>${totals.return}</strong></td>
+      <td><strong>${totals.total}</strong></td>
+      <td><strong>${totals.deal}</strong></td>
+      <td><strong>${totals.phones}</strong></td>
+      <td></td>
+    </tr>`;
+  }
 }
 
 function optionHtml(options, selected) {
@@ -606,10 +686,7 @@ function fmtWeekNum(val) {
 function renderWeeklyCommissionMatrix(matrix) {
   const el = document.getElementById('weeklyCommissionMatrix');
   if (!el) return;
-  if (!matrix) {
-    el.innerHTML = '<p class="hint">從銷售總表更新後，會顯示可請／已請／未請矩陣</p>';
-    return;
-  }
+  const data = matrix || matrixFromManualCommission(current?.manual);
   const cards = [
     { key: 'claimable', title: '可請總金額' },
     { key: 'claimed', title: '已請款金額' },
@@ -617,8 +694,8 @@ function renderWeeklyCommissionMatrix(matrix) {
     { key: 'forecast', title: '預計本月可請' },
   ];
   el.innerHTML = cards.map((c) => {
-    const b = matrix[c.key] || {};
-    const labels = matrix.labels || current?.commissionDefaults?.labels || {
+    const b = data[c.key] || {};
+    const labels = data.labels || current?.commissionDefaults?.labels || {
       claimable: '佣金', retention: '保留', payable: '可請',
     };
     return `<div class="commission-matrix-card" data-tone="${c.key}">
@@ -648,17 +725,21 @@ function renderCommission(manual, derived) {
     { key: 'nextMonthUnits', label: '預計本月可請戶數' },
     { key: 'nextMonthParking', label: '預計本月可請車位' },
     { key: 'nextMonthAmount', label: '預計本月可請金額(萬)', step: '0.0001' },
-    { key: 'bookedAmount', label: '已入帳金額(萬)', step: '0.0001' },
+    { key: 'bookedAmount', label: '已請佣已入帳金額(萬)', step: '0.0001' },
   ];
+  const d = calcCommissionDerived(c);
   document.getElementById('commissionInputs').innerHTML = fields.map((f) => `
     <div class="form-group">
       <label>${f.label}</label>
       <input type="number" min="0" step="${f.step || '0.01'}" data-block="commission" data-field="${f.key}" value="${Number(c[f.key]) || 0}">
     </div>
-  `).join('');
-  const d = derived || calcCommissionDerived(c);
+  `).concat([
+    `<div class="form-group">
+      <label>已請佣未入帳金額(萬)</label>
+      <input type="number" step="0.0001" id="commissionUnbooked" value="${d.unbookedAmount}" readonly>
+    </div>`,
+  ]).join('');
   const labels = current?.commissionDefaults?.labels
-    || current?.suggested?.commissionMatrix?.labels
     || { payable: '本期可請', retention: '保留款' };
   renderDerivedCards('commissionDerived', [
     { label: `${labels.payable}(萬)`, value: `${d.payableAmount}` },
@@ -666,10 +747,11 @@ function renderCommission(manual, derived) {
     { label: '未請佣金額(萬)', value: `${d.unclaimedAmount}` },
     { label: '未請佣戶數', value: `${d.unclaimedUnits}` },
     { label: '未請佣車位', value: `${d.unclaimedParking}` },
-    { label: '已入帳(萬)', value: `${d.bookedAmount}` },
+    { label: '已請佣已入帳(萬)', value: `${d.bookedAmount}` },
+    { label: '已請佣未入帳(萬)', value: `${d.unbookedAmount}` },
     { label: '本月預計可請(戶/車/萬)', value: `${d.nextMonthUnits} / ${d.nextMonthParking} / ${d.nextMonthAmount}` },
   ]);
-  renderWeeklyCommissionMatrix(current?.commissionMatrix || current?.suggested?.commissionMatrix);
+  renderWeeklyCommissionMatrix(matrixFromManualCommission({ commission: c }));
   document.querySelectorAll('[data-block="commission"]').forEach((el) => {
     el.addEventListener('input', refreshDerivedFromForm);
   });
@@ -693,7 +775,6 @@ function refreshDerivedFromForm() {
   ]);
   const com = calcCommissionDerived(manual.commission || {});
   const labels = current?.commissionDefaults?.labels
-    || current?.suggested?.commissionMatrix?.labels
     || { payable: '本期可請', retention: '保留款' };
   renderDerivedCards('commissionDerived', [
     { label: `${labels.payable}(萬)`, value: `${com.payableAmount}` },
@@ -701,9 +782,13 @@ function refreshDerivedFromForm() {
     { label: '未請佣金額(萬)', value: `${com.unclaimedAmount}` },
     { label: '未請佣戶數', value: `${com.unclaimedUnits}` },
     { label: '未請佣車位', value: `${com.unclaimedParking}` },
-    { label: '已入帳(萬)', value: `${com.bookedAmount}` },
+    { label: '已請佣已入帳(萬)', value: `${com.bookedAmount}` },
+    { label: '已請佣未入帳(萬)', value: `${com.unbookedAmount}` },
     { label: '本月預計可請(戶/車/萬)', value: `${com.nextMonthUnits} / ${com.nextMonthParking} / ${com.nextMonthAmount}` },
   ]);
+  const unbookedEl = document.getElementById('commissionUnbooked');
+  if (unbookedEl) unbookedEl.value = com.unbookedAmount;
+  renderWeeklyCommissionMatrix(matrixFromManualCommission(manual));
 }
 
 function renderConversion(auto, manual) {
@@ -714,23 +799,36 @@ function renderConversion(auto, manual) {
     tbody.innerHTML = '<tr><td colspan="10" class="empty-row">尚無銷售資料</td></tr>';
     return;
   }
+  const convVal = (r, field) => {
+    const ov = overrides[r.name] || {};
+    if (ov[field] != null && ov[field] !== '') return Number(ov[field]) || 0;
+    return Number(r[field] ?? 0) || 0;
+  };
+  const dataRows = rows.filter((r) => r.name !== '合計');
+  const sums = { visits: 0, deals: 0, amount: 0, refunds: 0, refundAmount: 0 };
+  dataRows.forEach((r) => {
+    sums.visits += convVal(r, 'visits');
+    sums.deals += convVal(r, 'deals');
+    sums.amount += convVal(r, 'amount');
+    sums.refunds += convVal(r, 'refunds');
+    sums.refundAmount += convVal(r, 'refundAmount');
+  });
   const convInput = (name, field, value) =>
     `<input type="number" step="0.01" class="table-input" data-conv="${escapeHtml(name)}" data-cf="${field}" value="${Number(value) || 0}">`;
-  tbody.innerHTML = rows.map((r) => {
-    const bold = r.name === '合計' || r.name === '前期銷售';
+  const rateText = (visits, deals) => Number(deals) ? `${Math.round((Number(visits) / Number(deals)) * 10) / 10}:1` : '—';
+  const htmlRows = dataRows.map((r) => {
+    const visits = convVal(r, 'visits');
+    const deals = convVal(r, 'deals');
+    const amount = convVal(r, 'amount');
+    const refunds = convVal(r, 'refunds');
+    const refundAmount = convVal(r, 'refundAmount');
+    const bold = r.name === '前期銷售';
     const name = bold ? `<strong>${escapeHtml(r.name)}</strong>` : escapeHtml(r.name);
-    const ov = overrides[r.name] || {};
-    const visits = ov.visits != null && ov.visits !== '' ? ov.visits : r.visits;
-    const deals = ov.deals != null && ov.deals !== '' ? ov.deals : r.deals;
-    const amount = ov.amount != null && ov.amount !== '' ? ov.amount : (r.amount ?? 0);
-    const refunds = ov.refunds != null && ov.refunds !== '' ? ov.refunds : (r.refunds ?? 0);
-    const refundAmount = ov.refundAmount != null && ov.refundAmount !== '' ? ov.refundAmount : (r.refundAmount ?? 0);
-    const rate = Number(deals) ? `${Math.round((Number(visits) / Number(deals)) * 10) / 10}:1` : '—';
     return `<tr>
       <td>${name}</td>
       <td>${convInput(r.name, 'visits', visits)}</td>
       <td>${convInput(r.name, 'deals', deals)}</td>
-      <td><strong>${escapeHtml(rate)}</strong></td>
+      <td><strong>${escapeHtml(rateText(visits, deals))}</strong></td>
       <td>${convInput(r.name, 'amount', amount)}</td>
       <td>${convInput(r.name, 'refunds', refunds)}</td>
       <td>${convInput(r.name, 'refundAmount', refundAmount)}</td>
@@ -738,7 +836,29 @@ function renderConversion(auto, manual) {
       <td>${r.weekDeals}</td>
       <td>${r.weekAmount ?? 0}</td>
     </tr>`;
-  }).join('');
+  });
+  const totalAuto = rows.find((r) => r.name === '合計') || {};
+  htmlRows.push(`<tr data-total="1">
+      <td><strong>合計</strong></td>
+      <td><strong>${sums.visits}</strong></td>
+      <td><strong>${sums.deals}</strong></td>
+      <td><strong>${escapeHtml(rateText(sums.visits, sums.deals))}</strong></td>
+      <td><strong>${sums.amount}</strong></td>
+      <td><strong>${sums.refunds}</strong></td>
+      <td><strong>${sums.refundAmount}</strong></td>
+      <td>${totalAuto.weekVisits ?? 0}</td>
+      <td>${totalAuto.weekDeals ?? 0}</td>
+      <td>${totalAuto.weekAmount ?? 0}</td>
+    </tr>`);
+  tbody.innerHTML = htmlRows.join('');
+  tbody.querySelectorAll('[data-conv][data-cf]').forEach((el) => {
+    el.addEventListener('change', () => {
+      if (!current) return;
+      const manualData = collectManualFromForm(current.manual);
+      current.manual = manualData;
+      renderConversion(current.auto, manualData);
+    });
+  });
 }
 
 function filterDimRows(rows, mode) {
@@ -943,69 +1063,12 @@ function applySuggestedFromSales() {
       amount: Math.max((s.dealsCum.amount || 0) - (s.signingsCum.amount || 0), 0),
     };
   }
-  manual.conversionManual = {
-    ...(manual.conversionManual || {}),
-    合計: {
-      ...(manual.conversionManual || {})['合計'],
-      deals: s.dealsCum?.units ?? 0,
-      amount: s.dealsCum?.amount ?? 0,
-    },
-  };
-  if (s.commission) {
-    manual.commission = { ...manual.commission, ...s.commission };
-  }
-  if (s.inventory) {
-    manual.inventory = { ...manual.inventory, ...s.inventory };
-  }
   current.manual = manual;
-  current.commissionMatrix = s.commissionMatrix || null;
   renderDealInputs(manual);
   renderConversion(current.auto, manual);
-  renderInventory(manual, null);
-  renderCommission(manual, null);
   document.getElementById('salesSuggestHint').textContent =
     `已帶入（銷售總表 ${s.totalRecords} 筆；本週成交 ${s.weekDealCount || 0} 筆）`;
-  document.getElementById('commissionSuggestHint').textContent =
-    `已帶入銷售總表 ${s.totalRecords} 筆請佣資料`;
-  showToast('已從銷售總表帶入成交／請佣／去化數字');
-}
-
-async function applyCommissionFromSales() {
-  if (!current) {
-    showToast('請先載入本週資料', 'error');
-    return;
-  }
-  let s;
-  try {
-    const params = new URLSearchParams({
-      siteId: document.getElementById('weekSite').value,
-      weekStart: document.getElementById('weekStart').value,
-    });
-    const res = await fetch(`/api/sales/summary?${params}`);
-    const json = await res.json();
-    if (!res.ok) {
-      showToast(json.error || '讀取銷售總表失敗', 'error');
-      return;
-    }
-    s = json.summary;
-    current.suggested = s;
-  } catch {
-    showToast('讀取銷售總表失敗', 'error');
-    return;
-  }
-  if (!s || !(s.totalRecords > 0)) {
-    showToast('銷售總表尚無資料，請先至銷售總表登錄', 'error');
-    return;
-  }
-  const manual = collectManualFromForm(current.manual);
-  manual.commission = { ...manual.commission, ...(s.commission || {}) };
-  current.manual = manual;
-  current.commissionMatrix = s.commissionMatrix || null;
-  current.suggested = s;
-  renderCommission(manual, null);
-  document.getElementById('commissionSuggestHint').textContent =
-    `已帶入銷售總表 ${s.totalRecords} 筆請佣資料`;
-  showToast('請佣摘要已從銷售總表更新');
+  showToast('已從銷售總表帶入成交／簽約數字');
 }
 
 function renderAll(payload) {
@@ -1016,6 +1079,7 @@ function renderAll(payload) {
   if (payload.week1Start != null && document.getElementById('week1Start')) {
     document.getElementById('week1Start').value = payload.week1Start || '';
   }
+  applySuggestedWeekNumber();
   document.getElementById('weekSaveBadge').textContent = payload.saved
     ? `已儲存 ${payload.updatedAt || ''}`
     : '尚未儲存';
@@ -1025,9 +1089,7 @@ function renderAll(payload) {
   const auto = payload.auto || {};
   const derived = payload.derived || {};
   const suggested = payload.suggested || {};
-  current.commissionMatrix = suggested.commissionMatrix || payload.commissionMatrix || null;
   renderKpi(auto, manual);
-  renderVisitorSelect(auto, manual);
   renderDaily(auto, manual);
   renderPhoneDetail(manual);
   renderAllDimTables();
@@ -1045,13 +1107,7 @@ function renderAll(payload) {
   const hint = document.getElementById('salesSuggestHint');
   if (hint) {
     hint.textContent = suggested.totalRecords
-      ? `銷售總表 ${suggested.totalRecords} 筆可帶入`
-      : '銷售總表尚無資料';
-  }
-  const commissionHint = document.getElementById('commissionSuggestHint');
-  if (commissionHint) {
-    commissionHint.textContent = suggested.totalRecords
-      ? `銷售總表 ${suggested.totalRecords} 筆可帶入`
+      ? `銷售總表 ${suggested.totalRecords} 筆可帶入成交／簽約`
       : '銷售總表尚無資料';
   }
 }
@@ -1243,17 +1299,7 @@ async function init() {
   document.getElementById('nextWeekBtn').addEventListener('click', () => shiftWeek(1));
   document.getElementById('saveWeek1Btn')?.addEventListener('click', saveWeek1Start);
   document.getElementById('saveWeekBtn').addEventListener('click', saveWeek);
-  document.getElementById('selectAllVisitorsBtn').addEventListener('click', () => {
-    document.querySelectorAll('#visitorSelectTable tbody input[type="checkbox"]').forEach((cb) => { cb.checked = true; });
-    updateVisitorSelectSummary();
-  });
-  document.getElementById('clearVisitorsBtn').addEventListener('click', () => {
-    document.querySelectorAll('#visitorSelectTable tbody input[type="checkbox"]').forEach((cb) => { cb.checked = false; });
-    updateVisitorSelectSummary();
-  });
-  document.getElementById('applyVisitorsBtn').addEventListener('click', applyVisitorSelection);
   document.getElementById('fillFromSalesBtn').addEventListener('click', applySuggestedFromSales);
-  document.getElementById('fillCommissionFromSalesBtn').addEventListener('click', applyCommissionFromSales);
   document.getElementById('openSalesFromWeekly')?.addEventListener('click', saveWeeklyDraft);
   document.getElementById('addPhoneCallBtn')?.addEventListener('click', addPhoneCallRow);
   document.getElementById('dimFilterMode')?.addEventListener('change', renderAllDimTables);

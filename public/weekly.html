@@ -17,7 +17,7 @@
   <main class="container">
     <section class="card">
       <h2>選擇週次</h2>
-      <p class="hint">系統會自動帶出來人分析（區域／媒體／職業／年齡）、成交比、回訪／有望客。可勾選「要報的來人」後套用；去化／請佣／成交手填後儲存。匯出 Excel 時請開「PPT摘要」貼首頁（來人／成交／請佣已分欄）；完整數字看「週報一覽」。</p>
+      <p class="hint">系統會自動帶出來人分析（區域／媒體／職業／年齡）、成交比、回訪／有望客。去化／請佣／成交手填後儲存。各工地可直接開本頁向長官報告。</p>
       <div class="search-grid">
         <div class="form-group">
           <label for="weekSite">案場 <span class="required">*</span></label>
@@ -42,7 +42,7 @@
           <div id="weekRangeLabel" class="current-site-label">—</div>
         </div>
       </div>
-      <p class="hint">「本案第 1 週起始日」請選該案場第一份週報的週一（會自動對齊週一）。設定後載入未存檔的週次會自動算第 2、3…週；已儲存的週報週次不會被改寫。</p>
+      <p class="hint">「本案第 1 週起始日」請選該案場第一份週報的週一（會自動對齊週一）。設定並儲存後，用日期或上一週／下一週都會依此計算週次。</p>
       <div class="form-actions">
         <button type="button" id="loadWeekBtn" class="btn btn-primary">載入本週資料</button>
         <button type="button" id="prevWeekBtn" class="btn btn-outline">上一週</button>
@@ -86,30 +86,8 @@
       </section>
 
       <section class="card">
-        <h2>選取要報的來人</h2>
-        <p class="hint">實際來人可能多於上報組數。勾選要納入本週週報的組別後按「套用選取」，下方統計與匯出只會計算勾選的組。</p>
-        <div class="form-actions" style="margin-bottom:0.75rem;">
-          <button type="button" id="selectAllVisitorsBtn" class="btn btn-outline">全選</button>
-          <button type="button" id="clearVisitorsBtn" class="btn btn-outline">全不選</button>
-          <button type="button" id="applyVisitorsBtn" class="btn btn-primary">套用選取並重算</button>
-          <span id="visitorSelectSummary" class="hint"></span>
-        </div>
-        <div class="table-wrap">
-          <table class="data-table" id="visitorSelectTable">
-            <thead>
-              <tr>
-                <th>納入</th><th>日期</th><th>類型</th><th>姓名</th><th>電話</th>
-                <th>區域</th><th>媒體</th><th>職業</th><th>年齡</th><th>銷售</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
-        </div>
-      </section>
-
-      <section class="card">
-        <h2>每日來人（依選取）／來電・天氣</h2>
-        <p class="hint">每日來電通數會依下方「來電明細」自動加總；天氣請由選單選擇。</p>
+        <h2>每日來人／來電・天氣</h2>
+        <p class="hint">每日來電通數會依下方「來電明細」自動加總；天氣請由選單選擇。最下列為本週合計（自動加總）。</p>
         <div class="table-wrap">
           <table class="data-table" id="dailyTable">
             <thead>
@@ -119,6 +97,7 @@
               </tr>
             </thead>
             <tbody></tbody>
+            <tfoot></tfoot>
           </table>
         </div>
       </section>
@@ -195,17 +174,14 @@
 
       <section class="card">
         <h2>房屋去化（手填，自動算去化率）</h2>
+        <p class="hint">新週開啟時會帶入上一週已儲存的數字，不會清零。各工地手動改完並儲存後，下一週繼續沿用最新紀錄。</p>
         <div class="search-grid" id="inventoryInputs"></div>
         <div id="inventoryDerived" class="stats-grid" style="margin-top:1rem;"></div>
       </section>
 
       <section class="card">
-        <h2>請佣摘要（可從銷售總表帶入）</h2>
-        <p class="hint">請先在銷售總表登錄請佣資料，再按下方按鈕更新本區數字。矩陣與銷售總表「請佣總覽」同一套彙總。</p>
-        <div class="form-actions" style="margin-bottom:0.75rem;">
-          <button type="button" id="fillCommissionFromSalesBtn" class="btn btn-secondary">從銷售總表更新請佣</button>
-          <span id="commissionSuggestHint" class="hint"></span>
-        </div>
+        <h2>請佣摘要</h2>
+        <p class="hint">此區請手動填寫。上方色塊會依下方數字即時計算；佣金／可請／保留比例沿用銷售總表「本案場請佣設定」。</p>
         <div id="weeklyCommissionMatrix" class="commission-matrix" style="margin-bottom:1rem;"></div>
         <div class="commission-grid" id="commissionInputs"></div>
         <div id="commissionDerived" class="commission-grid" style="margin-top:1rem;"></div>
@@ -213,7 +189,7 @@
 
       <section class="card">
         <h2>銷售成交比（客資自動）</h2>
-        <p class="hint">接客、成交與退戶僅統計新客，不含回訪。成交比＝累計接待÷累計成交。累計成交／成交金額／退戶可手填；按「從銷售總表帶入」會把合計成交戶數與金額寫進合計列。共同經營組數／成交各算 0.5。已離職人員取消勾選後累計併入「前期銷售」。</p>
+        <p class="hint">接客、成交與退戶僅統計新客，不含回訪。成交比＝累計接待÷累計成交。各銷售人員的累計成交／金額／退戶可手填；合計列會自動加總。共同經營組數／成交各算 0.5。已離職或調離人員取消勾選後累計併入「前期銷售」。</p>
         <div class="table-wrap">
           <table class="data-table" id="conversionTable">
             <thead>

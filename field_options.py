@@ -138,12 +138,29 @@ def load_site_option_overrides(conn: sqlite3.Connection, site_id: str) -> dict:
 def save_site_option_overrides(conn: sqlite3.Connection, site_id: str, config: dict):
     conn.execute('DELETE FROM site_field_options WHERE site_id = ?', (site_id,))
     for field_key, options in config.items():
-        if not options:
+        if options in (None, '', [], {}):
             continue
         conn.execute(
             'INSERT INTO site_field_options (site_id, field_key, options_json) VALUES (?, ?, ?)',
-            (site_id, field_key, json.dumps(list(options), ensure_ascii=False)),
+            (site_id, field_key, json.dumps(options, ensure_ascii=False)),
         )
+
+
+def staff_departed_map(overrides: dict) -> dict:
+    """未在職銷售：resigned＝已離職，transferred＝已調離原工地。"""
+    raw = (overrides or {}).get(SALES_STAFF_FIELD_KEY)
+    meta = {}
+    if isinstance(raw, dict):
+        meta = raw.get('departed') or raw.get('staffDeparted') or {}
+    if not isinstance(meta, dict):
+        return {}
+    out = {}
+    for name, status in meta.items():
+        key = str(name or '').strip()
+        st = str(status or '').strip()
+        if key and st in ('transferred', 'resigned'):
+            out[key] = st
+    return out
 
 
 def _normalize_override_list(raw) -> list:
@@ -212,12 +229,16 @@ def build_site_field_config(
         if key == 'region':
             all_options = sort_region_options(all_options)
             enabled = sort_region_options(enabled)
+        extra = {}
+        if key == SALES_STAFF_FIELD_KEY:
+            extra['staffDeparted'] = staff_departed_map(overrides)
         fields.append({
             **item,
             'defaultOptions': defaults,
             'allOptions': all_options,
             'enabledOptions': enabled,
             'isCustomized': is_customized,
+            **extra,
         })
     return {'siteId': site_id, 'fields': fields}
 
@@ -270,10 +291,22 @@ def normalize_save_payload(
             continue
         defaults = list(configurable[field_key] or [])
         picked = _normalize_override_list(selected)
-        # 銷售人員允許空清單（＝全部標為已離職）；其他欄位空值視為未設定
+        # 銷售人員允許空清單（＝全部標為已離職／調離）；其他欄位空值視為未設定
         if not picked and field_key != SALES_STAFF_FIELD_KEY:
             continue
-        if picked != defaults or field_key == SALES_STAFF_FIELD_KEY:
+        if field_key == SALES_STAFF_FIELD_KEY:
+            departed = {}
+            if isinstance(selected, dict):
+                raw_dep = selected.get('departed') or selected.get('staffDeparted') or {}
+                if isinstance(raw_dep, dict):
+                    for name, status in raw_dep.items():
+                        key_name = str(name or '').strip()
+                        st = str(status or '').strip()
+                        if key_name and key_name not in picked and st in ('transferred', 'resigned'):
+                            departed[key_name] = st
+            normalized[field_key] = {'enabled': picked, 'departed': departed}
+            continue
+        if picked != defaults:
             normalized[field_key] = picked
     return normalized
 

@@ -33,7 +33,10 @@ async function loadSitesList() {
       const fieldOptionsBtn = `<a href="/site-fields.html?site=${encodeURIComponent(s.id)}" class="btn-sm">欄位選項</a>`;
       const actions = [fieldOptionsBtn, clearBtn, deleteSiteBtn].filter(Boolean).join(' ') || '<span class="hint">—</span>';
       return `<tr>
-        <td><strong>${escapeHtml(s.name)}</strong></td>
+        <td>
+          <input type="text" class="batch-inline-input" value="${escapeHtml(s.name)}"
+            onchange="saveSiteName('${s.id}', this.value)" maxlength="80" title="修改案場名稱">
+        </td>
         <td>${GROUP_LABELS[s.group] || s.group}</td>
         <td>${count} 筆</td>
         <td>
@@ -58,6 +61,32 @@ function escapeHtml(str) {
 function escapeAttr(str) {
   return String(str).replace(/'/g, "\\'");
 }
+
+window.saveSiteName = async function (id, value) {
+  const name = String(value || '').trim();
+  if (!name) {
+    showToast('請輸入案場名稱', 'error');
+    loadSitesList();
+    return;
+  }
+  try {
+    const res = await fetch(`/api/sites/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+    const json = await res.json();
+    if (!res.ok) {
+      showToast(json.error || '更名失敗', 'error');
+      loadSitesList();
+      return;
+    }
+    showToast(`案場名稱已改為「${json.site?.name || name}」`);
+    loadSitesList();
+  } catch {
+    showToast('更名失敗', 'error');
+  }
+};
 
 window.saveWeek1Start = async function (id, value) {
   try {
