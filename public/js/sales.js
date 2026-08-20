@@ -186,9 +186,10 @@ function calculatePrices() {
   ].reduce((sum, id) => sum + numberValue(id), 0);
   const houseBase = numberValue('fHouseBasePrice');
   const parkingBase = numberValue('fParkingBasePrice');
-  const contractTotal = houseSale + parkingSale + deductions;
-  const actualHouse = houseSale;
-  const actualTotal = houseSale + parkingSale;
+  // 房售為全含；合約總價＝房售＋車售（不再把附加加進去）
+  const contractTotal = houseSale + parkingSale;
+  const actualHouse = houseSale - deductions;
+  const actualTotal = actualHouse + parkingSale;
   const baseTotal = houseBase + parkingBase;
   const excess = contractTotal - baseTotal - deductions;
 

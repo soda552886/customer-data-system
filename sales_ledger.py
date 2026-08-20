@@ -1225,7 +1225,9 @@ def normalize_deal_payload(body: dict, site_id: str = '', settings: Optional[dic
         surcharge + appliance_gift + pickup_voucher
         + decoration + company_loan_interest
     )
-    contract_total = house_sale + parking_sale
+    # 房售為全含：合約總價＝房售＋車售；實際房價＝房售−附加／減項
+    contract_from_parts = house_sale + parking_sale
+    contract_total = contract_from_parts
     parking_no1 = str(body.get('parkingNo1') or '').strip()
     parking_no2 = str(body.get('parkingNo2') or '').strip()
     extra_in = body.get('extra') if isinstance(body.get('extra'), dict) else {}
@@ -1233,28 +1235,24 @@ def normalize_deal_payload(body: dict, site_id: str = '', settings: Optional[dic
     parking_nos = '、'.join(x for x in (parking_no1, parking_no2, parking_no3) if x)
     parking_count = sum(1 for x in (parking_no1, parking_no2, parking_no3) if x)
     if explicit_total > 0:
-        if contract_total <= 0:
+        if contract_from_parts <= 0:
             contract_total = explicit_total
-        elif abs(contract_total - explicit_total) > 0.01:
+        elif abs(explicit_total - contract_from_parts) <= 0.05:
+            contract_total = contract_from_parts
+        elif (
+            deductions > 0.01
+            and abs(explicit_total - (contract_from_parts + deductions)) <= 0.05
+        ):
+            # 舊前端曾把附加再加進合約總價，改回房售＋車售
+            contract_total = contract_from_parts
+        else:
             contract_total = explicit_total
             if parking_count > 0 and parking_sale <= 0 and house_sale > 0:
                 diff = explicit_total - house_sale
                 if diff > 0.01 and abs(diff - deductions) > 0.01:
                     parking_sale = diff
-    # 請佣總表「房售價」多為未含附加；若 房+車+附加 ≈ 合約總價，實際成交＝房售＋車售
-    net_of_extras = (
-        deductions > 0.01
-        and contract_total > 0
-        and abs(house_sale + parking_sale + deductions - contract_total) <= 0.05
-    )
-    if net_of_extras:
-        actual_house = house_sale
-        actual_total = house_sale + parking_sale
-        if explicit_total <= 0:
-            contract_total = house_sale + parking_sale + deductions
-    else:
-        actual_house = house_sale - deductions
-        actual_total = actual_house + parking_sale
+    actual_house = house_sale - deductions
+    actual_total = actual_house + parking_sale
     base_total = house_base + parking_base
     excess = _excess_from_body(body, contract_total, base_total, deductions)
     # 相容舊資料／API：尚未拆分房售、車售時保留既有總價。
