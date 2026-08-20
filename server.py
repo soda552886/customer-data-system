@@ -27,7 +27,7 @@ from weekly_reports import (
     empty_manual_payload, enrich_dims_with_phones, init_weekly_tables, inventory_summary,
     list_weekly_reports, load_weekly_report, merge_manual, monday_of,
     normalize_phone_calls_detail, normalize_week1_start, phone_total_from_manual,
-    previous_saved_inventory, roc_year,
+    previous_saved_inventory, previous_saved_review_fields, roc_year,
     upsert_weekly_report, week_bounds, safe_week_number,
 )
 from sales_ledger import (
@@ -1543,6 +1543,10 @@ def weekly_summary():
             inv = dict(manual.get('inventory') or {})
             inv.update(prev_inv)
             manual['inventory'] = inv
+        prev_review = previous_saved_review_fields(conn, site_id, week_start_s)
+        for key, val in prev_review.items():
+            if not str(manual.get(key) or '').strip():
+                manual[key] = val
 
     phone_sum = phone_total_from_manual(manual)
     active_staff = get_active_sales_staff(conn, site_id)
@@ -3240,6 +3244,10 @@ STAFF_LOOKUP_FIELDS = (
 def staff_visitor_lookup():
     site_id = (request.args.get('siteId') or '').strip()
     salesperson = (request.args.get('salesperson') or '').strip()
+    phone_q = normalize_phone(request.args.get('phone') or '')
+    visit_filter = (request.args.get('visitType') or 'all').strip()
+    if visit_filter not in ('all', '新客', '回訪'):
+        visit_filter = 'all'
     if not site_id:
         return jsonify({'error': '請選擇案場'}), 400
     site = get_site_by_id(site_id)
@@ -3280,11 +3288,17 @@ def staff_visitor_lookup():
             names.add(s2)
         if salesperson and salesperson not in (s1, s2):
             continue
-        if not salesperson:
+        visit_type = row['visit_type'] or data.get('visitType') or ''
+        if visit_filter != 'all' and visit_type != visit_filter:
+            continue
+        if phone_q:
+            if phone_q not in normalize_phone(data.get('phone', '')):
+                continue
+        elif not salesperson:
             continue
         rec = {
             'id': row['id'],
-            'visitType': row['visit_type'] or data.get('visitType') or '',
+            'visitType': visit_type,
             'visitDate': data.get('visitDate') or row['visit_date'] or '',
             'firstVisitDate': data.get('firstVisitDate') or row['first_visit_date'] or '',
         }
@@ -3301,6 +3315,7 @@ def staff_visitor_lookup():
         'siteId': site_id,
         'siteName': site['name'],
         'salesperson': salesperson,
+        'visitType': visit_filter,
         'staff': staff_names,
         'count': len(records),
         'records': records[:800],

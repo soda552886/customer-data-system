@@ -254,6 +254,25 @@ td.is-deal-mode {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.8rem;
 }
+.commission-grid-spacer {
+  visibility: hidden;
+  pointer-events: none;
+}
+.commission-split-warn-wrap {
+  grid-column: 1 / -1;
+}
+.commission-split-warn {
+  color: #b91c1c;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  padding: 0.65rem 0.85rem;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+.commission-split-warn.hidden {
+  display: none;
+}
 .commission-scheme-simple .ss-tier-only,
 .commission-scheme-tiers .ss-simple-only {
   display: none !important;

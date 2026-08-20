@@ -17,15 +17,27 @@
   <main class="container container-wide">
     <section class="card">
       <h2>查看自己接待過的客戶（僅檢視）</h2>
-      <p class="hint">不必登入即可查詢。此頁只能看、不能改、不能刪。電話號碼不顯示。</p>
+      <p class="hint">不必登入即可查詢。此頁只能看、不能改、不能刪。可用電話搜尋，但結果不顯示電話號碼。</p>
       <div class="search-grid">
         <div class="form-group">
           <label for="lookupSite">案場 <span class="required">*</span></label>
           <select id="lookupSite"><option value="">請選擇案場</option></select>
         </div>
         <div class="form-group">
-          <label for="lookupStaff">銷售人員 <span class="required">*</span></label>
-          <select id="lookupStaff"><option value="">請先選案場</option></select>
+          <label for="lookupStaff">銷售人員</label>
+          <select id="lookupStaff"><option value="">全部／請先選案場</option></select>
+        </div>
+        <div class="form-group">
+          <label for="lookupPhone">以電話號碼查詢</label>
+          <input type="tel" id="lookupPhone" placeholder="輸入電話後查詢（結果不顯示電話）">
+        </div>
+      </div>
+      <div class="form-group" style="margin-top:0.75rem;">
+        <label>客戶類型</label>
+        <div class="radio-group">
+          <label class="radio-label"><input type="radio" name="lookupVisitType" value="all" checked> 全部搜尋</label>
+          <label class="radio-label"><input type="radio" name="lookupVisitType" value="新客"> 搜尋新客</label>
+          <label class="radio-label"><input type="radio" name="lookupVisitType" value="回訪"> 搜尋回訪</label>
         </div>
       </div>
       <div class="form-actions">
@@ -44,7 +56,7 @@
             </tr>
           </thead>
           <tbody>
-            <tr><td colspan="10" class="empty-row">請選擇案場與銷售人員後查詢</td></tr>
+            <tr><td colspan="10" class="empty-row">請選擇案場後查詢（可選銷售人員或電話）</td></tr>
           </tbody>
         </table>
       </div>

@@ -256,6 +256,12 @@ function calculateCommission() {
   syncCurrentMonthClaimable();
 }
 
+function syncUnitsFromAreaPing() {
+  const unitsEl = document.getElementById('fUnits');
+  if (!unitsEl) return;
+  unitsEl.value = numberValue('fAreaPing') > 0 ? 1 : 0;
+}
+
 function syncBookedAmount() {
   const select = document.getElementById('fCommissionBookedStatus');
   if (!select || select.value !== '是') return;
@@ -271,7 +277,7 @@ function syncCurrentMonthClaimable() {
   if (!unitsEl || !parkingEl || !amtEl) return;
   const parking = ['fParkingNo1', 'fParkingNo2', 'fParkingNo3']
     .filter((id) => document.getElementById(id).value.trim()).length;
-  unitsEl.value = numberValue('fUnits') || 1;
+  unitsEl.value = numberValue('fAreaPing') > 0 ? 1 : 0;
   parkingEl.value = parking;
   amtEl.value = roundMoney(numberValue('fCommPayable'));
 }
@@ -343,7 +349,7 @@ function collectForm() {
     phone: '',
     productType: document.getElementById('fProductType').value,
     areaPing: Number(document.getElementById('fAreaPing').value) || 0,
-    units: Number(document.getElementById('fUnits').value) || 1,
+    units: Number(document.getElementById('fAreaPing').value) > 0 ? 1 : 0,
     parkingNo1: document.getElementById('fParkingNo1').value.trim(),
     parkingNo2: document.getElementById('fParkingNo2').value.trim(),
     parkingNo3: document.getElementById('fParkingNo3').value.trim(),
@@ -408,7 +414,7 @@ function fillForm(rec) {
     }
   }
   document.getElementById('fAreaPing').value = rec?.areaPing || 0;
-  document.getElementById('fUnits').value = rec?.units ?? 1;
+  document.getElementById('fUnits').value = Number(rec?.areaPing) > 0 ? 1 : 0;
   document.getElementById('fParkingNo1').value = rec?.parkingNo1 || '';
   document.getElementById('fParkingNo2').value = rec?.parkingNo2 || '';
   document.getElementById('fParkingNo3').value = rec?.parkingNo3 || rec?.extra?.parkingNo3 || '';
@@ -488,7 +494,7 @@ function ensureStaffOption(selId, name) {
 function clearForm() {
   editingId = null;
   salesAmountManual = false;
-  fillForm({ recordType: 'deal', units: 1 });
+  fillForm({ recordType: 'deal', units: 0, areaPing: 0 });
   document.getElementById('salesFormCard').classList.add('hidden');
 }
 
@@ -749,7 +755,8 @@ function exportCommissionOverview() {
 function renderTable(rows) {
   const tbody = document.querySelector('#salesTable tbody');
   const tfoot = document.getElementById('salesTableTotal');
-  document.getElementById('salesTotalBadge').textContent = String(rows.length);
+  const unitCount = rows.filter((r) => Number(r.areaPing) > 0).length;
+  document.getElementById('salesTotalBadge').textContent = String(unitCount);
   if (!rows.length) {
     tbody.innerHTML = '<tr><td colspan="19" class="empty-row">尚無銷售明細，請按「新增明細」</td></tr>';
     tfoot.innerHTML = '';
@@ -760,10 +767,10 @@ function renderTable(rows) {
     const salesAmtClass = r.commissionBaseMode === 'deal' ? ' class="is-deal-mode"' : '';
     return `<tr>
       <td>${escapeHtml(r.recordTypeLabel || r.recordType)}</td>
-      <td>${escapeHtml(r.orderNo)}</td>
       <td>${escapeHtml(r.builderCompany || '')}</td>
       <td>${escapeHtml(r.community || '')}</td>
       <td>${escapeHtml(r.unitNo)}</td>
+      <td>${r.areaPing ?? 0}</td>
       <td>${escapeHtml(r.customerName)}</td>
       <td>${escapeHtml([r.parkingNo1, r.parkingNo2, r.parkingNo3].filter(Boolean).join('／'))}</td>
       <td>${r.contractTotal ?? r.totalPrice ?? 0}</td>
@@ -788,7 +795,9 @@ function renderTable(rows) {
     0,
   ));
   tfoot.innerHTML = `<tr class="sales-total-row">
-    <th colspan="7">合計（${rows.length} 筆）</th>
+    <th colspan="4">合計（${unitCount} 戶）</th>
+    <th>${sum('areaPing')}</th>
+    <th colspan="2"></th>
     <th>${sum('contractTotal', 'totalPrice')}</th>
     <th>${sum('actualTotalPrice')}</th>
     <th>${sum('houseBasePrice')}</th>
@@ -1088,7 +1097,7 @@ async function init() {
       return;
     }
     salesAmountManual = false;
-    fillForm({ recordType: 'deal', units: 1 });
+    fillForm({ recordType: 'deal', units: 0, areaPing: 0 });
   });
   document.getElementById('saveSalesBtn').addEventListener('click', saveDeal);
   document.getElementById('cancelSalesBtn').addEventListener('click', clearForm);
@@ -1135,8 +1144,11 @@ async function init() {
       }
     });
   }
-  ['fUnits', 'fParkingNo1', 'fParkingNo2', 'fParkingNo3'].forEach((id) => {
-    document.getElementById(id).addEventListener('input', syncCurrentMonthClaimable);
+  ['fAreaPing', 'fParkingNo1', 'fParkingNo2', 'fParkingNo3'].forEach((id) => {
+    document.getElementById(id).addEventListener('input', () => {
+      if (id === 'fAreaPing') syncUnitsFromAreaPing();
+      syncCurrentMonthClaimable();
+    });
   });
   document.getElementById('fCommissionBookedStatus')?.addEventListener('change', () => {
     if (document.getElementById('fCommissionBookedStatus').value === '是') {

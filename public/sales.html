@@ -197,8 +197,8 @@
             <input type="number" step="0.01" id="fAreaPing" value="0">
           </div>
           <div class="form-group">
-            <label for="fUnits">戶數</label>
-            <input type="number" step="0.5" id="fUnits" value="1">
+            <label for="fUnits">戶數（有填坪數＝1，純加購車位＝0）</label>
+            <input type="number" step="1" id="fUnits" value="0" readonly>
           </div>
           <div class="form-group">
             <label for="fParkingNo1">車位1</label>
@@ -384,7 +384,7 @@
         <table class="data-table" id="salesTable">
           <thead>
             <tr>
-              <th>類型</th><th>訂單編號</th><th>建設公司</th><th>社區</th><th>戶別</th><th>客戶</th><th>車位</th>
+              <th>類型</th><th>建設公司</th><th>社區</th><th>戶別</th><th>坪數</th><th>客戶</th><th>車位</th>
               <th>合約總價</th><th>實際成交總價</th><th>房底</th><th>車底</th><th>底總</th><th>附加費</th>
               <th>請佣銷售金額</th>
               <th>可請</th>

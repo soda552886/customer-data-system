@@ -11,6 +11,11 @@ function escapeHtml(str) {
     .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+function selectedVisitType() {
+  const el = document.querySelector('input[name="lookupVisitType"]:checked');
+  return el ? el.value : 'all';
+}
+
 async function loadSites() {
   const sel = document.getElementById('lookupSite');
   const res = await fetch('/api/sites');
@@ -22,7 +27,7 @@ async function loadSites() {
 async function loadStaff() {
   const siteId = document.getElementById('lookupSite').value;
   const sel = document.getElementById('lookupStaff');
-  sel.innerHTML = '<option value="">請選擇銷售人員</option>';
+  sel.innerHTML = '<option value="">全部銷售人員</option>';
   if (!siteId) return;
   const [fieldsRes, lookupRes] = await Promise.all([
     fetch(`/api/fields?siteId=${encodeURIComponent(siteId)}`),
@@ -40,12 +45,19 @@ async function loadStaff() {
 
 async function runLookup() {
   const siteId = document.getElementById('lookupSite').value;
-  const salesperson = document.getElementById('lookupStaff').value;
-  if (!siteId || !salesperson) {
-    showToast('請選擇案場與銷售人員', 'error');
+  const salesperson = document.getElementById('lookupStaff').value.trim();
+  const phone = document.getElementById('lookupPhone').value.trim();
+  if (!siteId) {
+    showToast('請選擇案場', 'error');
     return;
   }
-  const params = new URLSearchParams({ siteId, salesperson });
+  if (!salesperson && !phone) {
+    showToast('請選擇銷售人員，或輸入電話號碼查詢', 'error');
+    return;
+  }
+  const params = new URLSearchParams({ siteId, visitType: selectedVisitType() });
+  if (salesperson) params.set('salesperson', salesperson);
+  if (phone) params.set('phone', phone);
   const res = await fetch(`/api/customers/staff-lookup?${params}`);
   const json = await res.json();
   const tbody = document.querySelector('#lookupTable tbody');
@@ -55,9 +67,9 @@ async function runLookup() {
     return;
   }
   const rows = json.records || [];
-  count.textContent = rows.length ? `共 ${rows.length} 筆（僅檢視）` : '';
+  count.textContent = rows.length ? `共 ${rows.length} 筆（僅檢視，電話不顯示）` : '';
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="10" class="empty-row">此銷售人員尚無接待紀錄</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="10" class="empty-row">查無接待紀錄</td></tr>';
     return;
   }
   tbody.innerHTML = rows.map((r) => `
@@ -81,6 +93,9 @@ async function boot() {
   await loadSites();
   document.getElementById('lookupSite').addEventListener('change', loadStaff);
   document.getElementById('lookupBtn').addEventListener('click', runLookup);
+  document.getElementById('lookupPhone').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') runLookup();
+  });
 }
 
 boot();

@@ -237,16 +237,21 @@ def empty_manual_payload(start, end, week_number=None, origin=None):
             'sellableUnits': 0,
             'sellableParking': 0,
             'sellableAmount': 0,
+            'claimableUnits': 0,
+            'claimableParking': 0,
+            'claimableSalesAmount': 0,
             'claimableAmount': 0,
+            'claimableRetentionAmount': 0,
+            'claimablePayableAmount': 0,
             'payableAmount': 0,
             'retentionAmount': 0,
             'unclaimedAmount': 0,
-            'claimedAmount': 0,
-            'bookedAmount': 0,
-            'claimableUnits': 0,
-            'claimableParking': 0,
             'claimedUnits': 0,
             'claimedParking': 0,
+            'claimedAmount': 0,
+            'claimedRetentionAmount': 0,
+            'claimedPayableAmount': 0,
+            'bookedAmount': 0,
             'nextMonthUnits': 0,
             'nextMonthParking': 0,
             'nextMonthAmount': 0,
@@ -813,24 +818,62 @@ def commission_summary(manual: dict) -> dict:
     claimable_p = _num(c.get('claimableParking'))
     claimed_p = _num(c.get('claimedParking'))
     unclaimed_amt = _num(c.get('unclaimedAmount'))
-    if not unclaimed_amt:
+    if unclaimed_amt == 0 and claimable_amt:
+        unclaimed_amt = round(max(claimable_amt - claimed_amt, 0), 4)
+    elif 'unclaimedAmount' not in c:
         unclaimed_amt = round(max(claimable_amt - claimed_amt, 0), 4)
     unclaimed_u = _num(c.get('unclaimedUnits'))
-    if not unclaimed_u:
+    if 'unclaimedUnits' not in c:
         unclaimed_u = max(claimable_u - claimed_u, 0)
     unclaimed_p = _num(c.get('unclaimedParking'))
-    if not unclaimed_p:
+    if 'unclaimedParking' not in c:
         unclaimed_p = max(claimable_p - claimed_p, 0)
+
+    if 'claimableRetentionAmount' in c:
+        claimable_ret = round(_num(c.get('claimableRetentionAmount')), 4)
+    elif 'retentionAmount' in c:
+        claimable_ret = round(_num(c.get('retentionAmount')), 4)
+    else:
+        claimable_ret = round(claimable_amt * 0.03, 4)
+
+    if 'claimablePayableAmount' in c:
+        claimable_pay = round(_num(c.get('claimablePayableAmount')), 4)
+    elif 'payableAmount' in c:
+        claimable_pay = round(_num(c.get('payableAmount')), 4)
+    else:
+        claimable_pay = round(claimable_amt - claimable_ret, 4)
+
+    if claimable_amt and claimable_ret == 0 and claimable_pay == 0:
+        claimable_ret = round(claimable_amt * 0.03, 4)
+        claimable_pay = round(claimable_amt - claimable_ret, 4)
+
+    if 'claimedRetentionAmount' in c:
+        claimed_ret = round(_num(c.get('claimedRetentionAmount')), 4)
+    else:
+        claimed_ret = round(claimed_amt * 0.03, 4)
+
+    if 'claimedPayableAmount' in c:
+        claimed_pay = round(_num(c.get('claimedPayableAmount')), 4)
+    else:
+        claimed_pay = round(claimed_amt - claimed_ret, 4)
+
+    if claimed_amt and claimed_ret == 0 and claimed_pay == 0:
+        claimed_ret = round(claimed_amt * 0.03, 4)
+        claimed_pay = round(claimed_amt - claimed_ret, 4)
+
     return {
         'unclaimedAmount': round(unclaimed_amt, 4),
         'unclaimedUnits': unclaimed_u,
         'unclaimedParking': unclaimed_p,
-        'payableAmount': round(_num(c.get('payableAmount')) or claimable_amt * 0.97, 4),
-        'retentionAmount': round(_num(c.get('retentionAmount')) or claimable_amt * 0.03, 4),
+        'payableAmount': claimable_pay,
+        'retentionAmount': claimable_ret,
         'bookedAmount': round(_num(c.get('bookedAmount')), 4),
         'nextMonthUnits': _num(c.get('nextMonthUnits')),
         'nextMonthParking': _num(c.get('nextMonthParking')),
         'nextMonthAmount': round(_num(c.get('nextMonthAmount')), 4),
+        'claimableSalesAmount': round(_num(c.get('claimableSalesAmount')), 4),
+        'claimedRetentionAmount': claimed_ret,
+        'claimedPayableAmount': claimed_pay,
     }
 
 
@@ -853,8 +896,8 @@ def load_weekly_report(conn: sqlite3.Connection, site_id: str, week_start: str):
     }
 
 
-def previous_saved_inventory(conn: sqlite3.Connection, site_id: str, week_start: str) -> Optional[dict]:
-    """帶入上一份已存週報的房屋去化，新週才不會清成空白。"""
+def previous_saved_week_data(conn: sqlite3.Connection, site_id: str, week_start: str) -> Optional[dict]:
+    """上一份已存週報的 data（房屋去化／檢討文字延續用）。"""
     row = conn.execute(
         '''
         SELECT data FROM weekly_reports
@@ -870,8 +913,27 @@ def previous_saved_inventory(conn: sqlite3.Connection, site_id: str, week_start:
         data = json.loads(row['data'] or '{}')
     except (TypeError, json.JSONDecodeError):
         return None
-    inv = data.get('inventory') if isinstance(data, dict) else None
+    return data if isinstance(data, dict) and data else None
+
+
+def previous_saved_inventory(conn: sqlite3.Connection, site_id: str, week_start: str) -> Optional[dict]:
+    """帶入上一份已存週報的房屋去化，新週才不會清成空白。"""
+    data = previous_saved_week_data(conn, site_id, week_start)
+    if not data:
+        return None
+    inv = data.get('inventory')
     return inv if isinstance(inv, dict) and inv else None
+
+
+def previous_saved_review_fields(conn: sqlite3.Connection, site_id: str, week_start: str) -> dict:
+    """帶入上一週檢討／區域個案／備註，新週不清空。"""
+    data = previous_saved_week_data(conn, site_id, week_start) or {}
+    out = {}
+    for key in ('reviewNotes', 'competitorNotes', 'memo'):
+        val = data.get(key)
+        if isinstance(val, str) and val.strip():
+            out[key] = val
+    return out
 
 
 def upsert_weekly_report(
@@ -1189,7 +1251,9 @@ def _build_ppt_summary_sheet(ws, *, site_name, start, end, week_number, manual, 
     claimable_amt = _num(c.get('claimableAmount'))
     claimed_amt = _num(c.get('claimedAmount'))
     booked_amt = _num(c.get('bookedAmount'))
-    retention_amt = _num(c.get('retentionAmount')) or com.get('retentionAmount')
+    retention_amt = _num(c.get('claimableRetentionAmount'))
+    if 'claimableRetentionAmount' not in c:
+        retention_amt = _num(c.get('retentionAmount')) or com.get('retentionAmount')
     unclaimed_amt = _num(c.get('unclaimedAmount')) or com.get('unclaimedAmount')
     unclaimed_units = _num(c.get('unclaimedUnits')) or com.get('unclaimedUnits')
     unclaimed_parking = _num(c.get('unclaimedParking')) or com.get('unclaimedParking')
@@ -1210,25 +1274,38 @@ def _build_ppt_summary_sheet(ws, *, site_name, start, end, week_number, manual, 
     if m_claimed:
         claimed_units = _num(m_claimed.get('units'), claimed_units)
         claimed_parking = _num(m_claimed.get('parking'), claimed_parking)
-        claimed_amt = _num(m_claimed.get('payable'), claimed_amt) or claimed_amt
-        claimed_total_485 = _num(m_claimed.get('claimable')) or round(claimed_amt + retention_amt, 4)
-        claimed_retention = _num(m_claimed.get('retention'), retention_amt)
+        claimed_total_485 = _num(m_claimed.get('claimable')) or claimed_amt
+        claimed_retention = _num(m_claimed.get('retention'))
+        if 'retention' not in m_claimed:
+            claimed_retention = _num(c.get('claimedRetentionAmount'), retention_amt)
+        currently_claimed_payable = _num(m_claimed.get('payable')) or _num(c.get('claimedPayableAmount'))
     else:
-        claimed_total_485 = round(claimed_amt + retention_amt, 4) if (claimed_amt or retention_amt) else claimable_amt
-        claimed_retention = retention_amt
+        claimed_total_485 = claimed_amt
+        if 'claimedRetentionAmount' in c:
+            claimed_retention = _num(c.get('claimedRetentionAmount'))
+        else:
+            claimed_retention = round(claimed_amt * 0.03, 4) if claimed_amt else retention_amt
+        currently_claimed_payable = (
+            _num(c.get('claimedPayableAmount'))
+            if 'claimedPayableAmount' in c
+            else round(claimed_amt - claimed_retention, 4)
+        )
     if m_unclaimed:
         unclaimed_units = _num(m_unclaimed.get('units'), unclaimed_units)
         unclaimed_parking = _num(m_unclaimed.get('parking'), unclaimed_parking)
-        # PPT「未請佣金額」對的是 4.85% 可請，不是 97%
+        # PPT「未請佣金額」對的是 100%／4.85% 可請，不是 97%
         unclaimed_amt = (
             _num(m_unclaimed.get('claimable'))
             or _num(m_unclaimed.get('payable'), unclaimed_amt)
             or unclaimed_amt
         )
 
-    comm_sales_amount = round(claimable_amt / rate, 4) if claimable_amt else cum_deal_a
+    comm_sales_amount = (
+        _num(c.get('claimableSalesAmount'))
+        or (round(claimable_amt / rate, 4) if claimable_amt else cum_deal_a)
+    )
     unclaimed_sales = round(unclaimed_amt / rate, 4) if unclaimed_amt else 0
-    currently_claimed = booked_amt if booked_amt else claimed_amt
+    currently_claimed = booked_amt if booked_amt else currently_claimed_payable
 
     week_title = (
         f'第{_to_zh_int(safe_week_number(week_number, start))}週　'
@@ -1585,20 +1662,28 @@ def build_weekly_excel(site_name: str, start, end, week_number, manual: dict, au
         ('累積銷售戶數', 'sellableUnits'),
         ('累積銷售車位', 'sellableParking'),
         ('累積銷售金額(萬)', 'sellableAmount'),
-        ('可請佣金額(萬)', 'claimableAmount'),
-        ('已請佣金額(萬)', 'claimedAmount'),
-        ('已入帳金額(萬)', 'bookedAmount'),
         ('可請佣戶數', 'claimableUnits'),
-        ('已請佣戶數', 'claimedUnits'),
         ('可請佣車位', 'claimableParking'),
+        ('可請佣銷售金額(萬)', 'claimableSalesAmount'),
+        ('可請佣金額(萬)', 'claimableAmount'),
+        ('3%保留款(萬)', 'claimableRetentionAmount'),
+        ('97%可請(萬)', 'claimablePayableAmount'),
+        ('已請佣戶數', 'claimedUnits'),
         ('已請佣車位', 'claimedParking'),
+        ('已請佣金額(萬)', 'claimedAmount'),
+        ('已請3%保留款(萬)', 'claimedRetentionAmount'),
+        ('已請97%(萬)', 'claimedPayableAmount'),
+        ('已入帳金額(萬)', 'bookedAmount'),
         ('未請佣戶數', 'unclaimedUnits'),
         ('未請佣車位', 'unclaimedParking'),
         ('預計本月可請戶數', 'nextMonthUnits'),
         ('預計本月可請車位', 'nextMonthParking'),
         ('預計本月可請金額(萬)', 'nextMonthAmount'),
     ]:
-        ws.append([label, c.get(key, 0)])
+        ws.append([
+            label,
+            c.get(key) if c.get(key) is not None else com.get(key, 0),
+        ])
     ws.append(['未請佣金額(萬)', com['unclaimedAmount']])
     if not c.get('unclaimedUnits'):
         ws.append(['未請佣戶數', com['unclaimedUnits']])

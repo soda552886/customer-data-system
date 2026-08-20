@@ -78,6 +78,14 @@ def default_media_items() -> list[dict]:
     return []
 
 
+def site_wants_referral(site_name: str, saved: Optional[dict]) -> bool:
+    """是否顯示介紹費欄：有存檔設定則依存檔，否則世界都心預設開啟。"""
+    data = saved if isinstance(saved, dict) else {}
+    if 'showReferralFee' in data:
+        return bool(data.get('showReferralFee'))
+    return '世界都心' in _text(site_name)
+
+
 def site_wants_owner_budget(site_name: str, saved: Optional[dict]) -> bool:
     data = saved if isinstance(saved, dict) else {}
     if 'showOwnerBudget' in data:

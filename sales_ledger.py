@@ -612,7 +612,7 @@ def _period_deal_totals(conn: sqlite3.Connection, site_id: str, period_name: str
     scheme = settings.get('scheme') or 'simple'
     rows = conn.execute(
         '''
-        SELECT units, parking_count, commission_payable, commission_claimable,
+        SELECT units, parking_count, area_ping, commission_payable, commission_claimable,
                commission_retention, commission_booked, commission_claimed,
                commission_period, commission_claim_date,
                unit_no, customer_name, order_no, id
@@ -642,7 +642,8 @@ def _period_deal_totals(conn: sqlite3.Connection, site_id: str, period_name: str
         claimable += c
         retention += ret
         booked += _num(r['commission_booked'])
-        units += _num(r['units'], 1)
+        u = _units_from_area_ping(r['area_ping'])
+        units += u
         parking += _num(r['parking_count'])
         is_claimed = bool(
             _num(r['commission_claimed']) > 0
@@ -654,7 +655,7 @@ def _period_deal_totals(conn: sqlite3.Connection, site_id: str, period_name: str
             'unitNo': r['unit_no'] or '',
             'customerName': r['customer_name'] or '',
             'orderNo': r['order_no'] or '',
-            'units': _num(r['units'], 1),
+            'units': u,
             'parking': _num(r['parking_count']),
             'payable': _round4(p),
             'claimable': _round4(c),
@@ -1012,6 +1013,11 @@ def _num(val, default=0.0) -> float:
         return float(default)
 
 
+def _units_from_area_ping(area_ping) -> float:
+    """有填坪數才算 1 戶；純加購車位（無坪數）不算戶。"""
+    return 1.0 if _num(area_ping) > 0 else 0.0
+
+
 def _truthy(val) -> bool:
     if isinstance(val, bool):
         return val
@@ -1111,7 +1117,7 @@ def row_to_deal(row) -> dict:
             row['base_price'],
             _deal_deductions(row),
         ),
-        'units': row['units'] if row['units'] is not None else 1,
+        'units': _units_from_area_ping(row['area_ping']),
         'depositDate': _parse_date(row['deposit_date']),
         'supplementDate': _parse_date(row['supplement_date']),
         'signDate': _parse_date(row['sign_date']),
@@ -1309,7 +1315,7 @@ def normalize_deal_payload(body: dict, site_id: str = '', settings: Optional[dic
         'house_base_price': house_base,
         'parking_base_price': parking_base,
         'excess_price': excess,
-        'units': _num(body.get('units'), 1),
+        'units': _units_from_area_ping(body.get('areaPing')),
         'deposit_date': _parse_date(body.get('depositDate')),
         'supplement_date': _parse_date(body.get('supplementDate')),
         'sign_date': _parse_date(body.get('signDate')),
@@ -1585,7 +1591,7 @@ def aggregate_for_weekly(conn: sqlite3.Connection, site_id: str, start, end) -> 
 
     for row in rows:
         rt = row['record_type'] or 'deal'
-        units = _num(row['units'], 1)
+        units = _units_from_area_ping(row['area_ping'] if 'area_ping' in row.keys() else 0)
         parking = _num(row['parking_count'])
         contract_amount = _num(row['total_price']) or _num(row['list_price'])
         actual_amount = _num(row['actual_total_price']) if 'actual_total_price' in row.keys() else 0
@@ -1852,6 +1858,7 @@ def build_sales_excel(site_name: str, rows: list[dict]) -> bytes:
         cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
 
     amount_keys = [
+        'areaPing',
         'contractTotal', 'actualTotalPrice',
         'houseBasePrice', 'parkingBasePrice', 'baseTotal', 'excessPrice',
         'commissionSalesAmount', 'commissionClaimable', 'commissionPayable',
@@ -1859,14 +1866,18 @@ def build_sales_excel(site_name: str, rows: list[dict]) -> bytes:
         'commissionBooked', 'nextMonthUnits', 'nextMonthParking', 'nextMonthClaimable',
     ]
     totals = {key: 0.0 for key in amount_keys}
+    unit_count = 0
     for row in rows:
+        if _num(row.get('areaPing')) > 0:
+            unit_count += 1
         for key in amount_keys:
             totals[key] += _num(row.get(key))
         ws.append(sales_export_row_values(row))
 
     total_values = [''] * len(headers)
     total_values[0] = '合計'
-    total_values[5] = f'{len(rows)} 筆'
+    total_values[4] = f'{unit_count} 戶'
+    total_values[7] = round(totals['areaPing'], 4)
     total_columns = {
         'contractTotal': 13, 'actualTotalPrice': 14,
         'surcharge': 15, 'applianceGift': 16, 'pickupVoucher': 17,

@@ -299,9 +299,12 @@ function collectManualFromForm(baseManual) {
   manual.commission = manual.commission || {};
   [
     'sellableUnits', 'sellableParking', 'sellableAmount',
-    'claimableAmount', 'claimedAmount', 'bookedAmount',
-    'claimableUnits', 'claimableParking', 'claimedUnits', 'claimedParking',
+    'claimableUnits', 'claimableParking', 'claimableSalesAmount',
+    'claimableAmount', 'claimableRetentionAmount', 'claimablePayableAmount',
+    'claimedUnits', 'claimedParking',
+    'claimedAmount', 'claimedRetentionAmount', 'claimedPayableAmount',
     'nextMonthUnits', 'nextMonthParking', 'nextMonthAmount',
+    'bookedAmount',
   ].forEach((f) => {
     const el = document.querySelector(`[data-block="commission"][data-field="${f}"]`);
     if (el) manual.commission[f] = Number(el.value) || 0;
@@ -344,63 +347,113 @@ function calcInventoryDerived(inv) {
   };
 }
 
-function calcCommissionDerived(c) {
-  const n = (k) => Number(c[k]) || 0;
-  const round4 = (x) => Math.round(x * 10000) / 10000;
-  const claimed = n('claimedAmount');
-  const booked = n('bookedAmount');
-  return {
-    unclaimedAmount: round4(Math.max(n('claimableAmount') - claimed, 0)),
-    unclaimedUnits: Math.max(n('claimableUnits') - n('claimedUnits'), 0),
-    unclaimedParking: Math.max(n('claimableParking') - n('claimedParking'), 0),
-    payableAmount: round4(n('claimableAmount')),
-    retentionAmount: round4(n('retentionAmount') || n('claimableAmount') * (current?.commissionDefaults?.retentionRatio || 0.03)),
-    bookedAmount: round4(booked),
-    unbookedAmount: round4(Math.max(claimed - booked, 0)),
-    nextMonthUnits: n('nextMonthUnits'),
-    nextMonthParking: n('nextMonthParking'),
-    nextMonthAmount: round4(n('nextMonthAmount')),
-  };
+function roundCommission4(x) {
+  return Math.round((Number(x) || 0) * 10000) / 10000;
 }
 
-function splitKeyedCommission(amount, defaults) {
-  const d = defaults || current?.commissionDefaults || {};
-  const payableRatio = Number(d.payableRatio);
-  const retentionRatio = Number(d.retentionRatio);
-  const keyed = Number(amount) || 0;
-  const scheme = d.scheme || 'simple';
-  if (scheme === 'payment_tiers') {
-    const ho = Number(d.handoverRetention) || 0;
-    return {
-      claimable: keyed,
-      payable: keyed,
-      retention: keyed * ho,
-    };
-  }
-  const payR = Number.isFinite(payableRatio) && payableRatio > 0 ? payableRatio : 1;
-  const retR = Number.isFinite(retentionRatio) ? retentionRatio : 0;
-  const total = keyed / payR;
+function retentionRatioDefault() {
+  const r = Number(current?.commissionDefaults?.retentionRatio);
+  return Number.isFinite(r) ? r : 0.03;
+}
+
+/** 3% = 100%×比率（四捨五入至小數4位），97% = 100%−3% */
+function splitFromTotal100(total100, retentionRatio) {
+  const total = Number(total100) || 0;
+  const ratio = Number.isFinite(Number(retentionRatio)) ? Number(retentionRatio) : retentionRatioDefault();
+  const retention = roundCommission4(total * ratio);
+  const payable = roundCommission4(total - retention);
+  return { claimable: roundCommission4(total), retention, payable };
+}
+
+function hasOwnCommissionVal(c, key) {
+  return c && Object.prototype.hasOwnProperty.call(c, key) && c[key] !== '' && c[key] != null;
+}
+
+/** 補齊／沿用 3%、97%；舊資料若只有 100% 則用公式帶入 */
+function normalizeCommissionSplits(raw) {
+  const c = { ...(raw || {}) };
+  const ratio = retentionRatioDefault();
+  const fillPair = (totalKey, retKey, payKey, legacyRetKey, legacyPayKey) => {
+    const total = Number(c[totalKey]) || 0;
+    const auto = splitFromTotal100(total, ratio);
+    let ret = hasOwnCommissionVal(c, retKey) ? Number(c[retKey]) || 0
+      : (legacyRetKey && hasOwnCommissionVal(c, legacyRetKey) ? Number(c[legacyRetKey]) || 0 : null);
+    let pay = hasOwnCommissionVal(c, payKey) ? Number(c[payKey]) || 0
+      : (legacyPayKey && hasOwnCommissionVal(c, legacyPayKey) ? Number(c[legacyPayKey]) || 0 : null);
+    // 100% 有值但 3%/97% 皆為 0（空白預設）→ 用公式帶入
+    if (total > 0 && (ret == null || pay == null || (ret === 0 && pay === 0))) {
+      ret = auto.retention;
+      pay = auto.payable;
+    } else {
+      if (ret == null) ret = auto.retention;
+      if (pay == null) pay = auto.payable;
+    }
+    c[retKey] = roundCommission4(ret);
+    c[payKey] = roundCommission4(pay);
+  };
+  fillPair(
+    'claimableAmount', 'claimableRetentionAmount', 'claimablePayableAmount',
+    'retentionAmount', 'payableAmount',
+  );
+  fillPair(
+    'claimedAmount', 'claimedRetentionAmount', 'claimedPayableAmount',
+    null, null,
+  );
+  return c;
+}
+
+function commissionSplitOk(total100, retention, payable) {
+  const sum = roundCommission4((Number(retention) || 0) + (Number(payable) || 0));
+  const total = roundCommission4(total100);
+  return Math.abs(sum - total) <= 0.00015;
+}
+
+function calcCommissionDerived(c) {
+  const n = (k) => Number(c[k]) || 0;
+  const claimed = n('claimedAmount');
+  const booked = n('bookedAmount');
+  const claimablePay = n('claimablePayableAmount') || n('payableAmount');
+  const claimableRet = n('claimableRetentionAmount') || n('retentionAmount');
   return {
-    claimable: Math.round(total * 10000) / 10000,
-    payable: Math.round(keyed * 10000) / 10000,
-    retention: Math.round(total * retR * 10000) / 10000,
+    unclaimedAmount: roundCommission4(Math.max(n('claimableAmount') - claimed, 0)),
+    unclaimedPayable: roundCommission4(Math.max(claimablePay - n('claimedPayableAmount'), 0)),
+    unclaimedRetention: roundCommission4(Math.max(claimableRet - n('claimedRetentionAmount'), 0)),
+    unclaimedUnits: Math.max(n('claimableUnits') - n('claimedUnits'), 0),
+    unclaimedParking: Math.max(n('claimableParking') - n('claimedParking'), 0),
+    payableAmount: roundCommission4(claimablePay),
+    retentionAmount: roundCommission4(claimableRet),
+    bookedAmount: roundCommission4(booked),
+    unbookedAmount: roundCommission4(Math.max((n('claimedPayableAmount') || claimed) - booked, 0)),
+    nextMonthUnits: n('nextMonthUnits'),
+    nextMonthParking: n('nextMonthParking'),
+    nextMonthAmount: roundCommission4(n('nextMonthAmount')),
+    claimableSplitOk: commissionSplitOk(n('claimableAmount'), n('claimableRetentionAmount'), n('claimablePayableAmount')),
+    claimedSplitOk: commissionSplitOk(n('claimedAmount'), n('claimedRetentionAmount'), n('claimedPayableAmount')),
   };
 }
 
 function matrixFromManualCommission(manual) {
-  const c = (manual || {}).commission || {};
+  const c = normalizeCommissionSplits((manual || {}).commission || {});
   const n = (k) => Number(c[k]) || 0;
   const defaults = current?.commissionDefaults || {};
   const labels = defaults.labels || {
-    claimable: '佣金', retention: '保留', payable: '可請',
+    claimable: '100%佣金', retention: '3%保留', payable: '97%可請',
   };
-  const claimableAmt = splitKeyedCommission(n('claimableAmount'), defaults);
-  const claimedAmt = splitKeyedCommission(n('claimedAmount'), defaults);
-  const forecastAmt = splitKeyedCommission(n('nextMonthAmount'), defaults);
+  const claimableAmt = {
+    claimable: n('claimableAmount'),
+    retention: n('claimableRetentionAmount'),
+    payable: n('claimablePayableAmount'),
+  };
+  const claimedAmt = {
+    claimable: n('claimedAmount'),
+    retention: n('claimedRetentionAmount'),
+    payable: n('claimedPayableAmount'),
+  };
+  const forecastAmt = splitFromTotal100(n('nextMonthAmount'), retentionRatioDefault());
   const unclaimedAmt = {
-    claimable: Math.round((claimableAmt.claimable - claimedAmt.claimable) * 10000) / 10000,
-    payable: Math.round((claimableAmt.payable - claimedAmt.payable) * 10000) / 10000,
-    retention: Math.round((claimableAmt.retention - claimedAmt.retention) * 10000) / 10000,
+    claimable: roundCommission4(claimableAmt.claimable - claimedAmt.claimable),
+    payable: roundCommission4(claimableAmt.payable - claimedAmt.payable),
+    retention: roundCommission4(claimableAmt.retention - claimedAmt.retention),
   };
   return {
     labels,
@@ -696,7 +749,7 @@ function renderWeeklyCommissionMatrix(matrix) {
   el.innerHTML = cards.map((c) => {
     const b = data[c.key] || {};
     const labels = data.labels || current?.commissionDefaults?.labels || {
-      claimable: '佣金', retention: '保留', payable: '可請',
+      claimable: '100%佣金', retention: '3%保留', payable: '97%可請',
     };
     return `<div class="commission-matrix-card" data-tone="${c.key}">
       <h3>${escapeHtml(c.title)}</h3>
@@ -710,56 +763,120 @@ function renderWeeklyCommissionMatrix(matrix) {
   }).join('');
 }
 
+function commissionFieldHtml(f, c) {
+  const step = f.step || '0.01';
+  const val = Number(c[f.key]) || 0;
+  const warn = f.warnAttr ? ` data-split-role="${f.warnAttr}"` : '';
+  return `<div class="form-group">
+      <label>${f.label}</label>
+      <input type="number" min="0" step="${step}" data-block="commission" data-field="${f.key}"${warn} value="${val}">
+    </div>`;
+}
+
+function renderCommissionSplitWarnings(c) {
+  const host = document.getElementById('commissionSplitWarn');
+  if (!host) return;
+  const d = calcCommissionDerived(c);
+  const msgs = [];
+  if (!d.claimableSplitOk) {
+    msgs.push('可請：3%保留款＋97%可請 必須等於 可請佣金額(100%)，請檢查手改數字。');
+  }
+  if (!d.claimedSplitOk) {
+    msgs.push('已請：已請3%保留款＋已請97% 必須等於 已請佣金額(100%)，請檢查手改數字。');
+  }
+  if (!msgs.length) {
+    host.className = 'commission-split-warn hidden';
+    host.textContent = '';
+    return;
+  }
+  host.className = 'commission-split-warn';
+  host.innerHTML = msgs.map((m) => `<div>${escapeHtml(m)}</div>`).join('');
+}
+
 function renderCommission(manual, derived) {
-  const c = manual.commission || {};
+  const c = normalizeCommissionSplits(manual.commission || {});
   const fields = [
     { key: 'sellableUnits', label: '累積銷售戶數' },
     { key: 'sellableParking', label: '累積銷售車位' },
     { key: 'sellableAmount', label: '累積銷售金額(萬)（實際房價＋車售）' },
     { key: 'claimableUnits', label: '可請佣戶數' },
     { key: 'claimableParking', label: '可請佣車位' },
-    { key: 'claimableAmount', label: '可請佣金額(萬)', step: '0.0001' },
+    { key: 'claimableSalesAmount', label: '可請佣銷售金額(萬)', step: '0.0001' },
+    { key: 'claimableAmount', label: '可請佣金額(萬)', step: '0.0001', warnAttr: 'claimable-total' },
+    { key: 'claimableRetentionAmount', label: '3%保留款(萬)', step: '0.0001', warnAttr: 'claimable-ret' },
+    { key: 'claimablePayableAmount', label: '97%可請(萬)', step: '0.0001', warnAttr: 'claimable-pay' },
     { key: 'claimedUnits', label: '已請佣戶數' },
     { key: 'claimedParking', label: '已請佣車位' },
-    { key: 'claimedAmount', label: '已請佣金額(萬)', step: '0.0001' },
+    { key: 'claimedAmount', label: '已請佣金額(萬)', step: '0.0001', warnAttr: 'claimed-total' },
+    { key: 'claimedRetentionAmount', label: '已請3%保留款(萬)', step: '0.0001', warnAttr: 'claimed-ret' },
+    { key: 'claimedPayableAmount', label: '已請97%(萬)', step: '0.0001', warnAttr: 'claimed-pay' },
     { key: 'nextMonthUnits', label: '預計本月可請戶數' },
     { key: 'nextMonthParking', label: '預計本月可請車位' },
     { key: 'nextMonthAmount', label: '預計本月可請金額(萬)', step: '0.0001' },
     { key: 'bookedAmount', label: '已請佣已入帳金額(萬)', step: '0.0001' },
   ];
+  // 已請戶數／車位列只佔兩格，金額移到下一排（用空白占位對齊）
+  const htmlParts = [];
+  fields.forEach((f) => {
+    if (f.key === 'claimedAmount') {
+      htmlParts.push('<div class="form-group commission-grid-spacer" aria-hidden="true"></div>');
+    }
+    htmlParts.push(commissionFieldHtml(f, c));
+  });
   const d = calcCommissionDerived(c);
-  document.getElementById('commissionInputs').innerHTML = fields.map((f) => `
-    <div class="form-group">
-      <label>${f.label}</label>
-      <input type="number" min="0" step="${f.step || '0.01'}" data-block="commission" data-field="${f.key}" value="${Number(c[f.key]) || 0}">
-    </div>
-  `).concat([
-    `<div class="form-group">
+  htmlParts.push(`<div class="form-group">
       <label>已請佣未入帳金額(萬)</label>
       <input type="number" step="0.0001" id="commissionUnbooked" value="${d.unbookedAmount}" readonly>
-    </div>`,
-  ]).join('');
+    </div>`);
+  htmlParts.push('<div class="form-group full-width commission-split-warn-wrap"><div id="commissionSplitWarn" class="commission-split-warn hidden"></div></div>');
+  document.getElementById('commissionInputs').innerHTML = htmlParts.join('');
   const labels = current?.commissionDefaults?.labels
-    || { payable: '本期可請', retention: '保留款' };
+    || { payable: '97%可請', retention: '3%保留款' };
   renderDerivedCards('commissionDerived', [
     { label: `${labels.payable}(萬)`, value: `${d.payableAmount}` },
     { label: `${labels.retention}(萬)`, value: `${d.retentionAmount}` },
-    { label: '未請佣金額(萬)', value: `${d.unclaimedAmount}` },
+    { label: '未請佣金額100%(萬)', value: `${d.unclaimedAmount}` },
     { label: '未請佣戶數', value: `${d.unclaimedUnits}` },
     { label: '未請佣車位', value: `${d.unclaimedParking}` },
     { label: '已請佣已入帳(萬)', value: `${d.bookedAmount}` },
     { label: '已請佣未入帳(萬)', value: `${d.unbookedAmount}` },
     { label: '本月預計可請(戶/車/萬)', value: `${d.nextMonthUnits} / ${d.nextMonthParking} / ${d.nextMonthAmount}` },
   ]);
+  renderCommissionSplitWarnings(c);
   renderWeeklyCommissionMatrix(matrixFromManualCommission({ commission: c }));
   document.querySelectorAll('[data-block="commission"]').forEach((el) => {
-    el.addEventListener('input', refreshDerivedFromForm);
+    el.addEventListener('input', onCommissionFieldInput);
   });
+}
+
+function onCommissionFieldInput(ev) {
+  const el = ev.target;
+  const field = el.getAttribute('data-field');
+  if (!field) {
+    refreshDerivedFromForm();
+    return;
+  }
+  const ratio = retentionRatioDefault();
+  const setVal = (key, val) => {
+    const input = document.querySelector(`[data-block="commission"][data-field="${key}"]`);
+    if (input) input.value = roundCommission4(val);
+  };
+  if (field === 'claimableAmount') {
+    const auto = splitFromTotal100(el.value, ratio);
+    setVal('claimableRetentionAmount', auto.retention);
+    setVal('claimablePayableAmount', auto.payable);
+  } else if (field === 'claimedAmount') {
+    const auto = splitFromTotal100(el.value, ratio);
+    setVal('claimedRetentionAmount', auto.retention);
+    setVal('claimedPayableAmount', auto.payable);
+  }
+  refreshDerivedFromForm();
 }
 
 function refreshDerivedFromForm() {
   if (!current) return;
   const manual = collectManualFromForm(current.manual);
+  manual.commission = normalizeCommissionSplits(manual.commission || {});
   const inv = calcInventoryDerived(manual.inventory || {});
   renderDerivedCards('inventoryDerived', [
     { label: '戶數去化率', value: `${inv.unitRate}%` },
@@ -775,11 +892,11 @@ function refreshDerivedFromForm() {
   ]);
   const com = calcCommissionDerived(manual.commission || {});
   const labels = current?.commissionDefaults?.labels
-    || { payable: '本期可請', retention: '保留款' };
+    || { payable: '97%可請', retention: '3%保留款' };
   renderDerivedCards('commissionDerived', [
     { label: `${labels.payable}(萬)`, value: `${com.payableAmount}` },
     { label: `${labels.retention}(萬)`, value: `${com.retentionAmount}` },
-    { label: '未請佣金額(萬)', value: `${com.unclaimedAmount}` },
+    { label: '未請佣金額100%(萬)', value: `${com.unclaimedAmount}` },
     { label: '未請佣戶數', value: `${com.unclaimedUnits}` },
     { label: '未請佣車位', value: `${com.unclaimedParking}` },
     { label: '已請佣已入帳(萬)', value: `${com.bookedAmount}` },
@@ -788,6 +905,7 @@ function refreshDerivedFromForm() {
   ]);
   const unbookedEl = document.getElementById('commissionUnbooked');
   if (unbookedEl) unbookedEl.value = com.unbookedAmount;
+  renderCommissionSplitWarnings(manual.commission || {});
   renderWeeklyCommissionMatrix(matrixFromManualCommission(manual));
 }
 
@@ -1184,6 +1302,15 @@ async function saveWeek() {
     return;
   }
   const manual = collectManualFromForm(current.manual);
+  manual.commission = normalizeCommissionSplits(manual.commission || {});
+  const d = calcCommissionDerived(manual.commission);
+  if (!d.claimableSplitOk || !d.claimedSplitOk) {
+    renderCommissionSplitWarnings(manual.commission);
+    const ok = window.confirm(
+      '請佣摘要：3%＋97% 與 100% 金額不一致。\n仍要儲存嗎？（建議先修正紅字警示的數字）',
+    );
+    if (!ok) return;
+  }
   try {
     const res = await fetch('/api/weekly/reports', {
       method: 'PUT',
