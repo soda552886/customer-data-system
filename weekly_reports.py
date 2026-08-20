@@ -931,8 +931,11 @@ def previous_saved_review_fields(conn: sqlite3.Connection, site_id: str, week_st
     out = {}
     for key in ('reviewNotes', 'competitorNotes', 'memo'):
         val = data.get(key)
-        if isinstance(val, str) and val.strip():
-            out[key] = val
+        if val is None:
+            continue
+        text = str(val).strip()
+        if text:
+            out[key] = str(val) if isinstance(val, str) else text
     return out
 
 

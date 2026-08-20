@@ -3,9 +3,11 @@ let current = null;
 let regionOptions = [];
 let mediaOptions = [];
 let draftSaveTimer = null;
+let pendingReviewCarry = null;
 
 const WEEKLY_CTX_KEY = 'weekly_report_ctx';
 const WEEKLY_DRAFT_KEY = 'weekly_report_draft';
+const REVIEW_CARRY_KEYS = ['reviewNotes', 'competitorNotes', 'memo'];
 
 const DIM_HEADERS = `
   <tr>
@@ -168,13 +170,41 @@ function clearWeeklyDraft() {
 function mergeWeeklyDraft(payload) {
   const draft = loadWeeklyDraft(payload.siteId, payload.weekStart);
   if (!draft?.manual) return { payload, restored: false };
+  const mergedManual = { ...(payload.manual || {}), ...draft.manual };
+  // 草稿空白不要蓋掉伺服器已帶入的檢討文字
+  REVIEW_CARRY_KEYS.forEach((key) => {
+    const fromServer = String((payload.manual || {})[key] || '').trim();
+    const fromDraft = String(draft.manual[key] || '').trim();
+    if (fromServer && !fromDraft) mergedManual[key] = payload.manual[key];
+  });
   return {
     payload: {
       ...payload,
-      manual: { ...(payload.manual || {}), ...draft.manual },
+      manual: mergedManual,
     },
     restored: true,
   };
+}
+
+function captureReviewCarryFromForm() {
+  pendingReviewCarry = {
+    reviewNotes: document.getElementById('reviewNotes')?.value || '',
+    competitorNotes: document.getElementById('competitorNotes')?.value || '',
+    memo: document.getElementById('weekMemo')?.value || '',
+  };
+}
+
+function applyReviewCarry(manual) {
+  const src = pendingReviewCarry;
+  pendingReviewCarry = null;
+  if (!src || !manual) return manual;
+  const out = { ...manual };
+  REVIEW_CARRY_KEYS.forEach((key) => {
+    if (!String(out[key] || '').trim() && String(src[key] || '').trim()) {
+      out[key] = src[key];
+    }
+  });
+  return out;
 }
 
 async function loadSites() {
@@ -1252,6 +1282,7 @@ async function loadWeek() {
     }
     saveWeeklyContext();
     const { payload, restored } = mergeWeeklyDraft(json);
+    payload.manual = applyReviewCarry(payload.manual || {});
     renderAll(payload);
     if (restored) {
       showToast('已還原離開頁面前未儲存的編輯');
@@ -1378,6 +1409,7 @@ function exportWeek(format) {
 function shiftWeek(delta) {
   const el = document.getElementById('weekStart');
   if (!el.value) return;
+  captureReviewCarryFromForm();
   const start = mondayOf(parseYmd(el.value));
   el.value = toYmd(addDays(start, delta * 7));
   updateRangeLabel();

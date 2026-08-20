@@ -1560,10 +1560,12 @@ def weekly_summary():
             inv = dict(manual.get('inventory') or {})
             inv.update(prev_inv)
             manual['inventory'] = inv
-        prev_review = previous_saved_review_fields(conn, site_id, week_start_s)
-        for key, val in prev_review.items():
-            if not str(manual.get(key) or '').strip():
-                manual[key] = val
+    # 檢討／區域個案／備註：只要本週欄位空白就帶入上一份已存內容
+    # （即使本週已有存檔、但這三欄是空的，也要延續，避免點下一週被清空）
+    prev_review = previous_saved_review_fields(conn, site_id, week_start_s)
+    for key, val in prev_review.items():
+        if not str(manual.get(key) or '').strip():
+            manual[key] = val
 
     phone_sum = phone_total_from_manual(manual)
     active_staff = get_active_sales_staff(conn, site_id)
@@ -1642,6 +1644,11 @@ def save_weekly_report():
         week_number = default_week_number(start, origin)
     manual['weekNumber'] = week_number
     manual['phoneCallsDetail'] = normalize_phone_calls_detail(manual.get('phoneCallsDetail'))
+    # 儲存時若檢討欄空白，自動帶入上一週，避免新週存成空字串後再也無法延續
+    prev_review = previous_saved_review_fields(conn, site_id, start.isoformat())
+    for key, val in prev_review.items():
+        if not str(manual.get(key) or '').strip():
+            manual[key] = val
     # 若有來電明細，每日來電通數改由明細加總，避免兩套數字不一致。
     if manual['phoneCallsDetail']:
         by_day = {}
