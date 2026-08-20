@@ -925,11 +925,98 @@ def previous_saved_inventory(conn: sqlite3.Connection, site_id: str, week_start:
     return inv if isinstance(inv, dict) and inv else None
 
 
+CARRY_TEXT_KEYS = ('reviewNotes', 'competitorNotes', 'memo')
+CARRY_AMOUNT_BLOCKS = ('dealsCum', 'signingsCum', 'purchasesCum', 'unreported')
+
+
+def _amount_block_empty(block) -> bool:
+    if not isinstance(block, dict):
+        return True
+    return not any(_num(block.get(k)) for k in ('units', 'parking', 'amount'))
+
+
+def _inventory_empty(inv) -> bool:
+    if not isinstance(inv, dict) or not inv:
+        return True
+    sold_keys = (
+        'soldUnits', 'soldParking', 'soldAmount', 'soldBasePrice',
+        'residentialSold', 'officeSold', 'shopSold', 'storefrontSold',
+    )
+    if any(_num(inv.get(k)) for k in sold_keys):
+        return False
+    # 僅有預設總戶／總車、尚未填任何去化 → 視為可帶入上一週
+    return True
+
+
+def _commission_empty(comm) -> bool:
+    if not isinstance(comm, dict) or not comm:
+        return True
+    return not any(_num(v) for v in comm.values() if not isinstance(v, (dict, list)))
+
+
+def _recompute_unsigned_cum(manual: dict) -> dict:
+    deals_cum = manual.get('dealsCum') or {}
+    signings_cum = manual.get('signingsCum') or {}
+    manual['unsignedCum'] = {
+        'units': max(_num(deals_cum.get('units')) - _num(signings_cum.get('units')), 0),
+        'parking': max(_num(deals_cum.get('parking')) - _num(signings_cum.get('parking')), 0),
+        'amount': max(_num(deals_cum.get('amount')) - _num(signings_cum.get('amount')), 0),
+    }
+    return manual
+
+
+def apply_previous_week_carry(manual: dict, prev: Optional[dict]) -> dict:
+    """
+    新週延續上一份已存週報：
+    1) 檢討／區域個案／備註
+    2) 累計成交／簽約／買進、未報（本週成交／簽約／買進不延續）
+    3) 房屋去化
+    4) 請佣摘要
+    本週欄位已有內容則保留，空白／全 0 才帶入。
+    """
+    out = manual if isinstance(manual, dict) else {}
+    if not isinstance(prev, dict) or not prev:
+        return _recompute_unsigned_cum(out)
+
+    for key in CARRY_TEXT_KEYS:
+        if str(out.get(key) or '').strip():
+            continue
+        val = prev.get(key)
+        if val is None:
+            continue
+        text = str(val).strip()
+        if text:
+            out[key] = str(val) if isinstance(val, str) else text
+
+    for key in CARRY_AMOUNT_BLOCKS:
+        if not _amount_block_empty(out.get(key)):
+            continue
+        prev_block = prev.get(key)
+        if isinstance(prev_block, dict) and not _amount_block_empty(prev_block):
+            out[key] = {
+                'units': _num(prev_block.get('units')),
+                'parking': _num(prev_block.get('parking')),
+                'amount': _num(prev_block.get('amount')),
+            }
+
+    if _inventory_empty(out.get('inventory')):
+        prev_inv = prev.get('inventory')
+        if isinstance(prev_inv, dict) and prev_inv:
+            out['inventory'] = dict(prev_inv)
+
+    if _commission_empty(out.get('commission')):
+        prev_com = prev.get('commission')
+        if isinstance(prev_com, dict) and prev_com:
+            out['commission'] = dict(prev_com)
+
+    return _recompute_unsigned_cum(out)
+
+
 def previous_saved_review_fields(conn: sqlite3.Connection, site_id: str, week_start: str) -> dict:
     """帶入上一週檢討／區域個案／備註，新週不清空。"""
     data = previous_saved_week_data(conn, site_id, week_start) or {}
     out = {}
-    for key in ('reviewNotes', 'competitorNotes', 'memo'):
+    for key in CARRY_TEXT_KEYS:
         val = data.get(key)
         if val is None:
             continue

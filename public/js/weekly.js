@@ -3,11 +3,12 @@ let current = null;
 let regionOptions = [];
 let mediaOptions = [];
 let draftSaveTimer = null;
-let pendingReviewCarry = null;
+let pendingWeekCarry = null;
 
 const WEEKLY_CTX_KEY = 'weekly_report_ctx';
 const WEEKLY_DRAFT_KEY = 'weekly_report_draft';
 const REVIEW_CARRY_KEYS = ['reviewNotes', 'competitorNotes', 'memo'];
+const AMOUNT_CARRY_KEYS = ['dealsCum', 'signingsCum', 'purchasesCum', 'unreported'];
 
 const DIM_HEADERS = `
   <tr>
@@ -171,12 +172,23 @@ function mergeWeeklyDraft(payload) {
   const draft = loadWeeklyDraft(payload.siteId, payload.weekStart);
   if (!draft?.manual) return { payload, restored: false };
   const mergedManual = { ...(payload.manual || {}), ...draft.manual };
-  // 草稿空白不要蓋掉伺服器已帶入的檢討文字
+  // 草稿空白不要蓋掉伺服器已帶入的延續欄位
   REVIEW_CARRY_KEYS.forEach((key) => {
     const fromServer = String((payload.manual || {})[key] || '').trim();
     const fromDraft = String(draft.manual[key] || '').trim();
     if (fromServer && !fromDraft) mergedManual[key] = payload.manual[key];
   });
+  AMOUNT_CARRY_KEYS.forEach((key) => {
+    if (amountBlockEmpty(draft.manual[key]) && !amountBlockEmpty((payload.manual || {})[key])) {
+      mergedManual[key] = payload.manual[key];
+    }
+  });
+  if (commissionBlockEmpty(draft.manual.commission) && !commissionBlockEmpty((payload.manual || {}).commission)) {
+    mergedManual.commission = payload.manual.commission;
+  }
+  if (inventoryBlockEmpty(draft.manual.inventory) && !inventoryBlockEmpty((payload.manual || {}).inventory)) {
+    mergedManual.inventory = payload.manual.inventory;
+  }
   return {
     payload: {
       ...payload,
@@ -186,17 +198,49 @@ function mergeWeeklyDraft(payload) {
   };
 }
 
-function captureReviewCarryFromForm() {
-  pendingReviewCarry = {
-    reviewNotes: document.getElementById('reviewNotes')?.value || '',
-    competitorNotes: document.getElementById('competitorNotes')?.value || '',
-    memo: document.getElementById('weekMemo')?.value || '',
+function amountBlockEmpty(block) {
+  if (!block || typeof block !== 'object') return true;
+  return !(Number(block.units) || Number(block.parking) || Number(block.amount));
+}
+
+function inventoryBlockEmpty(inv) {
+  if (!inv || typeof inv !== 'object') return true;
+  return !(
+    Number(inv.soldUnits) || Number(inv.soldParking) || Number(inv.soldAmount)
+    || Number(inv.soldBasePrice) || Number(inv.residentialSold) || Number(inv.officeSold)
+    || Number(inv.shopSold) || Number(inv.storefrontSold)
+  );
+}
+
+function commissionBlockEmpty(comm) {
+  if (!comm || typeof comm !== 'object') return true;
+  return !Object.values(comm).some((v) => Number(v));
+}
+
+function captureWeekCarryFromForm() {
+  const manual = current
+    ? collectManualFromForm(current.manual)
+    : {
+      reviewNotes: document.getElementById('reviewNotes')?.value || '',
+      competitorNotes: document.getElementById('competitorNotes')?.value || '',
+      memo: document.getElementById('weekMemo')?.value || '',
+    };
+  pendingWeekCarry = {
+    reviewNotes: manual.reviewNotes || '',
+    competitorNotes: manual.competitorNotes || '',
+    memo: manual.memo || '',
+    dealsCum: { ...(manual.dealsCum || {}) },
+    signingsCum: { ...(manual.signingsCum || {}) },
+    purchasesCum: { ...(manual.purchasesCum || {}) },
+    unreported: { ...(manual.unreported || {}) },
+    inventory: { ...(manual.inventory || {}) },
+    commission: { ...(manual.commission || {}) },
   };
 }
 
-function applyReviewCarry(manual) {
-  const src = pendingReviewCarry;
-  pendingReviewCarry = null;
+function applyWeekCarry(manual) {
+  const src = pendingWeekCarry;
+  pendingWeekCarry = null;
   if (!src || !manual) return manual;
   const out = { ...manual };
   REVIEW_CARRY_KEYS.forEach((key) => {
@@ -204,6 +248,24 @@ function applyReviewCarry(manual) {
       out[key] = src[key];
     }
   });
+  AMOUNT_CARRY_KEYS.forEach((key) => {
+    if (amountBlockEmpty(out[key]) && !amountBlockEmpty(src[key])) {
+      out[key] = { ...src[key] };
+    }
+  });
+  if (inventoryBlockEmpty(out.inventory) && !inventoryBlockEmpty(src.inventory)) {
+    out.inventory = { ...src.inventory };
+  }
+  if (commissionBlockEmpty(out.commission) && !commissionBlockEmpty(src.commission)) {
+    out.commission = { ...src.commission };
+  }
+  const dealsCum = out.dealsCum || {};
+  const signingsCum = out.signingsCum || {};
+  out.unsignedCum = {
+    units: Math.max((Number(dealsCum.units) || 0) - (Number(signingsCum.units) || 0), 0),
+    parking: Math.max((Number(dealsCum.parking) || 0) - (Number(signingsCum.parking) || 0), 0),
+    amount: Math.max((Number(dealsCum.amount) || 0) - (Number(signingsCum.amount) || 0), 0),
+  };
   return out;
 }
 
@@ -1282,7 +1344,7 @@ async function loadWeek() {
     }
     saveWeeklyContext();
     const { payload, restored } = mergeWeeklyDraft(json);
-    payload.manual = applyReviewCarry(payload.manual || {});
+    payload.manual = applyWeekCarry(payload.manual || {});
     renderAll(payload);
     if (restored) {
       showToast('已還原離開頁面前未儲存的編輯');
@@ -1409,7 +1471,7 @@ function exportWeek(format) {
 function shiftWeek(delta) {
   const el = document.getElementById('weekStart');
   if (!el.value) return;
-  captureReviewCarryFromForm();
+  captureWeekCarryFromForm();
   const start = mondayOf(parseYmd(el.value));
   el.value = toYmd(addDays(start, delta * 7));
   updateRangeLabel();

@@ -27,6 +27,7 @@ from weekly_reports import (
     empty_manual_payload, enrich_dims_with_phones, init_weekly_tables, inventory_summary,
     list_weekly_reports, load_weekly_report, merge_manual, monday_of,
     normalize_phone_calls_detail, normalize_week1_start, phone_total_from_manual,
+    apply_previous_week_carry, previous_saved_week_data,
     previous_saved_inventory, previous_saved_review_fields, roc_year,
     upsert_weekly_report, week_bounds, safe_week_number,
 )
@@ -1554,18 +1555,11 @@ def weekly_summary():
     saved = load_weekly_report(conn, site_id, week_start_s)
     base = empty_manual_payload(start, end, origin=origin)
     manual = merge_manual(base, (saved or {}).get('data') if saved else None)
-    if not saved:
-        prev_inv = previous_saved_inventory(conn, site_id, week_start_s)
-        if prev_inv:
-            inv = dict(manual.get('inventory') or {})
-            inv.update(prev_inv)
-            manual['inventory'] = inv
-    # 檢討／區域個案／備註：只要本週欄位空白就帶入上一份已存內容
-    # （即使本週已有存檔、但這三欄是空的，也要延續，避免點下一週被清空）
-    prev_review = previous_saved_review_fields(conn, site_id, week_start_s)
-    for key, val in prev_review.items():
-        if not str(manual.get(key) or '').strip():
-            manual[key] = val
+    # 延續上一週：檢討、累計成交／簽約／買進／未報、房屋去化、請佣摘要
+    manual = apply_previous_week_carry(
+        manual,
+        previous_saved_week_data(conn, site_id, week_start_s),
+    )
 
     phone_sum = phone_total_from_manual(manual)
     active_staff = get_active_sales_staff(conn, site_id)
@@ -1644,11 +1638,11 @@ def save_weekly_report():
         week_number = default_week_number(start, origin)
     manual['weekNumber'] = week_number
     manual['phoneCallsDetail'] = normalize_phone_calls_detail(manual.get('phoneCallsDetail'))
-    # 儲存時若檢討欄空白，自動帶入上一週，避免新週存成空字串後再也無法延續
-    prev_review = previous_saved_review_fields(conn, site_id, start.isoformat())
-    for key, val in prev_review.items():
-        if not str(manual.get(key) or '').strip():
-            manual[key] = val
+    # 儲存時空白欄位仍帶入上一週，避免新週存成全 0／空字串後無法再延續
+    manual = apply_previous_week_carry(
+        manual,
+        previous_saved_week_data(conn, site_id, start.isoformat()),
+    )
     # 若有來電明細，每日來電通數改由明細加總，避免兩套數字不一致。
     if manual['phoneCallsDetail']:
         by_day = {}

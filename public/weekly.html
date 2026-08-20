@@ -164,7 +164,7 @@
 
       <section class="card">
         <h2>成交／簽約／買進／未報</h2>
-        <p class="hint">可手填，或按「從銷售總表帶入」自動帶入本週與累計。成交／簽約／買進金額＝實際房價＋車售；未報為目前尚未改成已報的戶數（不分本週／累計），金額＝合約總價。</p>
+        <p class="hint">可手填，或按「從銷售總表帶入」。累計成交／簽約／未簽約／買進與未報會自動延續到下一週；本週成交／簽約／買進不延續。成交／簽約／買進金額＝實際房價＋車售；未報金額＝合約總價。</p>
         <div class="form-actions" style="margin-bottom:0.75rem;">
           <button type="button" id="fillFromSalesBtn" class="btn btn-secondary">從銷售總表帶入</button>
           <a class="btn btn-outline" href="/sales.html" id="openSalesFromWeekly">開啟銷售總表</a>
@@ -182,7 +182,7 @@
 
       <section class="card">
         <h2>請佣摘要</h2>
-        <p class="hint">請手動填寫。「可請佣金額／已請佣金額」皆填 100% 佣金（勿填 97%）；3%／97% 會依公式自動帶入，也可手改。若手改後 3%＋97% ≠ 100%，會顯示紅字警示，儲存時也會再確認。上方色塊與「預計本月可請」皆以 100% 拆算。</p>
+        <p class="hint">請手動填寫；新週會自動帶入上一週已存的請佣摘要。「可請佣金額／已請佣金額」皆填 100% 佣金（勿填 97%）；3%／97% 會依公式自動帶入，也可手改。若手改後 3%＋97% ≠ 100%，會顯示紅字警示。</p>
         <div id="weeklyCommissionMatrix" class="commission-matrix" style="margin-bottom:1rem;"></div>
         <div class="commission-grid" id="commissionInputs"></div>
         <div id="commissionDerived" class="commission-grid" style="margin-top:1rem;"></div>
