@@ -54,6 +54,14 @@ function moneyClass(val) {
   return Number(val) < 0 ? 'budget-neg' : (Number(val) !== 0 ? 'budget-hot' : '');
 }
 
+/** 總預算欄位加外框 class；可再合併其他 class（如正負色） */
+function totalColClass(key, extra = '') {
+  const parts = [];
+  if (key === 'total') parts.push('budget-total-col');
+  if (extra) parts.push(String(extra).trim());
+  return parts.filter(Boolean).join(' ');
+}
+
 function wanToYuan(val) {
   return Math.round((Number(val) || 0) * WAN * 100) / 100;
 }
