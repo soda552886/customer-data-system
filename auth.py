@@ -45,6 +45,7 @@ PUBLIC_API_EXACT = frozenset({
     '/api/sites',
     '/api/fields',
     '/api/import/template',
+    '/api/health',
 })
 PUBLIC_API_POST_ONLY = frozenset({
     '/api/customers',

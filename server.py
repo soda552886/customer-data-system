@@ -1003,6 +1003,23 @@ def sales_page():
     return send_from_directory('public', 'sales.html')
 
 
+@app.route('/api/health')
+def api_health():
+    """免登入健康檢查；順便確認預算模組可載入。"""
+    try:
+        from budget import normalize_project, site_wants_referral
+        sample = normalize_project({}, '麗寶鐸藝')
+        return jsonify({
+            'ok': True,
+            'budget': True,
+            'referralHelper': callable(site_wants_referral),
+            'showReferralFee': bool(sample.get('showReferralFee')),
+            'revision': 'budget-fix-20260820',
+        })
+    except Exception as exc:
+        return jsonify({'ok': False, 'budget': False, 'error': str(exc)}), 500
+
+
 @app.route('/budget.html')
 def budget_page():
     return send_from_directory('public', 'budget.html')

@@ -304,7 +304,15 @@ def _load_project_raw(conn, site_id) -> dict:
 
 def normalize_project(saved: Optional[dict], site_name='') -> dict:
     data = saved if isinstance(saved, dict) else {}
-    show_referral = site_wants_referral(site_name, data)
+    # 直接內聯判斷，避免再出現 NameError（舊版曾只呼叫未定義的 site_wants_referral）
+    if 'showReferralFee' in data:
+        show_referral = bool(data.get('showReferralFee'))
+    else:
+        show_referral = '世界都心' in _text(site_name)
+    if 'showOwnerBudget' in data:
+        show_owner = bool(data.get('showOwnerBudget'))
+    else:
+        show_owner = '世界都心' in _text(site_name)
     base = default_project_payload(include_referral=show_referral)
     saved_exec_cats = data.get('execCategories')
     saved_exec_amt = data.get('exec')
@@ -363,7 +371,7 @@ def normalize_project(saved: Optional[dict], site_name='') -> dict:
         'salesFeePct': _num(data.get('salesFeePct'), 2.375),
         'rewardPct': _num(data.get('rewardPct'), 1.0),
         'showReferralFee': show_referral,
-        'showOwnerBudget': site_wants_owner_budget(site_name, data),
+        'showOwnerBudget': show_owner,
         'ownerCategories': owner_cats,
         'execCategories': exec_cats,
         'weekExtraFields': extra_fields,
