@@ -361,8 +361,8 @@ function renderPhotoBlock(item, idx) {
       <button type="button" class="link-btn" data-photo-del="${idx}" data-photo-id="${escapeHtml(p.id)}">刪照片</button>
     </figure>
   `).join('');
-  return `<div class="budget-photo-row">
-    ${thumbs}
+  return `<div class="budget-photo-block">
+    <div class="budget-photo-row">${thumbs || '<span class="hint">尚無照片</span>'}</div>
     <div class="budget-photo-upload">
       <select data-photo-kind="${idx}">
         <option value="media">媒體照</option>
