@@ -690,16 +690,16 @@ td.is-deal-mode {
   line-height: 1.35;
 }
 .data-table td.cell-discussion {
-  min-width: 8rem;
-  max-width: 16rem;
+  min-width: 12rem;
+  max-width: 28rem;
   white-space: pre-wrap;
   vertical-align: top;
   word-break: break-word;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
   line-height: 1.4;
 }
 
-/* 週報客況明細：避免橫向捲軸，洽談內容變窄拉高、介紹戶別整戶換行 */
+/* 週報客況明細：洽談內容佔剩餘寬度、列高隨字數增加；介紹戶別整戶換行 */
 .weekly-visitor-wrap {
   overflow-x: visible;
   max-width: 100%;
@@ -714,18 +714,20 @@ td.is-deal-mode {
   word-break: break-word;
 }
 .weekly-visitor-table th:nth-child(1),
-.weekly-visitor-table td.cell-date { width: 6.5rem; }
-.weekly-visitor-table th:nth-child(2) { width: 3.2rem; }
-.weekly-visitor-table th:nth-child(3) { width: 5rem; }
+.weekly-visitor-table td.cell-date { width: 6.2rem; }
+.weekly-visitor-table th:nth-child(2) { width: 3rem; }
+.weekly-visitor-table th:nth-child(3) { width: 4.6rem; }
 .weekly-visitor-table th:nth-child(4),
 .weekly-visitor-table th:nth-child(5),
 .weekly-visitor-table th:nth-child(6),
-.weekly-visitor-table th:nth-child(7) { width: 5.5rem; }
-.weekly-visitor-table th:nth-child(8) { width: 7.5rem; }
-.weekly-visitor-table th:nth-child(9) { width: 18%; }
-.weekly-visitor-table th:nth-child(10) { width: 7rem; }
-.weekly-visitor-table th:nth-child(11) { width: 4.5rem; }
-.weekly-visitor-table th:nth-child(12) { width: 5.5rem; }
+.weekly-visitor-table th:nth-child(7) { width: 4.4rem; }
+.weekly-visitor-table th:nth-child(8) { width: 6.8rem; }
+.weekly-visitor-table th:nth-child(9),
+.weekly-visitor-table td.cell-discussion { width: 36%; }
+.weekly-visitor-table th:nth-child(10),
+.weekly-visitor-table td.cell-not-purchased { width: 8%; }
+.weekly-visitor-table th:nth-child(11) { width: 4.2rem; }
+.weekly-visitor-table th:nth-child(12) { width: 5rem; }
 .weekly-visitor-table td.cell-intro-unit {
   white-space: normal;
   line-height: 1.45;
@@ -739,9 +741,10 @@ td.is-deal-mode {
   display: inline;
 }
 .weekly-visitor-table td.cell-discussion {
-  min-width: 0;
+  min-width: 16rem;
   max-width: none;
-  width: 18%;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 .weekly-visitor-table td.cell-not-purchased {
   min-width: 0;

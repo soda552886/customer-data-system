@@ -529,6 +529,103 @@ def _week_rows(conn, site_id: str) -> list[dict]:
     return out
 
 
+def _catalog_opening_map(catalog: list[dict]) -> dict:
+    return {_text(c.get('name')): _num(c.get('openingCumulative')) for c in catalog if _text(c.get('name'))}
+
+
+def _week_media_items(rec: dict) -> list[dict]:
+    data = rec.get('data') if isinstance(rec, dict) else None
+    items = data.get('mediaItems') if isinstance(data, dict) else None
+    return items if isinstance(items, list) else []
+
+
+def _advance_media_balance(
+    running: float,
+    *,
+    catalog_opening: float,
+    stored_opening,
+    week_cost: float,
+) -> float:
+    """
+    一週結束後的媒體累計：
+    正常＝期初＋週執行；若期初誤存成「總累計」則不再加週執行；
+    若期初卡在 catalog 種子而 running 已前進，則忽略種子、只加本週執行。
+    """
+    start = _num(running, catalog_opening)
+    wc = _num(week_cost)
+    if stored_opening in (None, ''):
+        return round(start + wc, 2)
+    oc = _num(stored_opening, start)
+    cat = _num(catalog_opening)
+    # 期初欄位其實存的是本週總累計 → 不可再加週執行
+    if wc and abs(oc - (start + wc)) <= 0.005:
+        return round(oc, 2)
+    # 與鏈上預期期初一致
+    if abs(oc - start) <= 0.005:
+        return round(start + wc, 2)
+    # 舊資料期初一直停在種子
+    if abs(oc - cat) <= 0.005 and start > cat + 0.005:
+        return round(start + wc, 2)
+    # 手動改過期初
+    return round(oc + wc, 2)
+
+
+def _media_balances_before(
+    history: list[dict],
+    week_start: str,
+    catalog_opening: dict,
+) -> tuple[dict, dict]:
+    """回傳 week_start 之前各媒體結束餘額，以及最後見到的照片。"""
+    bal = dict(catalog_opening)
+    photos = {}
+    for rec in history:
+        if rec.get('weekStart', '') >= week_start:
+            break
+        for item in _week_media_items(rec):
+            if not isinstance(item, dict):
+                continue
+            name = _text(item.get('name'))
+            if not name:
+                continue
+            cat = _num(catalog_opening.get(name), 0)
+            bal[name] = _advance_media_balance(
+                _num(bal.get(name), cat),
+                catalog_opening=cat,
+                stored_opening=item.get('openingCumulative'),
+                week_cost=item.get('weekCost'),
+            )
+            ph = _normalize_photos(item)
+            if ph:
+                photos[name] = ph
+    return bal, photos
+
+
+def _display_week_opening(
+    *,
+    week_saved: bool,
+    stored_opening,
+    start_of_week: float,
+    catalog_opening: float,
+    week_cost: float,
+) -> float:
+    """未存檔新週：期初＝上週總累計。已存檔：保留手改，但修正「種子／誤存總累計」。"""
+    start = _num(start_of_week, catalog_opening)
+    cat = _num(catalog_opening)
+    wc = _num(week_cost)
+    if not week_saved:
+        return round(start, 2)
+    if stored_opening in (None, ''):
+        return round(start, 2)
+    oc = _num(stored_opening, start)
+    # 誤把總累計寫進期初
+    if wc and abs(oc - (start + wc)) <= 0.005:
+        return round(start, 2)
+    # 期初仍是 catalog 種子，但上週已有累計 → 改顯示正確期初（仍可再手改後存檔）
+    if abs(oc - cat) <= 0.005 and start > cat + 0.005:
+        return round(start, 2)
+    return round(oc, 2)
+
+
 def assemble_week_view(project: dict, week: dict, history: list[dict], week_start: str, *, week_saved=False) -> dict:
     media = []
     week_media_total = 0.0
@@ -536,34 +633,14 @@ def assemble_week_view(project: dict, week: dict, history: list[dict], week_star
         c for c in (project.get('mediaCatalog') or [])
         if isinstance(c, dict) and _text(c.get('name'))
     ]
-    opening = {_text(c.get('name')): _num(c.get('openingCumulative')) for c in catalog}
-    # 期初累計鏈：catalog 種子 + 歷週「週執行」合計 = 上週總累計
-    prior_end = dict(opening)
-    prior_photos = {_text(c.get('name')): _normalize_photos(c) for c in catalog}
-    for rec in history:
-        if rec['weekStart'] >= week_start:
-            continue
-        items = rec['data'].get('mediaItems') if isinstance(rec['data'], dict) else []
-        if not isinstance(items, list):
-            continue
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-            name = _text(item.get('name'))
-            if not name:
-                continue
-            cat_open = _num(opening.get(name), 0)
-            running = _num(prior_end.get(name), cat_open)
-            wc = _num(item.get('weekCost'))
-            oc = _num(item.get('openingCumulative'), running)
-            # 新鏈：總累計=期初+週執行。舊資料若期初一直停在 catalog 種子，改用 running+週執行避免少加。
-            if abs(oc - cat_open) < 0.005 and running > cat_open + 0.005:
-                prior_end[name] = running + wc
-            else:
-                prior_end[name] = oc + wc
-            photos = _normalize_photos(item)
-            if photos:
-                prior_photos[name] = photos
+    opening = _catalog_opening_map(catalog)
+    prior_end, prior_photos = _media_balances_before(history, week_start, opening)
+    for c in catalog:
+        name = _text(c.get('name'))
+        if name and name not in prior_photos:
+            ph = _normalize_photos(c)
+            if ph:
+                prior_photos[name] = ph
     for item in (week.get('mediaItems') or []):
         if not isinstance(item, dict):
             continue
@@ -571,12 +648,15 @@ def assemble_week_view(project: dict, week: dict, history: list[dict], week_star
         if not name:
             continue
         week_cost = _num(item.get('weekCost'))
-        default_opening = _num(prior_end.get(name), opening.get(name, item.get('openingCumulative') or 0))
-        if week_saved:
-            open_val = _num(item.get('openingCumulative'), default_opening)
-        else:
-            # 未存檔新週：期初累計 = 上週總累計，仍可手動改
-            open_val = default_opening
+        cat_open = _num(opening.get(name), 0)
+        start_of_week = _num(prior_end.get(name), cat_open)
+        open_val = _display_week_opening(
+            week_saved=week_saved,
+            stored_opening=item.get('openingCumulative'),
+            start_of_week=start_of_week,
+            catalog_opening=cat_open,
+            week_cost=week_cost,
+        )
         week_media_total += week_cost
         if week_saved and isinstance(item.get('photos'), list):
             photos = _normalize_photos(item)
