@@ -252,6 +252,7 @@ def empty_manual_payload(start, end, week_number=None, origin=None):
             'claimedRetentionAmount': 0,
             'claimedPayableAmount': 0,
             'bookedAmount': 0,
+            'progressRatePct': 0,
             'nextMonthUnits': 0,
             'nextMonthParking': 0,
             'nextMonthAmount': 0,
@@ -633,14 +634,20 @@ def build_auto_stats(
             bump_period('week')
 
         # 維度：前期 + 本週（本週受選取過濾）
+        # 來人／來電表以新客為主；回訪成交仍計入「本週成交」欄（來人組數不加回訪）
         for dim_key, dim_val in (
             ('region', region), ('media', media),
             ('occupation', occupation), ('age', age), ('source', source),
             ('purpose', purpose),
         ):
-            add_dim(dim_all[dim_key], dim_val, 1.0, is_deal and not is_refund, amount, use_week, in_prior)
-            if is_new and dim_key in dim_new:
-                add_dim(dim_new[dim_key], dim_val, 1.0, is_deal and not is_refund, amount, use_week, in_prior)
+            deal_flag = is_deal and not is_refund
+            add_dim(dim_all[dim_key], dim_val, 1.0, deal_flag, amount, use_week, in_prior)
+            if dim_key not in dim_new:
+                continue
+            if is_new:
+                add_dim(dim_new[dim_key], dim_val, 1.0, deal_flag, amount, use_week, in_prior)
+            elif deal_flag:
+                add_dim(dim_new[dim_key], dim_val, 0.0, True, amount, use_week, in_prior)
 
         if not use_week:
             continue
@@ -681,11 +688,11 @@ def build_auto_stats(
     week_deals = period['week']['deals']
     cum_visits = period['prior']['visits'] + period['week']['visits']
     cum_deals = period['prior']['deals'] + period['week']['deals']
-    # 新客專用分母（區域／媒體／來源表不含回訪）
+    # 來人分母仍用新客；成交分母含回訪成交（與 dim_new 成交欄一致）
     week_new = period['week']['new']
-    week_new_deals = period['week']['newDeals']
+    week_new_deals = week_deals
     cum_new = period['prior']['new'] + period['week']['new']
-    cum_new_deals = period['prior']['newDeals'] + period['week']['newDeals']
+    cum_new_deals = cum_deals
     week_phones = float(week_phone_total or 0)
     cum_phones = week_phones
 
@@ -754,7 +761,7 @@ def build_auto_stats(
         ],
         'totals': totals,
         'period': period,
-        # 區域／媒體／來源／職業／年齡皆僅統計新客
+        # 區域／媒體等：來人為新客；成交含回訪成交
         'byRegion': new_dims['region'],
         'byMedia': new_dims['media'],
         'bySource': new_dims['source'],

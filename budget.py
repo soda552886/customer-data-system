@@ -537,7 +537,8 @@ def assemble_week_view(project: dict, week: dict, history: list[dict], week_star
         if isinstance(c, dict) and _text(c.get('name'))
     ]
     opening = {_text(c.get('name')): _num(c.get('openingCumulative')) for c in catalog}
-    prior = dict(opening)
+    # 期初累計鏈：catalog 種子 + 歷週「週執行」合計 = 上週總累計
+    prior_end = dict(opening)
     prior_photos = {_text(c.get('name')): _normalize_photos(c) for c in catalog}
     for rec in history:
         if rec['weekStart'] >= week_start:
@@ -551,7 +552,15 @@ def assemble_week_view(project: dict, week: dict, history: list[dict], week_star
             name = _text(item.get('name'))
             if not name:
                 continue
-            prior[name] = _num(prior.get(name), opening.get(name, 0)) + _num(item.get('weekCost'))
+            cat_open = _num(opening.get(name), 0)
+            running = _num(prior_end.get(name), cat_open)
+            wc = _num(item.get('weekCost'))
+            oc = _num(item.get('openingCumulative'), running)
+            # 新鏈：總累計=期初+週執行。舊資料若期初一直停在 catalog 種子，改用 running+週執行避免少加。
+            if abs(oc - cat_open) < 0.005 and running > cat_open + 0.005:
+                prior_end[name] = running + wc
+            else:
+                prior_end[name] = oc + wc
             photos = _normalize_photos(item)
             if photos:
                 prior_photos[name] = photos
@@ -562,7 +571,12 @@ def assemble_week_view(project: dict, week: dict, history: list[dict], week_star
         if not name:
             continue
         week_cost = _num(item.get('weekCost'))
-        base = _num(prior.get(name), opening.get(name, item.get('openingCumulative') or 0))
+        default_opening = _num(prior_end.get(name), opening.get(name, item.get('openingCumulative') or 0))
+        if week_saved:
+            open_val = _num(item.get('openingCumulative'), default_opening)
+        else:
+            # 未存檔新週：期初累計 = 上週總累計，仍可手動改
+            open_val = default_opening
         week_media_total += week_cost
         if week_saved and isinstance(item.get('photos'), list):
             photos = _normalize_photos(item)
@@ -571,7 +585,8 @@ def assemble_week_view(project: dict, week: dict, history: list[dict], week_star
         media.append({
             **item,
             'weekCost': week_cost,
-            'cumulative': round(base + week_cost, 2),
+            'openingCumulative': open_val,
+            'cumulative': round(open_val + week_cost, 2),
             'photos': photos,
         })
     extras = dict(week.get('extras') or {})
@@ -605,6 +620,77 @@ def assemble_week_view(project: dict, week: dict, history: list[dict], week_star
     }
 
 
+def _extras_effectively_empty(extra_items: list[dict]) -> bool:
+    if not extra_items:
+        return True
+    return all(_num(i.get('amount')) == 0 for i in extra_items if isinstance(i, dict))
+
+
+def apply_previous_budget_week_carry(
+    week: dict,
+    project: dict,
+    history: list[dict],
+    week_start: str,
+    *,
+    week_saved: bool,
+) -> dict:
+    """
+    未存檔新週：週花費雜項金額延續上週；媒體期初由 assemble_week_view 處理。
+    已存檔不覆蓋。
+    """
+    if week_saved or not isinstance(week, dict):
+        return week
+    prev = None
+    for rec in history:
+        if rec['weekStart'] < week_start:
+            prev = rec
+        else:
+            break
+    if not prev or not isinstance(prev.get('data'), dict):
+        return week
+    prev_data = prev['data']
+    prev_items = prev_data.get('extraItems')
+    used_saved_list = isinstance(prev_items, list) and bool(prev_items)
+    if not used_saved_list:
+        prev_extras = prev_data.get('extras') if isinstance(prev_data.get('extras'), dict) else {}
+        if not prev_extras:
+            return week
+        prev_items = [
+            {'key': f['key'], 'label': f['label'], 'amount': _num(prev_extras.get(f['key']))}
+            for f in (project.get('weekExtraFields') or [])
+        ]
+    if _extras_effectively_empty(week.get('extraItems') or []):
+        if used_saved_list:
+            carried = []
+            extras_map = {}
+            for item in prev_items:
+                if not isinstance(item, dict):
+                    continue
+                key = _text(item.get('key'))
+                if not key or key == 'media':
+                    continue
+                label = _text(item.get('label'), key)
+                amount = _num(item.get('amount'))
+                carried.append({'key': key, 'label': label, 'amount': amount})
+                extras_map[key] = amount
+        else:
+            carried = []
+            extras_map = {}
+            for item in prev_items:
+                if not isinstance(item, dict):
+                    continue
+                key = _text(item.get('key'))
+                if not key:
+                    continue
+                label = _text(item.get('label'), key)
+                amount = _num(item.get('amount'))
+                carried.append({'key': key, 'label': label, 'amount': amount})
+                extras_map[key] = amount
+        if carried:
+            week = {**week, 'extraItems': carried, 'extras': extras_map}
+    return week
+
+
 def pie_items(categories: list[dict], rows: dict) -> list[dict]:
     """依已請款金額繪製圓餅（與週報 PPT 一致）。"""
     items = []
@@ -636,7 +722,11 @@ def load_budget(conn: sqlite3.Connection, site_id: str, week_start: str, *, site
         project['mediaCatalog'],
     )
     history = _week_rows(conn, site_id)
-    week_view = assemble_week_view(project, week, history, week_start, week_saved=bool(week_row))
+    week_saved = bool(week_row)
+    week = apply_previous_budget_week_carry(
+        week, project, history, week_start, week_saved=week_saved,
+    )
+    week_view = assemble_week_view(project, week, history, week_start, week_saved=week_saved)
     owner_rows = enrich_amount_rows(
         project['ownerCategories'], project['owner'], project['salesBaseWan'], contracted=True,
     )
@@ -725,7 +815,7 @@ def save_budget(conn: sqlite3.Connection, site_id: str, body: dict, *, site_name
             opening = _num(item.get('openingCumulative'))
             status = _text(item.get('status'))
             if name in known:
-                catalog[known[name]]['openingCumulative'] = opening
+                # catalog 期初僅作種子；週期初累計存在 budget_weeks，勿回寫以免與歷週加總重複
                 if status:
                     catalog[known[name]]['status'] = status
                 photos = _normalize_photos(item)

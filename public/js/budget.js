@@ -502,15 +502,12 @@ function readMediaItems() {
   return mediaItems.map((item, idx) => {
     const opening = Number(document.querySelector(`[data-media-opening="${idx}"]`)?.value) || 0;
     const weekCost = Number(document.querySelector(`[data-media-week="${idx}"]`)?.value) || 0;
-    const priorWithoutOpening = Number(item.cumulative || 0)
-      - Number(item.weekCost || 0)
-      - Number(item.openingCumulative || 0);
     return {
       name: document.querySelector(`[data-media-name="${idx}"]`)?.value.trim() || item.name,
       status: document.querySelector(`[data-media-status="${idx}"]`)?.value.trim() || '',
       weekCost,
       openingCumulative: opening,
-      cumulative: opening + Math.max(priorWithoutOpening, 0) + weekCost,
+      cumulative: opening + weekCost,
       photos: Array.isArray(item.photos) ? item.photos : [],
     };
   });

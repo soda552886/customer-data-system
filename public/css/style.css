@@ -690,9 +690,62 @@ td.is-deal-mode {
   line-height: 1.35;
 }
 .data-table td.cell-discussion {
-  min-width: 16rem;
-  max-width: 42rem;
+  min-width: 8rem;
+  max-width: 16rem;
   white-space: pre-wrap;
+  vertical-align: top;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  line-height: 1.4;
+}
+
+/* 週報客況明細：避免橫向捲軸，洽談內容變窄拉高、介紹戶別整戶換行 */
+.weekly-visitor-wrap {
+  overflow-x: visible;
+  max-width: 100%;
+}
+.weekly-visitor-table {
+  table-layout: fixed;
+  width: 100%;
+}
+.weekly-visitor-table th,
+.weekly-visitor-table td {
+  vertical-align: top;
+  word-break: break-word;
+}
+.weekly-visitor-table th:nth-child(1),
+.weekly-visitor-table td.cell-date { width: 6.5rem; }
+.weekly-visitor-table th:nth-child(2) { width: 3.2rem; }
+.weekly-visitor-table th:nth-child(3) { width: 5rem; }
+.weekly-visitor-table th:nth-child(4),
+.weekly-visitor-table th:nth-child(5),
+.weekly-visitor-table th:nth-child(6),
+.weekly-visitor-table th:nth-child(7) { width: 5.5rem; }
+.weekly-visitor-table th:nth-child(8) { width: 7.5rem; }
+.weekly-visitor-table th:nth-child(9) { width: 18%; }
+.weekly-visitor-table th:nth-child(10) { width: 7rem; }
+.weekly-visitor-table th:nth-child(11) { width: 4.5rem; }
+.weekly-visitor-table th:nth-child(12) { width: 5.5rem; }
+.weekly-visitor-table td.cell-intro-unit {
+  white-space: normal;
+  line-height: 1.45;
+}
+.weekly-visitor-table .intro-unit-token {
+  display: inline-block;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.weekly-visitor-table .intro-unit-sep {
+  display: inline;
+}
+.weekly-visitor-table td.cell-discussion {
+  min-width: 0;
+  max-width: none;
+  width: 18%;
+}
+.weekly-visitor-table td.cell-not-purchased {
+  min-width: 0;
+  max-width: none;
 }
 
 .data-table tbody tr:nth-child(even) td { background: #f7fafc; }
