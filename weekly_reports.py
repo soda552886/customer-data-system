@@ -246,6 +246,8 @@ def empty_manual_payload(start, end, week_number=None, origin=None):
             'payableAmount': 0,
             'retentionAmount': 0,
             'unclaimedAmount': 0,
+            'unclaimedUnits': 0,
+            'unclaimedParking': 0,
             'claimedUnits': 0,
             'claimedParking': 0,
             'claimedAmount': 0,
@@ -253,6 +255,8 @@ def empty_manual_payload(start, end, week_number=None, origin=None):
             'claimedPayableAmount': 0,
             'bookedAmount': 0,
             'progressRatePct': 0,
+            'retentionUnits': 0,
+            'retentionParking': 0,
             'nextMonthUnits': 0,
             'nextMonthParking': 0,
             'nextMonthAmount': 0,
@@ -825,10 +829,13 @@ def commission_summary(manual: dict) -> dict:
     claimable_p = _num(c.get('claimableParking'))
     claimed_p = _num(c.get('claimedParking'))
     unclaimed_amt = _num(c.get('unclaimedAmount'))
-    if unclaimed_amt == 0 and claimable_amt:
-        unclaimed_amt = round(max(claimable_amt - claimed_amt, 0), 4)
-    elif 'unclaimedAmount' not in c:
-        unclaimed_amt = round(max(claimable_amt - claimed_amt, 0), 4)
+    retention_for_balance = (
+        _num(c.get('claimableRetentionAmount'))
+        if 'claimableRetentionAmount' in c or 'retentionAmount' in c
+        else round(claimable_amt * 0.03, 4)
+    )
+    if 'unclaimedAmount' not in c:
+        unclaimed_amt = round(max(claimable_amt - claimed_amt - retention_for_balance, 0), 4)
     unclaimed_u = _num(c.get('unclaimedUnits'))
     if 'unclaimedUnits' not in c:
         unclaimed_u = max(claimable_u - claimed_u, 0)
@@ -1733,26 +1740,23 @@ def build_weekly_excel(site_name: str, start, end, week_number, manual: dict, au
     c = manual.get('commission') or {}
     matrix = auto.get('commissionMatrix') or {}
     if matrix:
-        ws.append(['【可請／已請／未請矩陣】'])
-        cards_labels = matrix.get('labels') or {}
-        rate_h = cards_labels.get('claimable') or '佣金(萬)'
-        ret_h = cards_labels.get('retention') or '保留(萬)'
-        pay_h = cards_labels.get('payable') or '可請(萬)'
-        ws.append(['區塊', '戶／車', rate_h, ret_h, pay_h])
+        ws.append(['【可請／已請／未請／保留款】'])
+        ws.append(['區塊', '戶／車', '金額(萬)'])
         _style_header(ws, ws.max_row)
         for key, label in (
             ('claimable', '可請總金額'),
             ('claimed', '已請款金額'),
             ('unclaimed', '未請款總金額'),
-            ('forecast', '預計本月可請'),
+            ('retention', '保留款金額'),
         ):
             b = matrix.get(key) or {}
+            if key == 'retention' and not b and matrix.get('forecast'):
+                b = matrix.get('forecast') or {}
+            amount = b.get('amount', b.get('claimable', 0))
             ws.append([
                 label,
                 f"{b.get('units', 0)}戶／{b.get('parking', 0)}車",
-                b.get('claimable', 0),
-                b.get('retention', 0),
-                b.get('payable', 0),
+                amount,
             ])
         ws.append([])
     for label, key in [
@@ -1762,20 +1766,15 @@ def build_weekly_excel(site_name: str, start, end, week_number, manual: dict, au
         ('可請佣戶數', 'claimableUnits'),
         ('可請佣車位', 'claimableParking'),
         ('可請佣銷售金額(萬)', 'claimableSalesAmount'),
-        ('可請佣金額(萬)', 'claimableAmount'),
-        ('3%保留款(萬)', 'claimableRetentionAmount'),
-        ('97%可請(萬)', 'claimablePayableAmount'),
-        ('已請佣戶數', 'claimedUnits'),
-        ('已請佣車位', 'claimedParking'),
-        ('已請佣金額(萬)', 'claimedAmount'),
-        ('已請3%保留款(萬)', 'claimedRetentionAmount'),
-        ('已請97%(萬)', 'claimedPayableAmount'),
+        ('可請總金額(萬)', 'claimableAmount'),
+        ('已請款金額(萬)', 'claimedAmount'),
+        ('未請款總金額(萬)', 'unclaimedAmount'),
+        ('保留款金額(萬)', 'claimableRetentionAmount'),
+        ('保留款戶數', 'retentionUnits'),
+        ('保留款車位', 'retentionParking'),
         ('已入帳金額(萬)', 'bookedAmount'),
         ('未請佣戶數', 'unclaimedUnits'),
         ('未請佣車位', 'unclaimedParking'),
-        ('預計本月可請戶數', 'nextMonthUnits'),
-        ('預計本月可請車位', 'nextMonthParking'),
-        ('預計本月可請金額(萬)', 'nextMonthAmount'),
     ]:
         ws.append([
             label,

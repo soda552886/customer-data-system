@@ -395,6 +395,8 @@ function collectManualFromForm(baseManual) {
     'claimableAmount', 'claimableRetentionAmount', 'claimablePayableAmount',
     'claimedUnits', 'claimedParking',
     'claimedAmount', 'claimedRetentionAmount', 'claimedPayableAmount',
+    'unclaimedUnits', 'unclaimedParking', 'unclaimedAmount',
+    'retentionUnits', 'retentionParking',
     'progressRatePct',
     'nextMonthUnits', 'nextMonthParking', 'nextMonthAmount',
     'bookedAmount',
@@ -552,18 +554,85 @@ function commissionSplitOk(total100, retention, payable) {
   return Math.abs(sum - total) <= 0.00015;
 }
 
+/** 已請＋未請＋保留款 須等於 可請總金額 */
+function matrixBalanceOk(c) {
+  const n = (k) => Number(c[k]) || 0;
+  const sum = roundCommission4(n('claimedAmount') + n('unclaimedAmount') + n('claimableRetentionAmount'));
+  const total = roundCommission4(n('claimableAmount'));
+  return Math.abs(sum - total) <= 0.00015;
+}
+
+/** 補齊色塊用欄位：未請／保留款戶車；缺保留金額時才依案場比例帶入 */
+function normalizeCommissionMatrixFields(raw) {
+  const c = { ...(raw || {}) };
+  const claimable = Number(c.claimableAmount) || 0;
+  const claimed = Number(c.claimedAmount) || 0;
+
+  if (!hasOwnCommissionVal(c, 'claimableRetentionAmount')) {
+    if (hasOwnCommissionVal(c, 'retentionAmount')) {
+      c.claimableRetentionAmount = roundCommission4(Number(c.retentionAmount) || 0);
+    } else if (claimable > 0) {
+      c.claimableRetentionAmount = splitFromTotal100(claimable, retentionRatioDefault()).retention;
+    } else {
+      c.claimableRetentionAmount = 0;
+    }
+  } else {
+    c.claimableRetentionAmount = roundCommission4(Number(c.claimableRetentionAmount) || 0);
+  }
+  const retention = Number(c.claimableRetentionAmount) || 0;
+  if (!hasOwnCommissionVal(c, 'claimablePayableAmount')) {
+    c.claimablePayableAmount = roundCommission4(Math.max(claimable - retention, 0));
+  }
+
+  if (!hasOwnCommissionVal(c, 'unclaimedAmount')) {
+    c.unclaimedAmount = roundCommission4(Math.max(claimable - claimed - retention, 0));
+  } else {
+    c.unclaimedAmount = roundCommission4(Number(c.unclaimedAmount) || 0);
+  }
+  if (!hasOwnCommissionVal(c, 'unclaimedUnits')) {
+    c.unclaimedUnits = Math.max((Number(c.claimableUnits) || 0) - (Number(c.claimedUnits) || 0), 0);
+  } else {
+    c.unclaimedUnits = Number(c.unclaimedUnits) || 0;
+  }
+  if (!hasOwnCommissionVal(c, 'unclaimedParking')) {
+    c.unclaimedParking = Math.max((Number(c.claimableParking) || 0) - (Number(c.claimedParking) || 0), 0);
+  } else {
+    c.unclaimedParking = Number(c.unclaimedParking) || 0;
+  }
+  if (!hasOwnCommissionVal(c, 'retentionUnits')) {
+    c.retentionUnits = Number(c.claimableUnits) || 0;
+  } else {
+    c.retentionUnits = Number(c.retentionUnits) || 0;
+  }
+  if (!hasOwnCommissionVal(c, 'retentionParking')) {
+    c.retentionParking = Number(c.claimableParking) || 0;
+  } else {
+    c.retentionParking = Number(c.retentionParking) || 0;
+  }
+  return c;
+}
+
 function calcCommissionDerived(c) {
   const n = (k) => Number(c[k]) || 0;
   const claimed = n('claimedAmount');
   const booked = n('bookedAmount');
   const claimablePay = n('claimablePayableAmount') || n('payableAmount');
   const claimableRet = n('claimableRetentionAmount') || n('retentionAmount');
+  const unclaimedAmt = hasOwnCommissionVal(c, 'unclaimedAmount')
+    ? roundCommission4(n('unclaimedAmount'))
+    : roundCommission4(Math.max(n('claimableAmount') - claimed - claimableRet, 0));
+  const unclaimedUnits = hasOwnCommissionVal(c, 'unclaimedUnits')
+    ? n('unclaimedUnits')
+    : Math.max(n('claimableUnits') - n('claimedUnits'), 0);
+  const unclaimedParking = hasOwnCommissionVal(c, 'unclaimedParking')
+    ? n('unclaimedParking')
+    : Math.max(n('claimableParking') - n('claimedParking'), 0);
   return {
-    unclaimedAmount: roundCommission4(Math.max(n('claimableAmount') - claimed, 0)),
+    unclaimedAmount: unclaimedAmt,
     unclaimedPayable: roundCommission4(Math.max(claimablePay - n('claimedPayableAmount'), 0)),
     unclaimedRetention: roundCommission4(Math.max(claimableRet - n('claimedRetentionAmount'), 0)),
-    unclaimedUnits: Math.max(n('claimableUnits') - n('claimedUnits'), 0),
-    unclaimedParking: Math.max(n('claimableParking') - n('claimedParking'), 0),
+    unclaimedUnits,
+    unclaimedParking,
     payableAmount: roundCommission4(claimablePay),
     retentionAmount: roundCommission4(claimableRet),
     bookedAmount: roundCommission4(booked),
@@ -571,48 +640,40 @@ function calcCommissionDerived(c) {
     nextMonthUnits: n('nextMonthUnits'),
     nextMonthParking: n('nextMonthParking'),
     nextMonthAmount: roundCommission4(n('nextMonthAmount')),
+    retentionUnits: n('retentionUnits') || n('claimableUnits'),
+    retentionParking: n('retentionParking') || n('claimableParking'),
     claimableSplitOk: commissionSplitOk(n('claimableAmount'), n('claimableRetentionAmount'), n('claimablePayableAmount')),
     claimedSplitOk: commissionSplitOk(n('claimedAmount'), n('claimedRetentionAmount'), n('claimedPayableAmount')),
+    matrixBalanceOk: matrixBalanceOk(c),
   };
 }
 
 function matrixFromManualCommission(manual) {
-  const c = normalizeCommissionSplits((manual || {}).commission || {});
+  const c = normalizeCommissionMatrixFields((manual || {}).commission || {});
   const n = (k) => Number(c[k]) || 0;
-  const matrixLabels = commissionMatrixLabelsFor(c);
-  const claimableAmt = {
-    claimable: n('claimableAmount'),
-    retention: n('claimableRetentionAmount'),
-    payable: n('claimablePayableAmount'),
-  };
-  const claimedAmt = {
-    claimable: n('claimedAmount'),
-    retention: n('claimedRetentionAmount'),
-    payable: n('claimedPayableAmount'),
-  };
-  const forecastAmt = splitFromTotal100(n('nextMonthAmount'), retentionRatioDefault());
-  const unclaimedAmt = {
-    claimable: roundCommission4(claimableAmt.claimable - claimedAmt.claimable),
-    payable: roundCommission4(claimableAmt.payable - claimedAmt.payable),
-    retention: roundCommission4(claimableAmt.retention - claimedAmt.retention),
-  };
+  const rateLabel = `${formatCommissionPct(siteCommissionRatePct(), 4.85)}%`;
   return {
-    labels: matrixLabels.claimable,
-    progressLabels: matrixLabels.progress,
-    progressRatePct: Number(c.progressRatePct) || siteCommissionRatePct(),
+    rateLabel,
+    balanceOk: matrixBalanceOk(c),
     claimable: {
-      units: n('claimableUnits'), parking: n('claimableParking'), ...claimableAmt,
+      units: n('claimableUnits'),
+      parking: n('claimableParking'),
+      amount: n('claimableAmount'),
     },
     claimed: {
-      units: n('claimedUnits'), parking: n('claimedParking'), ...claimedAmt,
+      units: n('claimedUnits'),
+      parking: n('claimedParking'),
+      amount: n('claimedAmount'),
     },
     unclaimed: {
-      units: Math.max(n('claimableUnits') - n('claimedUnits'), 0),
-      parking: Math.max(n('claimableParking') - n('claimedParking'), 0),
-      ...unclaimedAmt,
+      units: n('unclaimedUnits'),
+      parking: n('unclaimedParking'),
+      amount: n('unclaimedAmount'),
     },
-    forecast: {
-      units: n('nextMonthUnits'), parking: n('nextMonthParking'), ...forecastAmt,
+    retention: {
+      units: n('retentionUnits'),
+      parking: n('retentionParking'),
+      amount: n('claimableRetentionAmount'),
     },
   };
 }
@@ -879,34 +940,81 @@ function fmtWeekNum(val) {
   return String(Math.round(n * 10000) / 10000);
 }
 
+function matrixCardInput(field, value, extraClass = '') {
+  const cls = extraClass ? ` class="${extraClass}"` : '';
+  return `<input type="number" min="0" step="0.0001"${cls} data-block="commission" data-field="${field}" value="${fmtWeekNum(value)}">`;
+}
+
 function renderWeeklyCommissionMatrix(matrix) {
   const el = document.getElementById('weeklyCommissionMatrix');
   if (!el) return;
   const data = matrix || matrixFromManualCommission(current?.manual);
+  const rateLabel = data.rateLabel || `${formatCommissionPct(siteCommissionRatePct(), 4.85)}%`;
   const cards = [
-    { key: 'claimable', title: '可請總金額', labelKey: 'labels' },
-    { key: 'claimed', title: '已請款金額', labelKey: 'progressLabels' },
-    { key: 'unclaimed', title: '未請款總金額', labelKey: 'progressLabels' },
-    { key: 'forecast', title: '預計本月可請', labelKey: 'progressLabels' },
+    {
+      key: 'claimable',
+      title: `可請總金額 ${rateLabel}`,
+      units: 'claimableUnits',
+      parking: 'claimableParking',
+      amount: 'claimableAmount',
+    },
+    {
+      key: 'claimed',
+      title: '已請款金額',
+      units: 'claimedUnits',
+      parking: 'claimedParking',
+      amount: 'claimedAmount',
+    },
+    {
+      key: 'unclaimed',
+      title: '未請款總金額',
+      units: 'unclaimedUnits',
+      parking: 'unclaimedParking',
+      amount: 'unclaimedAmount',
+    },
+    {
+      key: 'retention',
+      title: '保留款金額',
+      units: 'retentionUnits',
+      parking: 'retentionParking',
+      amount: 'claimableRetentionAmount',
+    },
   ];
-  const fallbackLabels = data.labels || current?.commissionDefaults?.labels || {
-    claimable: '100%佣金', retention: '3%保留', payable: '97%可請',
-  };
   el.innerHTML = cards.map((c) => {
     const b = data[c.key] || {};
-    const labels = (c.labelKey === 'progressLabels' && data.progressLabels)
-      ? data.progressLabels
-      : fallbackLabels;
     return `<div class="commission-matrix-card" data-tone="${c.key}">
       <h3>${escapeHtml(c.title)}</h3>
-      <div class="upc">${fmtWeekNum(b.units)}戶／${fmtWeekNum(b.parking)}車</div>
-      <dl>
-        <dt>${escapeHtml(labels.claimable)}</dt><dd>${fmtWeekNum(b.claimable)} 萬</dd>
-        <dt>${escapeHtml(labels.retention)}</dt><dd>${fmtWeekNum(b.retention)} 萬</dd>
-        <dt>${escapeHtml(labels.payable)}</dt><dd>${fmtWeekNum(b.payable)} 萬</dd>
-      </dl>
+      <div class="matrix-line">
+        ${matrixCardInput(c.units, b.units)}<span class="matrix-unit">戶</span>
+        <span>／</span>
+        ${matrixCardInput(c.parking, b.parking)}<span class="matrix-unit">車</span>
+        ${matrixCardInput(c.amount, b.amount, 'matrix-amt')}
+        <span class="matrix-unit">萬</span>
+      </div>
     </div>`;
   }).join('');
+  el.querySelectorAll('[data-block="commission"]').forEach((input) => {
+    input.addEventListener('input', onCommissionFieldInput);
+  });
+  renderCommissionMatrixWarnings(
+    normalizeCommissionMatrixFields(current?.manual?.commission || {}),
+  );
+}
+
+function renderCommissionMatrixWarnings(c) {
+  const host = document.getElementById('commissionMatrixWarn')
+    || document.getElementById('commissionSplitWarn');
+  if (!host) return;
+  const n = (k) => Number(c[k]) || 0;
+  if (matrixBalanceOk(c)) {
+    host.className = 'commission-split-warn hidden';
+    host.textContent = '';
+    return;
+  }
+  const sum = roundCommission4(n('claimedAmount') + n('unclaimedAmount') + n('claimableRetentionAmount'));
+  const total = roundCommission4(n('claimableAmount'));
+  host.className = 'commission-split-warn';
+  host.innerHTML = `<div>驗算不符：已請款 ${fmtWeekNum(n('claimedAmount'))} ＋未請款 ${fmtWeekNum(n('unclaimedAmount'))} ＋保留款 ${fmtWeekNum(n('claimableRetentionAmount'))} ＝ ${fmtWeekNum(sum)}，應等於可請總金額 ${fmtWeekNum(total)}。</div>`;
 }
 
 function commissionFieldHtml(f, c) {
@@ -920,83 +1028,35 @@ function commissionFieldHtml(f, c) {
 }
 
 function renderCommissionSplitWarnings(c) {
-  const host = document.getElementById('commissionSplitWarn');
-  if (!host) return;
-  const d = calcCommissionDerived(c);
-  const fl = commissionSplitFieldLabels();
-  const msgs = [];
-  if (!d.claimableSplitOk) {
-    msgs.push(`可請：${fl.retention}＋${fl.payable} 必須等於 可請佣金額(100%)，請檢查手改數字。`);
-  }
-  if (!d.claimedSplitOk) {
-    msgs.push(`已請：已請${fl.retention}＋已請${fl.payable} 必須等於 已請佣金額(100%)，請檢查手改數字。`);
-  }
-  if (!msgs.length) {
-    host.className = 'commission-split-warn hidden';
-    host.textContent = '';
-    return;
-  }
-  host.className = 'commission-split-warn';
-  host.innerHTML = msgs.map((m) => `<div>${escapeHtml(m)}</div>`).join('');
+  renderCommissionMatrixWarnings(c);
 }
 
 function renderCommission(manual, derived) {
-  const c = normalizeCommissionSplits(manual.commission || {});
-  if (!Number.isFinite(Number(c.progressRatePct)) || Number(c.progressRatePct) <= 0) {
-    c.progressRatePct = siteCommissionRatePct();
-  }
-  const fl = commissionSplitFieldLabels();
+  const c = normalizeCommissionMatrixFields(manual.commission || {});
   const fields = [
     { key: 'sellableUnits', label: '累積銷售戶數' },
     { key: 'sellableParking', label: '累積銷售車位' },
     { key: 'sellableAmount', label: '累積銷售金額(萬)（實際房價＋車售）' },
-    { key: 'claimableUnits', label: '可請佣戶數' },
-    { key: 'claimableParking', label: '可請佣車位' },
     { key: 'claimableSalesAmount', label: '可請佣銷售金額(萬)', step: '0.0001' },
-    { key: 'claimableAmount', label: '可請佣金額(萬)', step: '0.0001', warnAttr: 'claimable-total' },
-    { key: 'claimableRetentionAmount', label: fl.claimableRetention, step: '0.0001', warnAttr: 'claimable-ret' },
-    { key: 'claimablePayableAmount', label: fl.claimablePayable, step: '0.0001', warnAttr: 'claimable-pay' },
-    { key: 'claimedUnits', label: '已請佣戶數' },
-    { key: 'claimedParking', label: '已請佣車位' },
-    { key: 'claimedAmount', label: '已請佣金額(萬)', step: '0.0001', warnAttr: 'claimed-total' },
-    { key: 'claimedRetentionAmount', label: fl.claimedRetention, step: '0.0001', warnAttr: 'claimed-ret' },
-    { key: 'claimedPayableAmount', label: fl.claimedPayable, step: '0.0001', warnAttr: 'claimed-pay' },
-    { key: 'progressRatePct', label: '本期請款進度(%)（已請／未請／預計本月標示用）', step: '0.01' },
-    { key: 'nextMonthUnits', label: '預計本月可請戶數' },
-    { key: 'nextMonthParking', label: '預計本月可請車位' },
-    { key: 'nextMonthAmount', label: '預計本月可請金額(萬)', step: '0.0001' },
     { key: 'bookedAmount', label: '已請佣已入帳金額(萬)', step: '0.0001' },
   ];
-  // 已請戶數／車位列只佔兩格，金額移到下一排（用空白占位對齊）
-  const htmlParts = [];
-  fields.forEach((f) => {
-    if (f.key === 'claimedAmount') {
-      htmlParts.push('<div class="form-group commission-grid-spacer" aria-hidden="true"></div>');
-    }
-    htmlParts.push(commissionFieldHtml(f, c));
-  });
+  const htmlParts = fields.map((f) => commissionFieldHtml(f, c));
   const d = calcCommissionDerived(c);
   htmlParts.push(`<div class="form-group">
       <label>已請佣未入帳金額(萬)</label>
       <input type="number" step="0.0001" id="commissionUnbooked" value="${d.unbookedAmount}" readonly>
     </div>`);
-  htmlParts.push('<div class="form-group full-width commission-split-warn-wrap"><div id="commissionSplitWarn" class="commission-split-warn hidden"></div></div>');
   document.getElementById('commissionInputs').innerHTML = htmlParts.join('');
-  const labels = current?.commissionDefaults?.labels
-    || { payable: '97%可請', retention: '3%保留款' };
   renderDerivedCards('commissionDerived', [
-    { label: `${labels.payable}(萬)`, value: `${d.payableAmount}` },
-    { label: `${labels.retention}(萬)`, value: `${d.retentionAmount}` },
-    { label: '未請佣金額100%(萬)', value: `${d.unclaimedAmount}` },
-    { label: '未請佣戶數', value: `${d.unclaimedUnits}` },
-    { label: '未請佣車位', value: `${d.unclaimedParking}` },
+    { label: '可請總金額(萬)', value: `${Number(c.claimableAmount) || 0}` },
+    { label: '已請款金額(萬)', value: `${Number(c.claimedAmount) || 0}` },
+    { label: '未請款總金額(萬)', value: `${d.unclaimedAmount}` },
+    { label: '保留款金額(萬)', value: `${d.retentionAmount}` },
     { label: '已請佣已入帳(萬)', value: `${d.bookedAmount}` },
     { label: '已請佣未入帳(萬)', value: `${d.unbookedAmount}` },
-    { label: '本月預計可請(戶/車/萬)', value: `${d.nextMonthUnits} / ${d.nextMonthParking} / ${d.nextMonthAmount}` },
   ]);
-  renderCommissionSplitWarnings(c);
   renderWeeklyCommissionMatrix(matrixFromManualCommission({ commission: c }));
-  document.querySelectorAll('[data-block="commission"]').forEach((el) => {
+  document.querySelectorAll('#commissionInputs [data-block="commission"]').forEach((el) => {
     el.addEventListener('input', onCommissionFieldInput);
   });
 }
@@ -1008,19 +1068,14 @@ function onCommissionFieldInput(ev) {
     refreshDerivedFromForm();
     return;
   }
-  const ratio = retentionRatioDefault();
-  const setVal = (key, val) => {
-    const input = document.querySelector(`[data-block="commission"][data-field="${key}"]`);
-    if (input) input.value = roundCommission4(val);
-  };
+  // 改可請總金額時，若保留款仍為 0，依案場比例帶入一次
   if (field === 'claimableAmount') {
-    const auto = splitFromTotal100(el.value, ratio);
-    setVal('claimableRetentionAmount', auto.retention);
-    setVal('claimablePayableAmount', auto.payable);
-  } else if (field === 'claimedAmount') {
-    const auto = splitFromTotal100(el.value, ratio);
-    setVal('claimedRetentionAmount', auto.retention);
-    setVal('claimedPayableAmount', auto.payable);
+    const ratio = retentionRatioDefault();
+    const retEl = document.querySelector('[data-block="commission"][data-field="claimableRetentionAmount"]');
+    if (retEl && !(Number(retEl.value) > 0)) {
+      const auto = splitFromTotal100(el.value, ratio);
+      retEl.value = roundCommission4(auto.retention);
+    }
   }
   refreshDerivedFromForm();
 }
@@ -1028,7 +1083,9 @@ function onCommissionFieldInput(ev) {
 function refreshDerivedFromForm() {
   if (!current) return;
   const manual = collectManualFromForm(current.manual);
-  manual.commission = normalizeCommissionSplits(manual.commission || {});
+  manual.commission = normalizeCommissionMatrixFields(manual.commission || {});
+  // 把色塊手填值寫回 current，避免重繪矩陣時被舊值蓋掉
+  current.manual = { ...current.manual, commission: manual.commission };
   const inv = calcInventoryDerived(manual.inventory || {});
   renderDerivedCards('inventoryDerived', [
     { label: '戶數去化率', value: `${inv.unitRate}%` },
@@ -1043,22 +1100,22 @@ function refreshDerivedFromForm() {
     { label: '店面去化率', value: `${inv.storefrontRate}%` },
   ]);
   const com = calcCommissionDerived(manual.commission || {});
-  const labels = current?.commissionDefaults?.labels
-    || { payable: '97%可請', retention: '3%保留款' };
   renderDerivedCards('commissionDerived', [
-    { label: `${labels.payable}(萬)`, value: `${com.payableAmount}` },
-    { label: `${labels.retention}(萬)`, value: `${com.retentionAmount}` },
-    { label: '未請佣金額100%(萬)', value: `${com.unclaimedAmount}` },
-    { label: '未請佣戶數', value: `${com.unclaimedUnits}` },
-    { label: '未請佣車位', value: `${com.unclaimedParking}` },
+    { label: '可請總金額(萬)', value: `${Number(manual.commission.claimableAmount) || 0}` },
+    { label: '已請款金額(萬)', value: `${Number(manual.commission.claimedAmount) || 0}` },
+    { label: '未請款總金額(萬)', value: `${com.unclaimedAmount}` },
+    { label: '保留款金額(萬)', value: `${com.retentionAmount}` },
     { label: '已請佣已入帳(萬)', value: `${com.bookedAmount}` },
     { label: '已請佣未入帳(萬)', value: `${com.unbookedAmount}` },
-    { label: '本月預計可請(戶/車/萬)', value: `${com.nextMonthUnits} / ${com.nextMonthParking} / ${com.nextMonthAmount}` },
   ]);
   const unbookedEl = document.getElementById('commissionUnbooked');
   if (unbookedEl) unbookedEl.value = com.unbookedAmount;
-  renderCommissionSplitWarnings(manual.commission || {});
-  renderWeeklyCommissionMatrix(matrixFromManualCommission(manual));
+  renderCommissionMatrixWarnings(manual.commission || {});
+  // 只更新警示與衍生，避免 input 時整塊重繪造成游標跳動
+  const matrix = document.getElementById('weeklyCommissionMatrix');
+  if (matrix && !matrix.querySelector('[data-field="claimableAmount"]')) {
+    renderWeeklyCommissionMatrix(matrixFromManualCommission(manual));
+  }
 }
 
 function renderConversion(auto, manual) {
@@ -1467,13 +1524,12 @@ async function saveWeek() {
     return;
   }
   const manual = collectManualFromForm(current.manual);
-  manual.commission = normalizeCommissionSplits(manual.commission || {});
+  manual.commission = normalizeCommissionMatrixFields(manual.commission || {});
   const d = calcCommissionDerived(manual.commission);
-  if (!d.claimableSplitOk || !d.claimedSplitOk) {
-    renderCommissionSplitWarnings(manual.commission);
-    const fl = commissionSplitFieldLabels();
+  if (!d.matrixBalanceOk) {
+    renderCommissionMatrixWarnings(manual.commission);
     const ok = window.confirm(
-      `請佣摘要：${fl.retention}＋${fl.payable} 與 100% 金額不一致。\n仍要儲存嗎？（建議先修正紅字警示的數字）`,
+      '請佣摘要驗算不符：已請款＋未請款＋保留款 須等於 可請總金額。\n仍要儲存嗎？（建議先修正紅字警示的數字）',
     );
     if (!ok) return;
   }

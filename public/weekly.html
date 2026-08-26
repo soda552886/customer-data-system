@@ -182,8 +182,9 @@
 
       <section class="card">
         <h2>請佣摘要</h2>
-        <p class="hint">請手動填寫；新週會自動帶入上一週已存的請佣摘要。「可請佣金額／已請佣金額」皆填 100% 佣金（勿填 97%）；3%／97% 會依公式自動帶入，也可手改。若手改後 3%＋97% ≠ 100%，會顯示紅字警示。</p>
+        <p class="hint">上方色塊請手動填寫戶／車／金額；新週會自動帶入上一週已存資料。驗算：已請款金額＋未請款總金額＋保留款金額須等於可請總金額，不符時會顯示紅字警示。</p>
         <div id="weeklyCommissionMatrix" class="commission-matrix" style="margin-bottom:1rem;"></div>
+        <div class="form-group full-width commission-split-warn-wrap"><div id="commissionMatrixWarn" class="commission-split-warn hidden"></div></div>
         <div class="commission-grid" id="commissionInputs"></div>
         <div id="commissionDerived" class="commission-grid" style="margin-top:1rem;"></div>
       </section>

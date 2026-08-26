@@ -328,9 +328,38 @@ td.is-deal-mode {
   background: #fff6d8;
   border-color: #e0c36a;
 }
-.commission-matrix-card[data-tone="forecast"] {
+.commission-matrix-card[data-tone="forecast"],
+.commission-matrix-card[data-tone="retention"] {
   background: #fdecd2;
   border-color: #e0a36a;
+}
+.commission-matrix-card .matrix-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem 0.35rem;
+  font-weight: 700;
+  font-size: 0.95rem;
+  line-height: 1.4;
+}
+.commission-matrix-card .matrix-line input {
+  width: 4.2rem;
+  min-width: 0;
+  padding: 0.2rem 0.3rem;
+  border: 1px solid rgba(15, 23, 42, 0.18);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.9);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.9rem;
+}
+.commission-matrix-card .matrix-line input.matrix-amt {
+  width: 6.8rem;
+}
+.commission-matrix-card .matrix-unit {
+  color: #334155;
+  font-weight: 600;
+  margin-right: 0.15rem;
 }
 .batch-row-full {
   background: #d5f5e3 !important;
