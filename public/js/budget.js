@@ -617,7 +617,10 @@ async function loadBudget() {
     return;
   }
   try {
-    const res = await fetch(`/api/budget?siteId=${encodeURIComponent(siteId)}&weekStart=${encodeURIComponent(weekStart)}`);
+    const res = await fetch(
+      `/api/budget?siteId=${encodeURIComponent(siteId)}&weekStart=${encodeURIComponent(weekStart)}&_=${Date.now()}`,
+      { cache: 'no-store' },
+    );
     const json = await res.json();
     if (!res.ok) {
       showToast(json.error || '載入失敗', 'error');

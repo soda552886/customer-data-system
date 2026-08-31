@@ -189,6 +189,10 @@ function mergeWeeklyDraft(payload) {
   if (inventoryBlockEmpty(draft.manual.inventory) && !inventoryBlockEmpty((payload.manual || {}).inventory)) {
     mergedManual.inventory = payload.manual.inventory;
   }
+  if ((!draft.manual.conversionManual || !Object.keys(draft.manual.conversionManual || {}).length)
+    && payload.manual?.conversionManual && Object.keys(payload.manual.conversionManual).length) {
+    mergedManual.conversionManual = payload.manual.conversionManual;
+  }
   return {
     payload: {
       ...payload,
@@ -235,6 +239,9 @@ function captureWeekCarryFromForm() {
     unreported: { ...(manual.unreported || {}) },
     inventory: { ...(manual.inventory || {}) },
     commission: { ...(manual.commission || {}) },
+    conversionManual: manual.conversionManual
+      ? JSON.parse(JSON.stringify(manual.conversionManual))
+      : undefined,
   };
 }
 
@@ -258,6 +265,10 @@ function applyWeekCarry(manual) {
   }
   if (commissionBlockEmpty(out.commission) && !commissionBlockEmpty(src.commission)) {
     out.commission = { ...src.commission };
+  }
+  if ((!out.conversionManual || !Object.keys(out.conversionManual).length)
+    && src.conversionManual && Object.keys(src.conversionManual).length) {
+    out.conversionManual = JSON.parse(JSON.stringify(src.conversionManual));
   }
   const dealsCum = out.dealsCum || {};
   const signingsCum = out.signingsCum || {};
@@ -404,6 +415,15 @@ function collectManualFromForm(baseManual) {
     const el = document.querySelector(`[data-block="commission"][data-field="${f}"]`);
     if (el) manual.commission[f] = Number(el.value) || 0;
   });
+
+  const hopeBoxes = document.querySelectorAll('#hopeEditor input[data-hope-id]');
+  if (hopeBoxes.length) {
+    manual.hopeVisitorIds = Array.from(hopeBoxes)
+      .filter((cb) => cb.checked)
+      .map((cb) => Number(cb.dataset.hopeId));
+  } else if (current?.manual && Array.isArray(current.manual.hopeVisitorIds)) {
+    manual.hopeVisitorIds = [...current.manual.hopeVisitorIds];
+  }
 
   manual.includedVisitorIds = null;
 
@@ -1258,6 +1278,81 @@ function renderAllDimTables() {
   renderDimTable('ageDimTable', auto.byAge, false);
 }
 
+function resolveHopeCustomers(auto, manual) {
+  const all = auto?.visitorsAllWeek || auto?.visitors || [];
+  if (manual && Array.isArray(manual.hopeVisitorIds)) {
+    const set = new Set(manual.hopeVisitorIds.map(Number));
+    return all.filter((v) => set.has(Number(v.id)));
+  }
+  return auto?.hopeCustomers || [];
+}
+
+function scrollToVisitorRow(visitorId) {
+  const id = Number(visitorId);
+  if (!id) return;
+  const row = document.querySelector(`tr[data-visitor-id="${id}"]`);
+  if (!row) {
+    showToast('此客戶不在本週已納入週報的明細中', 'error');
+    return;
+  }
+  row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  row.classList.add('visitor-row-highlight');
+  setTimeout(() => row.classList.remove('visitor-row-highlight'), 2000);
+}
+
+function renderHopeSection(auto, manual) {
+  const hint = document.getElementById('hopeHint');
+  const editor = document.getElementById('hopeEditor');
+  const listEl = document.getElementById('hopeList');
+  if (!listEl) return;
+
+  const autoHope = auto?.hopeCustomers || [];
+  const usingManual = manual && Array.isArray(manual.hopeVisitorIds);
+  if (hint) {
+    hint.textContent = usingManual
+      ? '目前為工地自訂有望客（勾選後請儲存週報）。'
+      : `自動列入誠意度：A、A+、A-、B、B+、有望、高（本週 ${autoHope.length} 組）。可按「自訂有望客」改為自行勾選。`;
+  }
+
+  const hopeRows = resolveHopeCustomers(auto, manual);
+  if (!hopeRows.length) {
+    listEl.innerHTML = '<p class="hint">本週尚無有望客</p>';
+  } else {
+    listEl.innerHTML = hopeRows.map((v) => `
+      <button type="button" class="mini-stat-item hope-link" data-visitor-id="${v.id}">
+        <span>${escapeHtml(v.date)}　${escapeHtml(v.customerName || '未填')}　${escapeHtml(v.salesperson1 || '')}${v.sincerity ? `　${escapeHtml(v.sincerity)}` : ''}</span>
+        <strong>${escapeHtml(v.visitType || '')}</strong>
+      </button>
+    `).join('');
+    listEl.querySelectorAll('.hope-link').forEach((btn) => {
+      btn.addEventListener('click', () => scrollToVisitorRow(btn.dataset.visitorId));
+    });
+  }
+
+  if (!editor) return;
+  const allWeek = auto?.visitorsAllWeek || auto?.visitors || [];
+  const selected = new Set(
+    (usingManual ? manual.hopeVisitorIds : autoHope.map((v) => v.id)).map(Number),
+  );
+  editor.innerHTML = allWeek.length
+    ? allWeek.map((v) => `
+      <label class="hope-pick-row">
+        <input type="checkbox" data-hope-id="${v.id}"${selected.has(Number(v.id)) ? ' checked' : ''}>
+        <span>${escapeHtml(v.date)} ${escapeHtml(v.customerName || '未填')} ${escapeHtml(v.salesperson1 || '')} ${escapeHtml(v.sincerity || '')}</span>
+      </label>
+    `).join('')
+    : '<p class="hint">本週尚無可選客戶</p>';
+  editor.querySelectorAll('input[data-hope-id]').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      if (!current) return;
+      const ids = Array.from(editor.querySelectorAll('input[data-hope-id]:checked'))
+        .map((x) => Number(x.dataset.hopeId));
+      current.manual = { ...current.manual, hopeVisitorIds: ids };
+      renderHopeSection(current.auto, current.manual);
+    });
+  });
+}
+
 function renderVisitorMini(elId, rows, emptyText) {
   const el = document.getElementById(elId);
   if (!rows || !rows.length) {
@@ -1327,7 +1422,7 @@ function visitorIntroUnitHtml(raw) {
 }
 
 function visitorRowHtml(v) {
-  return `<tr>
+  return `<tr data-visitor-id="${v.id}">
     <td class="cell-date">${escapeHtml(v.date)}</td>
     <td>${escapeHtml(v.visitType)}</td>
     <td>${escapeHtml(v.customerName)}</td>
@@ -1440,7 +1535,7 @@ function renderAll(payload) {
   document.getElementById('weekMemo').value = manual.memo || '';
   renderConversion(auto, manual);
   renderVisitorMini('returnList', auto.returnVisits, '本週尚無回訪');
-  renderVisitorMini('hopeList', auto.hopeCustomers, '本週尚無有望客');
+  renderHopeSection(auto, manual);
   renderVisitors(auto);
   renderHistory(payload.history || []);
   const hint = document.getElementById('salesSuggestHint');
@@ -1461,8 +1556,12 @@ async function loadWeek() {
   updateRangeLabel();
   await loadFieldOptions(siteId);
   try {
-    const params = new URLSearchParams({ siteId, weekStart: document.getElementById('weekStart').value });
-    const res = await fetch(`/api/weekly/summary?${params}`);
+    const params = new URLSearchParams({
+      siteId,
+      weekStart: document.getElementById('weekStart').value,
+      _: String(Date.now()),
+    });
+    const res = await fetch(`/api/weekly/summary?${params}`, { cache: 'no-store' });
     const json = await res.json();
     if (!res.ok) {
       showToast(json.error || '載入失敗', 'error');
@@ -1668,6 +1767,12 @@ async function init() {
     }
     await saveWeek();
     exportWeek('csv');
+  });
+
+  document.getElementById('toggleHopeEditBtn')?.addEventListener('click', () => {
+    const editor = document.getElementById('hopeEditor');
+    if (!editor) return;
+    editor.classList.toggle('hidden');
   });
 
   document.getElementById('weekWorkspace')?.addEventListener('input', scheduleWeeklyDraftSave);

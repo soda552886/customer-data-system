@@ -190,8 +190,8 @@
       </section>
 
       <section class="card">
-        <h2>銷售成交比（客資自動）</h2>
-        <p class="hint">接客、成交與退戶僅統計新客，不含回訪。成交比＝累計接待÷累計成交。各銷售人員的累計成交／金額／退戶可手填；合計列會自動加總。共同經營組數／成交各算 0.5。已離職或調離人員取消勾選後累計併入「前期銷售」。</p>
+        <h2>銷售成交比（可手填）</h2>
+        <p class="hint">接客、成交與退戶僅統計新客，不含回訪。成交比＝累計接待÷累計成交。各銷售人員的累計接待／成交／金額／退戶可手填並儲存；新週會延續上一週手填數字。共同經營各算 0.5。已離職人員取消勾選後併入「前期銷售」。</p>
         <div class="table-wrap">
           <table class="data-table" id="conversionTable">
             <thead>
@@ -215,6 +215,11 @@
           </div>
           <div>
             <h3 class="section-title">有望客</h3>
+            <p id="hopeHint" class="hint"></p>
+            <div class="form-actions" style="margin-bottom:0.5rem;">
+              <button type="button" id="toggleHopeEditBtn" class="btn btn-secondary">自訂有望客</button>
+            </div>
+            <div id="hopeEditor" class="hope-editor hidden"></div>
             <div id="hopeList" class="mini-stat-list"></div>
           </div>
         </div>

@@ -3,13 +3,36 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import sqlite3
+from pathlib import Path
 from typing import Optional
 
 from weekly_reports import default_week_number, roc_year, week_bounds
 
 
 WAN_TO_YUAN = 10000.0
+_BASE_DIR = Path(__file__).parent
+_DATA_DIR = Path(os.environ.get('DATA_DIR', str(_BASE_DIR / 'data')))
+BUDGET_UPLOAD_DIR = _DATA_DIR / 'uploads' / 'budget'
+LEGACY_BUDGET_UPLOAD_DIR = _BASE_DIR / 'uploads' / 'budget'
+
+
+def ensure_budget_upload_dir() -> Path:
+    """媒體照片存於 DATA_DIR，部署時與資料庫同一持久磁碟；並自舊路徑搬移檔案。"""
+    BUDGET_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    if LEGACY_BUDGET_UPLOAD_DIR.exists() and LEGACY_BUDGET_UPLOAD_DIR != BUDGET_UPLOAD_DIR:
+        for src in LEGACY_BUDGET_UPLOAD_DIR.iterdir():
+            if not src.is_file():
+                continue
+            dest = BUDGET_UPLOAD_DIR / src.name
+            if not dest.exists():
+                try:
+                    shutil.copy2(src, dest)
+                except OSError:
+                    pass
+    return BUDGET_UPLOAD_DIR
 
 
 def _num(val, default=0.0) -> float:
@@ -184,6 +207,7 @@ def _dump_project(project: dict) -> dict:
 
 
 def init_budget_tables(conn: sqlite3.Connection):
+    ensure_budget_upload_dir()
     conn.executescript('''
         CREATE TABLE IF NOT EXISTS budget_projects (
             site_id TEXT PRIMARY KEY,
@@ -608,22 +632,13 @@ def _display_week_opening(
     catalog_opening: float,
     week_cost: float,
 ) -> float:
-    """未存檔新週：期初＝上週總累計。已存檔：保留手改，但修正「種子／誤存總累計」。"""
+    """未存檔新週：期初＝上週總累計。已存檔：一律保留手動輸入值。"""
     start = _num(start_of_week, catalog_opening)
-    cat = _num(catalog_opening)
-    wc = _num(week_cost)
     if not week_saved:
         return round(start, 2)
     if stored_opening in (None, ''):
         return round(start, 2)
-    oc = _num(stored_opening, start)
-    # 誤把總累計寫進期初
-    if wc and abs(oc - (start + wc)) <= 0.005:
-        return round(start, 2)
-    # 期初仍是 catalog 種子，但上週已有累計 → 改顯示正確期初（仍可再手改後存檔）
-    if abs(oc - cat) <= 0.005 and start > cat + 0.005:
-        return round(start, 2)
-    return round(oc, 2)
+    return round(_num(stored_opening), 2)
 
 
 def assemble_week_view(project: dict, week: dict, history: list[dict], week_start: str, *, week_saved=False) -> dict:

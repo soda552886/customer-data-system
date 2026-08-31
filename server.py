@@ -39,7 +39,7 @@ from sales_ledger import (
     parse_deal_date, sales_export_headers, sales_export_row_values, update_sales_deal,
     upsert_commission_batch,
 )
-from budget import init_budget_tables, load_budget, save_budget
+from budget import init_budget_tables, load_budget, save_budget, ensure_budget_upload_dir, BUDGET_UPLOAD_DIR
 from field_options import (
     apply_site_field_options, apply_site_hidden_fields, build_site_field_config,
     build_site_field_visibility, build_site_report_export_config,
@@ -51,7 +51,6 @@ from field_options import (
 )
 
 BASE_DIR = Path(__file__).parent
-BUDGET_UPLOAD_DIR = BASE_DIR / 'uploads' / 'budget'
 BUDGET_PHOTO_EXTS = {'.jpg', '.jpeg', '.png', '.gif', '.webp'}
 BUDGET_PHOTO_MAX_BYTES = 8 * 1024 * 1024
 
@@ -71,6 +70,17 @@ app.secret_key = os.environ.get('SECRET_KEY', 'change-me-in-production-deyijia-2
 DATA_DIR = Path(os.environ.get('DATA_DIR', str(BASE_DIR / 'data')))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = DATA_DIR / 'customers.db'
+
+
+@app.after_request
+def _api_no_cache(response):
+    """API 與上傳檔不走瀏覽器快取，避免 A 存檔後 B 仍看到舊資料。"""
+    path = request.path or ''
+    if path.startswith('/api/') or path.startswith('/uploads/'):
+        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+    return response
 
 
 def get_db():
@@ -1470,7 +1480,7 @@ def api_upload_budget_photo():
     if len(raw) > BUDGET_PHOTO_MAX_BYTES:
         conn.close()
         return jsonify({'error': '單張照片請小於 8MB'}), 400
-    BUDGET_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    ensure_budget_upload_dir()
     photo_id = uuid.uuid4().hex
     stored = f'{photo_id}{ext}'
     (BUDGET_UPLOAD_DIR / stored).write_bytes(raw)
@@ -1555,11 +1565,12 @@ def weekly_summary():
     saved = load_weekly_report(conn, site_id, week_start_s)
     base = empty_manual_payload(start, end, origin=origin)
     manual = merge_manual(base, (saved or {}).get('data') if saved else None)
-    # 延續上一週：檢討、累計成交／簽約／買進／未報、房屋去化、請佣摘要
-    manual = apply_previous_week_carry(
-        manual,
-        previous_saved_week_data(conn, site_id, week_start_s),
-    )
+    # 僅「尚未儲存」的新週才延續上一週；已存週報以資料庫為準（含手改 0、清空文字）
+    if not saved:
+        manual = apply_previous_week_carry(
+            manual,
+            previous_saved_week_data(conn, site_id, week_start_s),
+        )
 
     phone_sum = phone_total_from_manual(manual)
     active_staff = get_active_sales_staff(conn, site_id)
@@ -1638,11 +1649,7 @@ def save_weekly_report():
         week_number = default_week_number(start, origin)
     manual['weekNumber'] = week_number
     manual['phoneCallsDetail'] = normalize_phone_calls_detail(manual.get('phoneCallsDetail'))
-    # 儲存時空白欄位仍帶入上一週，避免新週存成全 0／空字串後無法再延續
-    manual = apply_previous_week_carry(
-        manual,
-        previous_saved_week_data(conn, site_id, start.isoformat()),
-    )
+    # 儲存以使用者提交內容為準，不再套用上一週延續（避免手改 0／清空被蓋回）
     # 若有來電明細，每日來電通數改由明細加總，避免兩套數字不一致。
     if manual['phoneCallsDetail']:
         by_day = {}

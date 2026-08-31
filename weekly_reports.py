@@ -282,6 +282,7 @@ def empty_manual_payload(start, end, week_number=None, origin=None):
         'reviewNotes': '',
         'competitorNotes': '',
         'memo': '',
+        'hopeVisitorIds': None,
     }
 
 
@@ -981,12 +982,13 @@ def _recompute_unsigned_cum(manual: dict) -> dict:
 
 def apply_previous_week_carry(manual: dict, prev: Optional[dict]) -> dict:
     """
-    新週延續上一份已存週報：
+    新週（尚未儲存）延續上一份已存週報：
     1) 檢討／區域個案／備註
     2) 累計成交／簽約／買進、未報（本週成交／簽約／買進不延續）
     3) 房屋去化
     4) 請佣摘要
-    本週欄位已有內容則保留，空白／全 0 才帶入。
+    5) 銷售成交比手填
+    僅空白／全 0 才帶入；已儲存週報或使用者手改後請勿再呼叫。
     """
     out = manual if isinstance(manual, dict) else {}
     if not isinstance(prev, dict) or not prev:
@@ -1022,6 +1024,10 @@ def apply_previous_week_carry(manual: dict, prev: Optional[dict]) -> dict:
         prev_com = prev.get('commission')
         if isinstance(prev_com, dict) and prev_com:
             out['commission'] = dict(prev_com)
+
+    prev_conv = prev.get('conversionManual')
+    if isinstance(prev_conv, dict) and prev_conv and not out.get('conversionManual'):
+        out['conversionManual'] = dict(prev_conv)
 
     return _recompute_unsigned_cum(out)
 
