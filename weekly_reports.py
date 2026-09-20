@@ -9,6 +9,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Optional
 
+from sales_ledger import iter_week_deal_rows
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
@@ -434,18 +435,8 @@ def _match_customer_for_sales_row(srow, by_id, by_name, by_phone):
 
 
 def _iter_week_sales_deals(conn: sqlite3.Connection, site_id: str, start, end):
-    try:
-        sales_rows = conn.execute(
-            "SELECT * FROM sales_deals WHERE site_id = ? AND record_type = 'deal'",
-            (site_id,),
-        ).fetchall()
-    except sqlite3.OperationalError:
-        return
-    for srow in sales_rows:
-        sale_raw = srow['owner_sale_report_date'] or srow['report_date']
-        sale_d = parse_ymd(sale_raw)
-        if sale_d and start <= sale_d <= end:
-            yield srow, sale_d
+    """本週訴求成交與手填成交同一批銷售總表戶別。"""
+    yield from iter_week_deal_rows(conn, site_id, start, end)
 
 
 def _apply_sales_ledger_week_deals(
@@ -459,7 +450,7 @@ def _apply_sales_ledger_week_deals(
     add_dim,
 ):
     """
-    銷售總表「成交」且業主報售日在本週者，依戶別計入訴求分析本週成交。
+    銷售總表本週「成交／簽約」（業主報售日）依戶別計入訴求分析。
     同一回訪客資成交兩戶 → 計 2；區域／媒體／年齡／職業帶入對應客資。
     """
     for srow, sale_d, cust, data in week_sales:

@@ -1508,6 +1508,51 @@ def _in_range(date_s: Optional[str], start, end) -> bool:
     return start <= d <= end
 
 
+def _row_owner_sale_report_raw(row) -> Optional[str]:
+    """業主報售日：欄位、備用報售日、extra 都試，避免一筆吃到、另一筆吃不到。"""
+    keys = row.keys() if hasattr(row, 'keys') else []
+    candidates = []
+    if 'owner_sale_report_date' in keys:
+        candidates.append(row['owner_sale_report_date'])
+    if 'report_date' in keys:
+        candidates.append(row['report_date'])
+    extra = {}
+    if 'extra' in keys:
+        try:
+            extra = json.loads(row['extra'] or '{}') or {}
+        except (TypeError, ValueError, json.JSONDecodeError):
+            extra = {}
+    if isinstance(extra, dict):
+        candidates.extend([
+            extra.get('ownerSaleReportDate'),
+            extra.get('reportDate'),
+            extra.get('owner_sale_report_date'),
+        ])
+    for raw in candidates:
+        parsed = _parse_date(raw)
+        if parsed:
+            return parsed
+    return None
+
+
+def iter_week_deal_rows(conn: sqlite3.Connection, site_id: str, start, end):
+    """
+    與週報「從銷售總表帶入」本週成交同一口徑：
+    成交（已報）＋簽約，且業主報售日在本週。每筆戶別 yield (row, date)。
+    """
+    try:
+        rows = conn.execute(
+            "SELECT * FROM sales_deals WHERE site_id = ? AND record_type IN ('deal', 'signing')",
+            (site_id,),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return
+    for row in rows:
+        parsed = _row_owner_sale_report_raw(row)
+        if parsed and _in_range(parsed, start, end):
+            yield row, datetime.strptime(parsed, '%Y-%m-%d').date()
+
+
 def _on_or_before(date_s: Optional[str], end, *, include_blank=True) -> bool:
     parsed = _parse_date(date_s)
     if not parsed:
