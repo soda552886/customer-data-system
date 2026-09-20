@@ -1214,12 +1214,16 @@ function filterDimRows(rows, mode) {
   let shown = dataRows;
   if (mode === 'week') {
     shown = dataRows.filter((r) =>
-      Number(r.weekVisits || r.count || 0) > 0 || Number(r.weekPhones || 0) > 0);
+      Number(r.weekVisits || r.count || 0) > 0
+      || Number(r.weekPhones || 0) > 0
+      || Number(r.weekDeals || 0) > 0);
   } else if (mode === 'cum') {
     shown = dataRows.filter((r) =>
       Number(r.cumVisits || 0) > 0
       || Number(r.weekVisits || 0) > 0
-      || Number(r.weekPhones || 0) > 0);
+      || Number(r.weekPhones || 0) > 0
+      || Number(r.weekDeals || 0) > 0
+      || Number(r.cumDeals || 0) > 0);
   }
   const totalRow = rows.find((r) => r.name === '合計');
   return totalRow ? [...shown, totalRow] : shown;

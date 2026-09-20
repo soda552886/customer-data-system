@@ -385,24 +385,55 @@ def _sales_deal_amount(row) -> float:
     )
 
 
-def _apply_sales_ledger_week_deals(
-    conn: sqlite3.Connection,
-    site_id: str,
-    start,
-    end,
-    *,
-    dim_all: dict,
-    dim_new: dict,
-    period: dict,
-    by_day: dict,
-    week_deal_customer_ids: set,
-    deals: list,
-    add_dim,
-):
-    """
-    銷售總表「成交」且業主報售日在本週者，補入訴求分析本週成交。
-    （只填銷售總表、客資未勾成交／回訪日不在本週時也能顯示）
-    """
+def _phone_key(val) -> str:
+    return ''.join(ch for ch in str(val or '') if ch.isdigit())
+
+
+def _index_customers_for_sales(cust_rows):
+    by_id = {}
+    by_name = defaultdict(list)
+    by_phone = defaultdict(list)
+    for r in cust_rows:
+        data = json.loads(r['data'] or '{}')
+        by_id[int(r['id'])] = (r, data)
+        name = str(data.get('customerName') or '').strip()
+        if name:
+            by_name[name].append((r, data))
+        phone = _phone_key(data.get('phone') or data.get('mobile'))
+        if phone:
+            by_phone[phone].append((r, data))
+    return by_id, by_name, by_phone
+
+
+def _pick_customer_candidate(candidates):
+    if not candidates:
+        return None, {}
+    for r, d in candidates:
+        if (r['visit_type'] or '') == '回訪' or int(r['is_deal'] or 0) == 1:
+            return r, d
+    return candidates[0]
+
+
+def _match_customer_for_sales_row(srow, by_id, by_name, by_phone):
+    cid = srow['customer_id'] if 'customer_id' in srow.keys() else None
+    if cid not in (None, ''):
+        try:
+            hit = by_id.get(int(cid))
+            if hit:
+                return hit
+        except (TypeError, ValueError):
+            pass
+    name = str(srow['customer_name'] or '').strip()
+    cust, data = _pick_customer_candidate(by_name.get(name) or [])
+    if cust:
+        return cust, data
+    phone = _phone_key(srow['phone'] if 'phone' in srow.keys() else '')
+    if phone:
+        return _pick_customer_candidate(by_phone.get(phone) or [])
+    return None, {}
+
+
+def _iter_week_sales_deals(conn: sqlite3.Connection, site_id: str, start, end):
     try:
         sales_rows = conn.execute(
             "SELECT * FROM sales_deals WHERE site_id = ? AND record_type = 'deal'",
@@ -410,60 +441,28 @@ def _apply_sales_ledger_week_deals(
         ).fetchall()
     except sqlite3.OperationalError:
         return
-
-    cust_rows = conn.execute(
-        'SELECT * FROM customers WHERE site_id = ?',
-        (site_id,),
-    ).fetchall()
-    by_id = {int(r['id']): r for r in cust_rows}
-    by_name = defaultdict(list)
-    for r in cust_rows:
-        data = json.loads(r['data'] or '{}')
-        name = str(data.get('customerName') or '').strip()
-        if name:
-            by_name[name].append((r, data))
-
     for srow in sales_rows:
         sale_raw = srow['owner_sale_report_date'] or srow['report_date']
         sale_d = parse_ymd(sale_raw)
-        if not sale_d or not (start <= sale_d <= end):
-            continue
+        if sale_d and start <= sale_d <= end:
+            yield srow, sale_d
 
-        cust = None
-        data = {}
-        cid = srow['customer_id']
-        if cid not in (None, ''):
-            try:
-                cid_i = int(cid)
-            except (TypeError, ValueError):
-                cid_i = None
-            if cid_i is not None:
-                if cid_i in week_deal_customer_ids:
-                    continue
-                cust = by_id.get(cid_i)
 
-        if cust is None:
-            name = str(srow['customer_name'] or '').strip()
-            candidates = by_name.get(name) or []
-            # 優先回訪／有成交標記者
-            for r, d in candidates:
-                if int(r['id']) in week_deal_customer_ids:
-                    continue
-                if (r['visit_type'] or '') == '回訪' or int(r['is_deal'] or 0) == 1:
-                    cust = r
-                    data = d
-                    break
-            if cust is None:
-                for r, d in candidates:
-                    if int(r['id']) not in week_deal_customer_ids:
-                        cust = r
-                        data = d
-                        break
-        else:
-            data = json.loads(cust['data'] or '{}')
-            if int(cust['id']) in week_deal_customer_ids:
-                continue
-
+def _apply_sales_ledger_week_deals(
+    week_sales: list,
+    *,
+    dim_all: dict,
+    dim_new: dict,
+    period: dict,
+    by_day: dict,
+    deals: list,
+    add_dim,
+):
+    """
+    銷售總表「成交」且業主報售日在本週者，依戶別計入訴求分析本週成交。
+    同一回訪客資成交兩戶 → 計 2；區域／媒體／年齡／職業帶入對應客資。
+    """
+    for srow, sale_d, cust, data in week_sales:
         dims = _customer_dim_values(data if cust else {})
         amount = _sales_deal_amount(srow)
         for dim_key, dim_val in dims.items():
@@ -480,34 +479,35 @@ def _apply_sales_ledger_week_deals(
         if key in by_day:
             by_day[key]['deal'] += 1
 
-        if cust:
-            week_deal_customer_ids.add(int(cust['id']))
-            deals.append({
-                'id': cust['id'],
-                'date': key,
-                'visitType': cust['visit_type'] or '',
-                'isDeal': True,
-                'isRefund': False,
-                'isCoManaged': False,
-                'dealAmount': amount,
-                'refundAmount': 0,
-                'customerName': data.get('customerName') or srow['customer_name'] or '',
-                'phone': data.get('phone') or srow['phone'] or '',
-                'region': dims['region'],
-                'media': dims['media'],
-                'occupation': dims['occupation'],
-                'age': dims['age'],
-                'source': dims['source'],
-                'purpose': dims['purpose'],
-                'sincerity': str(data.get('sincerity') or ''),
-                'salesperson1': str(srow['salesperson1'] or data.get('salesperson1') or ''),
-                'salesperson2': str(srow['salesperson2'] or data.get('salesperson2') or ''),
-                'discussion': data.get('discussion') or '',
-                'introUnit': data.get('introUnit') or srow['unit_no'] or '',
-                'notPurchasedReason': '',
-                'included': True,
-                'fromSalesLedger': True,
-            })
+        unit_no = str(srow['unit_no'] or '') if 'unit_no' in srow.keys() else ''
+        deals.append({
+            'id': cust['id'] if cust else f"sales-{srow['id']}",
+            'salesDealId': srow['id'],
+            'date': key,
+            'visitType': (cust['visit_type'] if cust else '') or '',
+            'isDeal': True,
+            'isRefund': False,
+            'isCoManaged': False,
+            'dealAmount': amount,
+            'refundAmount': 0,
+            'customerName': (data.get('customerName') if data else None) or srow['customer_name'] or '',
+            'phone': (data.get('phone') if data else None) or (srow['phone'] if 'phone' in srow.keys() else '') or '',
+            'region': dims['region'],
+            'media': dims['media'],
+            'occupation': dims['occupation'],
+            'age': dims['age'],
+            'source': dims['source'],
+            'purpose': dims['purpose'],
+            'sincerity': str((data or {}).get('sincerity') or ''),
+            'salesperson1': str(srow['salesperson1'] or (data or {}).get('salesperson1') or ''),
+            'salesperson2': str(srow['salesperson2'] or (data or {}).get('salesperson2') or ''),
+            'discussion': (data or {}).get('discussion') or '',
+            'introUnit': (data or {}).get('introUnit') or unit_no,
+            'unitNo': unit_no,
+            'notPurchasedReason': '',
+            'included': True,
+            'fromSalesLedger': True,
+        })
 
 
 def _is_co_managed(data: dict) -> bool:
@@ -642,7 +642,14 @@ def build_auto_stats(
     return_visits = []
     deals = []
     hope_customers = []
-    week_deal_customer_ids = set()
+    by_id, by_name, by_phone = _index_customers_for_sales(rows)
+    week_sales = []
+    sales_covered_cids = set()
+    for srow, sale_d in _iter_week_sales_deals(conn, site_id, start, end):
+        cust, data = _match_customer_for_sales_row(srow, by_id, by_name, by_phone)
+        week_sales.append((srow, sale_d, cust, data))
+        if cust:
+            sales_covered_cids.add(int(cust['id']))
 
     month_start = start.replace(day=1)
     year_start = start.replace(month=1, day=1)
@@ -681,6 +688,7 @@ def build_auto_stats(
         vt = row['visit_type'] or ''
         is_new = vt != '回訪'
         is_deal = int(row['is_deal'] or 0) == 1
+        sales_cover_week = int(row['id']) in sales_covered_cids
         is_refund = (
             _truthy(data.get('isRefund'))
             or bool(str(data.get('cancelDate') or '').strip())
@@ -786,7 +794,8 @@ def build_auto_stats(
                 period[key]['new'] += w
             else:
                 period[key]['return'] += w
-            if is_deal and not is_refund:
+            count_deal = (is_deal and not is_refund and not (key == 'week' and sales_cover_week))
+            if count_deal:
                 period[key]['deals'] += w
                 period[key]['amount'] += amount * w
                 if is_new:
@@ -804,18 +813,21 @@ def build_auto_stats(
 
         # 維度：前期 + 本週（本週受選取過濾）
         # 來人／來電表以新客為主；回訪成交仍計入「本週成交」欄（來人組數不加回訪）
+        # 本週若已有銷售總表戶別，改由戶別計數，避免同一組客資重複 +1
         for dim_key, dim_val in (
             ('region', region), ('media', media),
             ('occupation', occupation), ('age', age), ('source', source),
             ('purpose', purpose),
         ):
             deal_flag = is_deal and not is_refund
-            add_dim(dim_all[dim_key], dim_val, 1.0, deal_flag, amount, use_week, in_prior)
+            week_deal_flag = deal_flag and not sales_cover_week
+            dim_deal = week_deal_flag if use_week else deal_flag
+            add_dim(dim_all[dim_key], dim_val, 1.0, dim_deal, amount, use_week, in_prior)
             if dim_key not in dim_new:
                 continue
             if is_new:
-                add_dim(dim_new[dim_key], dim_val, 1.0, deal_flag, amount, use_week, in_prior)
-            elif deal_flag:
+                add_dim(dim_new[dim_key], dim_val, 1.0, dim_deal, amount, use_week, in_prior)
+            elif dim_deal:
                 # 回訪不加來人組數，但成交計 1
                 add_dim(dim_new[dim_key], dim_val, 0.0, True, amount, use_week, in_prior, deal_weight=1.0)
 
@@ -828,36 +840,32 @@ def build_auto_stats(
         else:
             by_day[key]['return'] += 1
         by_day[key]['total'] += 1
-        if is_deal and not is_refund:
+        if is_deal and not is_refund and not sales_cover_week:
             by_day[key]['deal'] += 1
 
         visitors.append(item)
         if not is_new:
             return_visits.append(item)
-        if is_deal and not is_refund:
+        if is_deal and not is_refund and not sales_cover_week:
             deals.append(item)
-            if use_week:
-                week_deal_customer_ids.add(int(row['id']))
         if _is_hope(sincerity):
             hope_customers.append(item)
 
     visitors_all_week.sort(key=lambda x: (x['date'], x['id']))
     visitors.sort(key=lambda x: (x['date'], x['id']))
     return_visits.sort(key=lambda x: (x['date'], x['id']))
-    deals.sort(key=lambda x: (x['date'], x['id']))
     hope_customers.sort(key=lambda x: (x['date'], x['id']))
 
     _apply_sales_ledger_week_deals(
-        conn, site_id, start, end,
+        week_sales,
         dim_all=dim_all,
         dim_new=dim_new,
         period=period,
         by_day=by_day,
-        week_deal_customer_ids=week_deal_customer_ids,
         deals=deals,
         add_dim=add_dim,
     )
-    deals.sort(key=lambda x: (x['date'], x['id']))
+    deals.sort(key=lambda x: (x.get('date') or '', str(x.get('unitNo') or ''), x['id']))
 
     totals = {
         'new': sum(v['new'] for v in by_day.values()),
@@ -1396,7 +1404,11 @@ def _append_dim_table(ws, title, rows, *, week_only=True, with_phones=False):
         if r.get('name') == '合計':
             total_row = r
             continue
-        has_week = float(r.get('weekVisits') or 0) or float(r.get('weekPhones') or 0)
+        has_week = (
+            float(r.get('weekVisits') or 0)
+            or float(r.get('weekPhones') or 0)
+            or float(r.get('weekDeals') or 0)
+        )
         if week_only and not has_week:
             continue
         if with_phones:
