@@ -435,16 +435,30 @@ def _index_customers_for_sales(cust_rows):
     return by_id, by_name, by_phone, by_unit
 
 
-def _pick_customer_candidate(candidates):
+def _pick_customer_candidate(candidates, start=None, end=None):
     if not candidates:
         return None, {}
+
+    def in_week(r, d):
+        if start is None or end is None:
+            return False
+        dt = _record_date(r, d)
+        return bool(dt and start <= dt <= end)
+
+    week_deals = [(r, d) for r, d in candidates if int(r['is_deal'] or 0) == 1 and in_week(r, d)]
+    if week_deals:
+        week_deals.sort(key=lambda x: (0 if (x[0]['visit_type'] or '') == '回訪' else 1, x[0]['id']))
+        return week_deals[0]
     for r, d in candidates:
-        if (r['visit_type'] or '') == '回訪' or int(r['is_deal'] or 0) == 1:
+        if int(r['is_deal'] or 0) == 1:
+            return r, d
+    for r, d in candidates:
+        if (r['visit_type'] or '') == '回訪':
             return r, d
     return candidates[0]
 
 
-def _match_customer_for_sales_row(srow, by_id, by_name, by_phone, by_unit=None):
+def _match_customer_for_sales_row(srow, by_id, by_name, by_phone, by_unit=None, start=None, end=None):
     cid = srow['customer_id'] if 'customer_id' in srow.keys() else None
     if cid not in (None, ''):
         try:
@@ -454,17 +468,17 @@ def _match_customer_for_sales_row(srow, by_id, by_name, by_phone, by_unit=None):
         except (TypeError, ValueError):
             pass
     name = _name_key(srow['customer_name'] or '')
-    cust, data = _pick_customer_candidate(by_name.get(name) or [])
+    cust, data = _pick_customer_candidate(by_name.get(name) or [], start, end)
     if cust:
         return cust, data
     phone = _phone_key(srow['phone'] if 'phone' in srow.keys() else '')
     if phone:
-        cust, data = _pick_customer_candidate(by_phone.get(phone) or [])
+        cust, data = _pick_customer_candidate(by_phone.get(phone) or [], start, end)
         if cust:
             return cust, data
     uk = _unit_key(srow['unit_no'] if 'unit_no' in srow.keys() else '')
     if uk and by_unit:
-        return _pick_customer_candidate(by_unit.get(uk) or [])
+        return _pick_customer_candidate(by_unit.get(uk) or [], start, end)
     return None, {}
 
 
@@ -489,6 +503,18 @@ def _dedupe_week_sales_rows(pairs):
         if prev is None or _sales_row_rank(srow) > _sales_row_rank(prev[0]):
             by_unit[uk] = (srow, sale_d)
     return list(by_unit.values()) + no_unit
+
+
+def _week_deal_customer_ids(cust_rows, start, end):
+    ids = set()
+    for r in cust_rows:
+        data = json.loads(r['data'] or '{}')
+        if int(r['is_deal'] or 0) != 1:
+            continue
+        d = _record_date(r, data)
+        if d and start <= d <= end:
+            ids.add(int(r['id']))
+    return ids
 
 
 def _week_deal_customer_candidates(cust_rows, start, end, covered_cids):
@@ -530,6 +556,7 @@ def _attach_unmatched_week_sales(unmatched, by_id, covered_cids, leftovers):
 
 def _collect_week_sales(conn, site_id, start, end, cust_rows):
     by_id, by_name, by_phone, by_unit = _index_customers_for_sales(cust_rows)
+    week_deal_ids = _week_deal_customer_ids(cust_rows, start, end)
     raw = _dedupe_week_sales_rows(list(iter_week_deal_rows(conn, site_id, start, end)))
     week_sales = []
     covered = set()
@@ -537,7 +564,13 @@ def _collect_week_sales(conn, site_id, start, end, cust_rows):
     for srow, sale_d in raw:
         if not _sales_is_countable_unit(srow):
             continue
-        cust, data = _match_customer_for_sales_row(srow, by_id, by_name, by_phone, by_unit)
+        cust, data = _match_customer_for_sales_row(
+            srow, by_id, by_name, by_phone, by_unit, start=start, end=end,
+        )
+        # 對到的人若不是本週客資成交，改掛本週成交客資，避免 1 組成交被算成 2 筆
+        if cust and week_deal_ids and int(cust['id']) not in week_deal_ids:
+            unmatched.append((srow, sale_d))
+            continue
         if cust:
             week_sales.append((srow, sale_d, cust, data))
             covered.add(int(cust['id']))
@@ -576,15 +609,11 @@ def _apply_sales_ledger_week_deals(
         if cust and (cust['visit_type'] or '') != '回訪':
             period['week']['newDeals'] += 1.0
 
-        key = sale_d.isoformat()
-        if key in by_day:
-            by_day[key]['deal'] += 1
-
         unit_no = str(srow['unit_no'] or '') if 'unit_no' in srow.keys() else ''
         deals.append({
             'id': cust['id'] if cust else f"sales-{srow['id']}",
             'salesDealId': srow['id'],
-            'date': key,
+            'date': sale_d.isoformat(),
             'visitType': (cust['visit_type'] if cust else '') or '',
             'isDeal': True,
             'isRefund': False,
@@ -934,7 +963,7 @@ def build_auto_stats(
         else:
             by_day[key]['return'] += 1
         by_day[key]['total'] += 1
-        if is_deal and not is_refund and not sales_cover_week:
+        if is_deal and not is_refund:
             by_day[key]['deal'] += 1
 
         visitors.append(item)
