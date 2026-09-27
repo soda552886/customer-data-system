@@ -656,7 +656,8 @@ function calcCommissionDerived(c) {
     payableAmount: roundCommission4(claimablePay),
     retentionAmount: roundCommission4(claimableRet),
     bookedAmount: roundCommission4(booked),
-    unbookedAmount: roundCommission4(Math.max((n('claimedPayableAmount') || claimed) - booked, 0)),
+    // 已請佣未入帳 = 已請款金額 − 已入帳金額（不要用 97% 可請去減，否則常會算成 0）
+    unbookedAmount: roundCommission4(Math.max(claimed - booked, 0)),
     nextMonthUnits: n('nextMonthUnits'),
     nextMonthParking: n('nextMonthParking'),
     nextMonthAmount: roundCommission4(n('nextMonthAmount')),
@@ -1063,7 +1064,7 @@ function renderCommission(manual, derived) {
   const htmlParts = fields.map((f) => commissionFieldHtml(f, c));
   const d = calcCommissionDerived(c);
   htmlParts.push(`<div class="form-group">
-      <label>已請佣未入帳金額(萬)</label>
+      <label>已請佣未入帳金額(萬) <span class="field-hint-inline">已請款 − 已入帳</span></label>
       <input type="number" step="0.0001" id="commissionUnbooked" value="${d.unbookedAmount}" readonly>
     </div>`);
   document.getElementById('commissionInputs').innerHTML = htmlParts.join('');

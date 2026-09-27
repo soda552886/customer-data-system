@@ -9,7 +9,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Optional
 
-from sales_ledger import iter_week_deal_rows
+from sales_ledger import _units_from_area_ping, iter_week_deal_rows
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
@@ -390,20 +390,49 @@ def _phone_key(val) -> str:
     return ''.join(ch for ch in str(val or '') if ch.isdigit())
 
 
+def _name_key(val) -> str:
+    return str(val or '').replace(' ', '').replace('　', '').strip()
+
+
+def _unit_key(val) -> str:
+    return str(val or '').replace(' ', '').replace('　', '').strip().upper()
+
+
+def _sales_area_ping(srow) -> float:
+    if hasattr(srow, 'keys') and 'area_ping' in srow.keys():
+        return _num(srow['area_ping'])
+    return 0.0
+
+
+def _sales_is_countable_unit(srow) -> bool:
+    """有戶號或坪數才算一戶；純加購車／無戶簽約不另計訴求成交。"""
+    unit = _unit_key(srow['unit_no'] if hasattr(srow, 'keys') and 'unit_no' in srow.keys() else '')
+    if unit:
+        return True
+    return _units_from_area_ping(_sales_area_ping(srow)) > 0
+
+
 def _index_customers_for_sales(cust_rows):
     by_id = {}
     by_name = defaultdict(list)
     by_phone = defaultdict(list)
+    by_unit = defaultdict(list)
     for r in cust_rows:
         data = json.loads(r['data'] or '{}')
         by_id[int(r['id'])] = (r, data)
-        name = str(data.get('customerName') or '').strip()
+        name = _name_key(data.get('customerName'))
         if name:
             by_name[name].append((r, data))
         phone = _phone_key(data.get('phone') or data.get('mobile'))
         if phone:
             by_phone[phone].append((r, data))
-    return by_id, by_name, by_phone
+        for uk in (
+            _unit_key(data.get('introUnit')),
+            _unit_key(data.get('focusUnit')),
+        ):
+            if uk:
+                by_unit[uk].append((r, data))
+    return by_id, by_name, by_phone, by_unit
 
 
 def _pick_customer_candidate(candidates):
@@ -415,7 +444,7 @@ def _pick_customer_candidate(candidates):
     return candidates[0]
 
 
-def _match_customer_for_sales_row(srow, by_id, by_name, by_phone):
+def _match_customer_for_sales_row(srow, by_id, by_name, by_phone, by_unit=None):
     cid = srow['customer_id'] if 'customer_id' in srow.keys() else None
     if cid not in (None, ''):
         try:
@@ -424,19 +453,100 @@ def _match_customer_for_sales_row(srow, by_id, by_name, by_phone):
                 return hit
         except (TypeError, ValueError):
             pass
-    name = str(srow['customer_name'] or '').strip()
+    name = _name_key(srow['customer_name'] or '')
     cust, data = _pick_customer_candidate(by_name.get(name) or [])
     if cust:
         return cust, data
     phone = _phone_key(srow['phone'] if 'phone' in srow.keys() else '')
     if phone:
-        return _pick_customer_candidate(by_phone.get(phone) or [])
+        cust, data = _pick_customer_candidate(by_phone.get(phone) or [])
+        if cust:
+            return cust, data
+    uk = _unit_key(srow['unit_no'] if 'unit_no' in srow.keys() else '')
+    if uk and by_unit:
+        return _pick_customer_candidate(by_unit.get(uk) or [])
     return None, {}
 
 
-def _iter_week_sales_deals(conn: sqlite3.Connection, site_id: str, start, end):
-    """本週訴求成交與手填成交同一批銷售總表戶別。"""
-    yield from iter_week_deal_rows(conn, site_id, start, end)
+def _sales_row_rank(srow):
+    has_cid = 1 if (srow['customer_id'] if 'customer_id' in srow.keys() else None) not in (None, '') else 0
+    is_deal = 1 if (srow['record_type'] or '') == 'deal' else 0
+    has_name = 1 if _name_key(srow['customer_name'] or '') else 0
+    has_ping = 1 if _sales_area_ping(srow) > 0 else 0
+    return (has_cid, is_deal, has_name, has_ping, -int(srow['id']))
+
+
+def _dedupe_week_sales_rows(pairs):
+    """同一戶號本週成交／簽約只留一筆，避免一戶變成兩筆訴求成交。"""
+    by_unit = {}
+    no_unit = []
+    for srow, sale_d in pairs:
+        uk = _unit_key(srow['unit_no'] if 'unit_no' in srow.keys() else '')
+        if not uk:
+            no_unit.append((srow, sale_d))
+            continue
+        prev = by_unit.get(uk)
+        if prev is None or _sales_row_rank(srow) > _sales_row_rank(prev[0]):
+            by_unit[uk] = (srow, sale_d)
+    return list(by_unit.values()) + no_unit
+
+
+def _week_deal_customer_candidates(cust_rows, start, end, covered_cids):
+    """本週客資成交、尚未被銷售總表對到的人，用來補上未對到的戶別。"""
+    out = []
+    for r in cust_rows:
+        if int(r['id']) in covered_cids:
+            continue
+        data = json.loads(r['data'] or '{}')
+        if int(r['is_deal'] or 0) != 1:
+            continue
+        d = _record_date(r, data)
+        if d and start <= d <= end:
+            out.append((r, data))
+    out.sort(key=lambda x: (0 if (x[0]['visit_type'] or '') == '回訪' else 1, x[0]['id']))
+    return out
+
+
+def _attach_unmatched_week_sales(unmatched, by_id, covered_cids, leftovers):
+    attached = []
+    leftovers = list(leftovers)
+    covered = set(covered_cids)
+    for srow, sale_d in unmatched:
+        if leftovers:
+            cust, data = leftovers.pop(0)
+            attached.append((srow, sale_d, cust, data))
+            covered.add(int(cust['id']))
+            continue
+        if not _sales_is_countable_unit(srow):
+            continue
+        if len(covered) == 1:
+            hit = by_id.get(next(iter(covered)))
+            if hit:
+                attached.append((srow, sale_d, hit[0], hit[1]))
+                continue
+        attached.append((srow, sale_d, None, {}))
+    return attached, covered
+
+
+def _collect_week_sales(conn, site_id, start, end, cust_rows):
+    by_id, by_name, by_phone, by_unit = _index_customers_for_sales(cust_rows)
+    raw = _dedupe_week_sales_rows(list(iter_week_deal_rows(conn, site_id, start, end)))
+    week_sales = []
+    covered = set()
+    unmatched = []
+    for srow, sale_d in raw:
+        if not _sales_is_countable_unit(srow):
+            continue
+        cust, data = _match_customer_for_sales_row(srow, by_id, by_name, by_phone, by_unit)
+        if cust:
+            week_sales.append((srow, sale_d, cust, data))
+            covered.add(int(cust['id']))
+        else:
+            unmatched.append((srow, sale_d))
+    leftovers = _week_deal_customer_candidates(cust_rows, start, end, covered)
+    extra, covered = _attach_unmatched_week_sales(unmatched, by_id, covered, leftovers)
+    week_sales.extend(extra)
+    return week_sales, covered
 
 
 def _apply_sales_ledger_week_deals(
@@ -633,14 +743,7 @@ def build_auto_stats(
     return_visits = []
     deals = []
     hope_customers = []
-    by_id, by_name, by_phone = _index_customers_for_sales(rows)
-    week_sales = []
-    sales_covered_cids = set()
-    for srow, sale_d in _iter_week_sales_deals(conn, site_id, start, end):
-        cust, data = _match_customer_for_sales_row(srow, by_id, by_name, by_phone)
-        week_sales.append((srow, sale_d, cust, data))
-        if cust:
-            sales_covered_cids.add(int(cust['id']))
+    week_sales, sales_covered_cids = _collect_week_sales(conn, site_id, start, end, rows)
 
     month_start = start.replace(day=1)
     year_start = start.replace(month=1, day=1)
@@ -1061,6 +1164,7 @@ def commission_summary(manual: dict) -> dict:
         'payableAmount': claimable_pay,
         'retentionAmount': claimable_ret,
         'bookedAmount': round(_num(c.get('bookedAmount')), 4),
+        'unbookedAmount': round(max(claimed_amt - _num(c.get('bookedAmount')), 0), 4),
         'nextMonthUnits': _num(c.get('nextMonthUnits')),
         'nextMonthParking': _num(c.get('nextMonthParking')),
         'nextMonthAmount': round(_num(c.get('nextMonthAmount')), 4),
