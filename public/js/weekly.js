@@ -72,6 +72,16 @@ function currentSite() {
   return sites.find((s) => s.id === id) || null;
 }
 
+function salesPageUrlForCurrentSite() {
+  const siteId = document.getElementById('weekSite')?.value || current?.siteId || '';
+  return siteId ? `/sales.html?siteId=${encodeURIComponent(siteId)}` : '/sales.html';
+}
+
+function syncOpenSalesLink() {
+  const a = document.getElementById('openSalesFromWeekly');
+  if (a) a.href = salesPageUrlForCurrentSite();
+}
+
 function syncWeek1StartField() {
   const el = document.getElementById('week1Start');
   if (!el) return;
@@ -1549,6 +1559,7 @@ function renderAll(payload) {
       ? `銷售總表 ${suggested.totalRecords} 筆可帶入成交／簽約`
       : '銷售總表尚無資料';
   }
+  syncOpenSalesLink();
 }
 
 async function loadWeek() {
@@ -1733,6 +1744,7 @@ async function init() {
   await loadMeta();
   const shouldAutoLoad = restoreWeeklyContext();
   syncWeek1StartField();
+  syncOpenSalesLink();
   if (!document.getElementById('weekNumber').value) applySuggestedWeekNumber();
   await loadFieldOptions(document.getElementById('weekSite').value);
 
@@ -1746,6 +1758,7 @@ async function init() {
     applySuggestedWeekNumber();
     saveWeeklyContext();
     loadFieldOptions(document.getElementById('weekSite').value);
+    syncOpenSalesLink();
   });
   document.getElementById('weekNumber').addEventListener('input', saveWeeklyContext);
   document.getElementById('loadWeekBtn').addEventListener('click', loadWeek);
@@ -1754,7 +1767,12 @@ async function init() {
   document.getElementById('saveWeek1Btn')?.addEventListener('click', saveWeek1Start);
   document.getElementById('saveWeekBtn').addEventListener('click', saveWeek);
   document.getElementById('fillFromSalesBtn').addEventListener('click', applySuggestedFromSales);
-  document.getElementById('openSalesFromWeekly')?.addEventListener('click', saveWeeklyDraft);
+  document.getElementById('openSalesFromWeekly')?.addEventListener('click', (e) => {
+    saveWeeklyDraft();
+    const href = salesPageUrlForCurrentSite();
+    const a = e.currentTarget;
+    if (a) a.href = href;
+  });
   document.getElementById('addPhoneCallBtn')?.addEventListener('click', addPhoneCallRow);
   document.getElementById('dimFilterMode')?.addEventListener('change', renderAllDimTables);
   document.getElementById('exportWeekBtn').addEventListener('click', async () => {

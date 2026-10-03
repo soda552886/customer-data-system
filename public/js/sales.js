@@ -220,8 +220,9 @@ function calculateCommission() {
   const scheme = commissionDefaults.scheme || 'simple';
 
   let claimable = Math.max(salesAmount * rate - deduction, 0);
-  let payable = claimable * payableRatio;
-  let retention = claimable * retentionRatio;
+  claimable = roundMoney(claimable);
+  let retention = roundMoney(claimable * retentionRatio);
+  let payable = roundMoney(Math.max(claimable - retention, 0));
   if (scheme === 'payment_tiers') {
     const paidPct = numberValue('fCustomerPaidPct');
     const tiers = (commissionDefaults.tiers || []).slice()
@@ -293,8 +294,14 @@ async function loadSites() {
     opt.textContent = s.name;
     sel.appendChild(opt);
   });
-  const duoyi = sites.find((s) => s.id === 'libao_duoyi' || s.name.includes('鐸藝'));
-  if (duoyi) sel.value = duoyi.id;
+  const params = new URLSearchParams(window.location.search);
+  const fromQuery = (params.get('siteId') || '').trim();
+  if (fromQuery && sites.some((s) => s.id === fromQuery)) {
+    sel.value = fromQuery;
+  } else {
+    const duoyi = sites.find((s) => s.id === 'libao_duoyi' || s.name.includes('鐸藝'));
+    if (duoyi) sel.value = duoyi.id;
+  }
 }
 
 async function loadCommissionDefaults(siteId) {

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import io
+import math
 import re
 import sqlite3
 from datetime import date, datetime
@@ -281,6 +282,20 @@ def _round4(val) -> float:
     return round(float(val or 0), 4)
 
 
+def _round4_half_up(val) -> float:
+    """與前端 roundMoney 相同：小數第 5 位四捨五入（正數 half-up）。"""
+    x = float(val or 0)
+    return math.copysign(math.floor(abs(x) * 10000 + 0.5), x) / 10000.0
+
+
+def _split_retention_payable(claimable: float, retention_ratio: float):
+    """保留款先四捨五入到小數 4 位，可請 = 可請佣總金額 − 保留款。"""
+    total = _round4_half_up(max(claimable, 0))
+    retention = _round4_half_up(total * float(retention_ratio or 0))
+    payable = _round4_half_up(max(total - retention, 0))
+    return total, retention, payable
+
+
 def _as_ratio(val: float) -> float:
     """接受 0.0485 或 4.85（百分比）寫法。"""
     return _ratio_from_any(val, 0)
@@ -334,23 +349,21 @@ def compute_commission(
         retention_ratio = (handover_ratio / rate) if rate else 0
     else:
         claimable = max(sales_amount * rate - deduction, 0)
-        payable = claimable * payable_ratio
-        retention = claimable * retention_ratio
+        claimable, retention, payable = _split_retention_payable(claimable, retention_ratio)
         claimed = payable if is_claimed else 0.0
         unclaimed = max(claimable - claimed, 0)
 
     # 請佣總表匯入：若檔案已有可請／已請／未請實數，優先採用（期別仍決定已請狀態）
     if extra.get('importClaimable') not in (None, ''):
         claimable = max(_num(extra.get('importClaimable')), 0)
-    if extra.get('importPayable') not in (None, ''):
-        payable = max(_num(extra.get('importPayable')), 0)
-    elif scheme != 'payment_tiers':
-        payable = claimable * payable_ratio
     if extra.get('importRetention') not in (None, ''):
         retention = max(_num(extra.get('importRetention')), 0)
     elif scheme != 'payment_tiers':
-        # 保留款一律＝可請佣 × 保留比例，避免匯入的 97% 四捨五入讓 3% 對不上
-        retention = claimable * retention_ratio
+        _, retention, _ = _split_retention_payable(claimable, retention_ratio)
+    if extra.get('importPayable') not in (None, ''):
+        payable = max(_num(extra.get('importPayable')), 0)
+    elif scheme != 'payment_tiers':
+        payable = _round4(max(_round4(claimable) - _round4(retention), 0))
     if extra.get('importClaimed') not in (None, ''):
         claimed = max(_num(extra.get('importClaimed')), 0)
         is_claimed = is_claimed or claimed > 0
@@ -527,12 +540,13 @@ def _round_bucket(b: dict, *, derive_from_claimable: bool = True, settings: Opti
             'payable': round(b['payable'], 4),
         }
     if derive_from_claimable and claimable > 0:
+        _, retention, payable = _split_retention_payable(claimable, retention_ratio)
         return {
             'units': round(b['units'], 2),
             'parking': round(b['parking'], 2),
             'claimable': claimable,
-            'retention': round(claimable * retention_ratio, 4),
-            'payable': round(claimable * payable_ratio, 4),
+            'retention': retention,
+            'payable': payable,
         }
     payable = round(b['payable'], 4)
     if derive_from_claimable and payable > 0 and claimable <= 0 and payable_ratio:
@@ -633,11 +647,9 @@ def _period_deal_totals(conn: sqlite3.Connection, site_id: str, period_name: str
     for r in rows:
         p = _num(r['commission_payable'])
         c = _num(r['commission_claimable'])
-        if p <= 0 and c > 0 and scheme != 'payment_tiers':
-            p = c * payable_ratio
         ret = _num(r['commission_retention'])
-        if ret <= 0 and c > 0 and scheme != 'payment_tiers':
-            ret = c * retention_ratio
+        if c > 0 and scheme != 'payment_tiers':
+            _, ret, p = _split_retention_payable(c, retention_ratio)
         payable += p
         claimable += c
         retention += ret
@@ -1691,10 +1703,8 @@ def aggregate_for_weekly(conn: sqlite3.Connection, site_id: str, start, end) -> 
                 if 'commission_unclaimed' in row.keys()
                 else max(claimable - claimed, 0)
             )
-            if payable <= 0 and claimable > 0 and scheme != 'payment_tiers':
-                payable = claimable * payable_ratio
             if claimable > 0 and scheme != 'payment_tiers':
-                retention = claimable * retention_ratio
+                _, retention, payable = _split_retention_payable(claimable, retention_ratio)
             payable_amount += payable
             retention_amount += retention
             claimable_amount += claimable
@@ -1771,10 +1781,10 @@ def aggregate_for_weekly(conn: sqlite3.Connection, site_id: str, start, end) -> 
         if claimable_b <= 0 and payable_b > 0 and scheme != 'payment_tiers' and payable_ratio:
             claimable_b = payable_b / payable_ratio
         retention_b = _num(b.get('retention'))
-        if scheme != 'payment_tiers':
-            retention_b = claimable_b * retention_ratio
+        if scheme != 'payment_tiers' and claimable_b > 0:
+            _, retention_b, split_pay = _split_retention_payable(claimable_b, retention_ratio)
             if payable_b <= 0:
-                payable_b = claimable_b * payable_ratio
+                payable_b = split_pay
         next_month_units += units_b
         next_month_parking += parking_b
         next_month_amount += payable_b
