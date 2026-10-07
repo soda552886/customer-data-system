@@ -6,7 +6,7 @@
   <title>週報工作台 - 得意佳</title>
   <link rel="stylesheet" href="/css/style.css">
 </head>
-<body>
+<body class="weekly-page">
   <header class="header">
     <div class="header-inner">
       <h1><span class="brand">得意佳</span>客戶資料管理系統</h1>
@@ -17,7 +17,7 @@
   <main class="container">
     <section class="card">
       <h2>選擇週次</h2>
-      <p class="hint">系統會自動帶出來人分析（區域／媒體／職業／年齡）、成交比、回訪／有望客。去化／請佣／成交手填後儲存。各工地可直接開本頁向長官報告。</p>
+      <p class="hint">系統會自動帶出來人分析（區域／媒體／職業／年齡）、成交比、回訪／有望客，以及依銷售總表產生的去化分析圖（單價／總價／狀況）。去化／請佣／成交手填後儲存。各工地可直接開本頁向長官報告。</p>
       <div class="search-grid">
         <div class="form-group">
           <label for="weekSite">案場 <span class="required">*</span></label>
@@ -178,6 +178,37 @@
         <p class="hint">新週開啟時會帶入上一週已儲存的數字，不會清零。各工地手動改完並儲存後，下一週繼續沿用最新紀錄。</p>
         <div class="search-grid" id="inventoryInputs"></div>
         <div id="inventoryDerived" class="stats-grid" style="margin-top:1rem;"></div>
+      </section>
+
+      <section class="card" id="sellthroughCard">
+        <h2>去化分析圖</h2>
+        <p class="hint">依銷售總表戶別自動對應樓層（如 A1-10F）。可切換單價／總價／狀況；統計截至本週日。空格＝尚未成交。若缺戶或缺樓，請展開「戶別格局」補齊（每個案子各自設定）。</p>
+        <div class="st-toolbar">
+          <div class="st-views" id="stViewBtns">
+            <button type="button" class="tab-btn active" data-st-view="unit">單價</button>
+            <button type="button" class="tab-btn" data-st-view="total">總價</button>
+            <button type="button" class="tab-btn" data-st-view="status">狀況</button>
+          </div>
+          <div class="st-buildings" id="stBuildingBtns"></div>
+          <div class="st-legend">
+            <span><i class="st-swatch st-swatch-reserved"></i>訂足</span>
+            <span><i class="st-swatch st-swatch-signed"></i>簽約</span>
+            <span><i class="st-swatch st-swatch-owner"></i>業主戶</span>
+          </div>
+        </div>
+        <div id="stStats" class="st-stats"></div>
+        <div id="stGridWrap" class="st-scroll"></div>
+        <p id="stUnparsed" class="hint"></p>
+        <details class="st-layout" id="stLayoutPanel">
+          <summary>戶別格局設定（補齊未售戶／業主戶）</summary>
+          <p class="hint">戶別用逗號分隔，例如 <code>A1, A2, A3, A5</code>。坪數可寫 <code>A1:46.6, A2:23.61</code>。業主戶寫 <code>A1-29F, A15-17F</code>。</p>
+          <div id="stLayoutEditors"></div>
+          <div class="form-actions" style="margin-top:0.75rem;">
+            <button type="button" id="stAddBuildingBtn" class="btn btn-outline">新增棟別</button>
+            <button type="button" id="stSaveLayoutBtn" class="btn btn-primary">儲存格局</button>
+            <button type="button" id="stClearLayoutBtn" class="btn btn-secondary">改回自動推估</button>
+          </div>
+        </details>
       </section>
 
       <section class="card">

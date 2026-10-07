@@ -39,6 +39,7 @@ from sales_ledger import (
     parse_deal_date, sales_export_headers, sales_export_row_values, update_sales_deal,
     upsert_commission_batch,
 )
+from sellthrough import build_sellthrough, ensure_unit_map_column, save_unit_map
 from budget import init_budget_tables, load_budget, save_budget, ensure_budget_upload_dir, BUDGET_UPLOAD_DIR
 from field_options import (
     apply_site_field_options, apply_site_hidden_fields, build_site_field_config,
@@ -124,6 +125,7 @@ def init_db():
     migrate_retired_roles(conn)
     _ensure_sites_week1_start(conn)
     _ensure_sites_sales_settings(conn)
+    ensure_unit_map_column(conn)
     conn.commit()
 
     count = conn.execute('SELECT COUNT(*) FROM sites').fetchone()[0]
@@ -2806,6 +2808,58 @@ def api_delete_all_sales_deals():
     conn.commit()
     conn.close()
     return jsonify({'success': True, **counts})
+
+
+@app.route('/api/sales/sellthrough')
+def api_sales_sellthrough():
+    conn, user, err = auth_guard('manage_weekly_reports')
+    if err:
+        return err
+    site_id = (request.args.get('siteId') or '').strip()
+    if not site_id:
+        conn.close()
+        return jsonify({'error': '請提供案場'}), 400
+    denied = ensure_site_access(user, site_id)
+    if denied:
+        conn.close()
+        return denied
+    as_of = (request.args.get('asOf') or request.args.get('weekEnd') or '').strip() or None
+    data = build_sellthrough(conn, site_id, as_of=as_of)
+    conn.close()
+    return jsonify({'success': True, **data})
+
+
+@app.route('/api/sales/unit-map', methods=['PUT'])
+def api_save_unit_map():
+    conn, user, err = auth_guard('manage_weekly_reports')
+    if err:
+        return err
+    body = request.get_json() or {}
+    site_id = (body.get('siteId') or request.args.get('siteId') or '').strip()
+    if not site_id:
+        conn.close()
+        return jsonify({'error': '請提供案場'}), 400
+    denied = ensure_site_access(user, site_id)
+    if denied:
+        conn.close()
+        return denied
+    row = conn.execute('SELECT id, name FROM sites WHERE id = ?', (site_id,)).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({'error': '找不到此案場'}), 404
+    unit_map = save_unit_map(conn, site_id, body)
+    log_operation(
+        conn, user, 'unit_map_update',
+        f'更新去化格局：{row["name"]}',
+        entity_type='site', entity_id=site_id,
+        site_id=site_id, site_name=row['name'],
+        detail={'buildings': len(unit_map.get('buildings') or [])},
+    )
+    conn.commit()
+    as_of = (body.get('asOf') or '').strip() or None
+    data = build_sellthrough(conn, site_id, as_of=as_of)
+    conn.close()
+    return jsonify({'success': True, **data})
 
 
 @app.route('/api/sales/summary')

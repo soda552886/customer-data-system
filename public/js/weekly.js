@@ -1520,6 +1520,219 @@ function applySuggestedFromSales() {
   showToast('已從銷售總表帶入成交／簽約數字');
 }
 
+let sellthroughData = null;
+let stView = 'unit';
+let stBuildingId = '';
+
+function stFmt(n, digits = 2) {
+  const v = Number(n);
+  if (!Number.isFinite(v) || v === 0) return '';
+  return Number.isInteger(v) ? String(v) : v.toFixed(digits).replace(/0+$/, '').replace(/\.$/, '');
+}
+
+function currentRocYear() {
+  return new Date().getFullYear() - 1911;
+}
+
+function renderSellthrough(data, opts = {}) {
+  const refreshLayout = opts.refreshLayout !== false;
+  sellthroughData = data;
+  const wrap = document.getElementById('stGridWrap');
+  const statsEl = document.getElementById('stStats');
+  const unparsedEl = document.getElementById('stUnparsed');
+  const bbtns = document.getElementById('stBuildingBtns');
+  if (!wrap) return;
+  if (!data || !(data.buildings || []).length) {
+    wrap.innerHTML = '<p class="hint" style="padding:0.8rem;">銷售總表尚無可用戶別（請用 A1-10F 這類格式登錄），或先設定戶別格局。</p>';
+    if (statsEl) statsEl.innerHTML = '';
+    if (bbtns) bbtns.innerHTML = '';
+    if (unparsedEl) unparsedEl.textContent = (data?.unparsed || []).length
+      ? `無法對應樓層的戶別：${data.unparsed.join('、')}`
+      : '';
+    if (refreshLayout) renderSellthroughLayout(data);
+    return;
+  }
+  const buildings = data.buildings;
+  if (!stBuildingId || !buildings.some((b) => b.id === stBuildingId)) {
+    stBuildingId = buildings[0].id;
+  }
+  if (bbtns) {
+    bbtns.innerHTML = buildings.map((b) => `
+      <button type="button" class="tab-btn${b.id === stBuildingId ? ' active' : ''}" data-st-building="${escapeHtml(b.id)}">${escapeHtml(b.name)}</button>
+    `).join('');
+  }
+  const s = data.stats || {};
+  if (statsEl) {
+    statsEl.innerHTML = `
+      <span>總戶 <b>${s.total || 0}</b></span>
+      <span>已售 <b>${s.sold || 0}</b></span>
+      <span>訂足 <b>${s.reserved || 0}</b></span>
+      <span>簽約 <b>${s.signed || 0}</b></span>
+      <span>業主戶 <b>${s.owner || 0}</b></span>
+      <span>未售 <b>${s.available || 0}</b></span>
+      <span>去化率 <b>${s.rate || 0}%</b></span>
+      ${data.inferred ? '<span class="hint">格局由成交戶號推估</span>' : ''}
+      ${data.asOf ? `<span class="hint">截至 ${escapeHtml(data.asOf)}</span>` : ''}
+    `;
+  }
+  if (unparsedEl) {
+    unparsedEl.textContent = (data.unparsed || []).length
+      ? `無法對應樓層的戶別：${data.unparsed.join('、')}`
+      : '';
+  }
+  const building = buildings.find((b) => b.id === stBuildingId) || buildings[0];
+  const cells = data.cells || {};
+  const rocNow = currentRocYear();
+  const unitLabel = stView === 'total' ? '萬' : '萬/坪';
+  const head = (building.columns || []).map((col) => {
+    const ping = col.ping ? `<small>${escapeHtml(stFmt(col.ping, 2))}坪</small>` : '';
+    return `<th><span class="st-col-head">${escapeHtml(col.id)}${ping}</span></th>`;
+  }).join('');
+  const body = (building.floors || []).map((floor) => {
+    const tds = (building.columns || []).map((col) => {
+      const cell = cells[`${building.id}|${col.id}|${floor}`];
+      if (!cell || cell.status === 'available') {
+        return '<td class="st-cell"><div class="st-empty"></div></td>';
+      }
+      if (stView === 'status') {
+        const label = cell.status === 'signed' ? '簽約' : cell.status === 'owner' ? '業主戶' : '訂足';
+        return `<td class="st-cell"><div class="st-card st-status st-status-${escapeHtml(cell.status)}" title="${escapeHtml(cell.unitNo || '')} ${escapeHtml(cell.customerName || '')} ${label}"><span class="st-dot"></span></div></td>`;
+      }
+      const val = stView === 'total' ? cell.totalWan || cell.houseWan : cell.unitPriceWan;
+      const shown = stFmt(val, 2);
+      if (!shown && cell.status === 'owner') {
+        return `<td class="st-cell"><div class="st-card st-status st-status-owner" title="業主戶"><span class="st-dot"></span></div></td>`;
+      }
+      const date = cell.rocYm || '';
+      const y = Number(String(date).split('/')[0] || 0);
+      const oldCls = y && y < rocNow ? ' is-old' : '';
+      return `<td class="st-cell"><div class="st-card" title="${escapeHtml(cell.unitNo || '')} ${escapeHtml(cell.customerName || '')}">
+        ${date ? `<span class="st-date${oldCls}">${escapeHtml(date)}</span>` : ''}
+        <strong>${escapeHtml(shown || '—')}</strong>
+        <em>${unitLabel}</em>
+      </div></td>`;
+    }).join('');
+    return `<tr><th><span class="st-row-head">${floor}F</span></th>${tds}</tr>`;
+  }).join('');
+  wrap.innerHTML = `<table class="st-grid"><thead><tr><th class="st-corner"></th>${head}</tr></thead><tbody>${body}</tbody></table>`;
+  if (refreshLayout) renderSellthroughLayout(data);
+}
+
+function layoutBuildingHtml(b, idx) {
+  const cols = (b.columns || []).map((c) => c.id).join(', ');
+  const pings = (b.columns || [])
+    .filter((c) => Number(c.ping) > 0)
+    .map((c) => `${c.id}:${c.ping}`)
+    .join(', ');
+  const floors = b.floors || [];
+  const floorMax = floors.length ? floors[0] : '';
+  const floorMin = floors.length ? floors[floors.length - 1] : '';
+  const owners = (b.ownerUnits || []).map((k) => {
+    const p = String(k).split('|');
+    return p.length === 3 ? `${p[1]}-${p[2]}F` : k;
+  }).join(', ');
+  return `
+    <div class="st-layout-item" data-st-layout="${idx}">
+      <div class="form-group"><label>棟別名稱</label>
+        <input type="text" data-st-f="name" value="${escapeHtml(b.name || '')}" placeholder="A棟"></div>
+      <div class="form-group"><label>棟別代碼</label>
+        <input type="text" data-st-f="id" value="${escapeHtml(b.id || '')}" placeholder="A"></div>
+      <div class="form-group"><label>最高樓</label>
+        <input type="number" min="1" max="80" data-st-f="floorMax" value="${escapeHtml(floorMax)}"></div>
+      <div class="form-group"><label>最低樓</label>
+        <input type="number" min="1" max="80" data-st-f="floorMin" value="${escapeHtml(floorMin)}"></div>
+      <div class="form-group full"><label>戶別欄</label>
+        <input type="text" data-st-f="columns" value="${escapeHtml(cols)}" placeholder="A1, A2, A3, A5"></div>
+      <div class="form-group full"><label>坪數（選填）</label>
+        <input type="text" data-st-f="pings" value="${escapeHtml(pings)}" placeholder="A1:46.6, A2:23.61"></div>
+      <div class="form-group full"><label>業主戶（選填）</label>
+        <input type="text" data-st-f="ownerUnits" value="${escapeHtml(owners)}" placeholder="A1-29F, A15-17F"></div>
+    </div>`;
+}
+
+function renderSellthroughLayout(data) {
+  const el = document.getElementById('stLayoutEditors');
+  if (!el) return;
+  const buildings = (data && (data.unitMap?.buildings?.length ? data.unitMap.buildings : data.buildings)) || [];
+  const rows = buildings.length ? buildings : [{ id: 'A', name: 'A棟', columns: [], floors: [15, 2], ownerUnits: [] }];
+  el.innerHTML = rows.map((b, i) => layoutBuildingHtml(b, i)).join('');
+}
+
+function collectUnitMapFromForm() {
+  const items = Array.from(document.querySelectorAll('#stLayoutEditors [data-st-layout]'));
+  const buildings = items.map((box) => {
+    const val = (f) => box.querySelector(`[data-st-f="${f}"]`)?.value.trim() || '';
+    const pingMap = {};
+    val('pings').split(/[、,，;；]/).forEach((part) => {
+      const bits = part.split(/[:：]/);
+      if (bits.length >= 2) pingMap[bits[0].trim().toUpperCase()] = bits[1].trim();
+    });
+    const columns = val('columns').split(/[、,，;；\s]+/).filter(Boolean).map((id) => {
+      const cid = id.trim().toUpperCase();
+      return { id: cid, ping: pingMap[cid] || 0 };
+    });
+    return {
+      id: val('id'),
+      name: val('name'),
+      columns,
+      floorMax: val('floorMax'),
+      floorMin: val('floorMin'),
+      ownerUnits: val('ownerUnits'),
+    };
+  });
+  return { buildings };
+}
+
+async function loadSellthrough() {
+  const siteId = document.getElementById('weekSite')?.value || current?.siteId;
+  const asOf = current?.weekEnd || '';
+  const wrap = document.getElementById('stGridWrap');
+  if (!siteId || !wrap) return;
+  wrap.innerHTML = '<p class="hint" style="padding:0.8rem;">載入去化分析…</p>';
+  try {
+    const params = new URLSearchParams({ siteId, _: String(Date.now()) });
+    if (asOf) params.set('asOf', asOf);
+    const res = await fetch(`/api/sales/sellthrough?${params}`, { cache: 'no-store' });
+    const json = await res.json();
+    if (!res.ok) {
+      wrap.innerHTML = `<p class="hint" style="padding:0.8rem;">${escapeHtml(json.error || '去化分析載入失敗')}</p>`;
+      return;
+    }
+    renderSellthrough(json);
+  } catch {
+    wrap.innerHTML = '<p class="hint" style="padding:0.8rem;">去化分析載入失敗</p>';
+  }
+}
+
+async function saveSellthroughLayout(clear = false) {
+  const siteId = document.getElementById('weekSite')?.value || current?.siteId;
+  if (!siteId) {
+    showToast('請先選擇案場', 'error');
+    return;
+  }
+  const body = clear ? { siteId, buildings: [], asOf: current?.weekEnd || '' } : {
+    siteId,
+    ...collectUnitMapFromForm(),
+    asOf: current?.weekEnd || '',
+  };
+  try {
+    const res = await fetch('/api/sales/unit-map', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const json = await res.json();
+    if (!res.ok) {
+      showToast(json.error || '格局儲存失敗', 'error');
+      return;
+    }
+    renderSellthrough(json);
+    showToast(clear ? '已改回依銷售總表自動推估' : '已儲存此案場戶別格局');
+  } catch {
+    showToast('格局儲存失敗', 'error');
+  }
+}
+
 function renderAll(payload) {
   current = payload;
   document.getElementById('weekEmpty').classList.add('hidden');
@@ -1560,6 +1773,7 @@ function renderAll(payload) {
       : '銷售總表尚無資料';
   }
   syncOpenSalesLink();
+  loadSellthrough();
 }
 
 async function loadWeek() {
@@ -1767,6 +1981,31 @@ async function init() {
   document.getElementById('saveWeek1Btn')?.addEventListener('click', saveWeek1Start);
   document.getElementById('saveWeekBtn').addEventListener('click', saveWeek);
   document.getElementById('fillFromSalesBtn').addEventListener('click', applySuggestedFromSales);
+  document.getElementById('stViewBtns')?.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-st-view]');
+    if (!btn) return;
+    stView = btn.dataset.stView;
+    document.querySelectorAll('#stViewBtns [data-st-view]').forEach((el) => {
+      el.classList.toggle('active', el.dataset.stView === stView);
+    });
+    if (sellthroughData) renderSellthrough(sellthroughData, { refreshLayout: false });
+  });
+  document.getElementById('stBuildingBtns')?.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-st-building]');
+    if (!btn) return;
+    stBuildingId = btn.dataset.stBuilding;
+    if (sellthroughData) renderSellthrough(sellthroughData, { refreshLayout: false });
+  });
+  document.getElementById('stAddBuildingBtn')?.addEventListener('click', () => {
+    const el = document.getElementById('stLayoutEditors');
+    if (!el) return;
+    const idx = el.querySelectorAll('[data-st-layout]').length;
+    el.insertAdjacentHTML('beforeend', layoutBuildingHtml({
+      id: '', name: '', columns: [], floors: [], ownerUnits: [],
+    }, idx));
+  });
+  document.getElementById('stSaveLayoutBtn')?.addEventListener('click', () => saveSellthroughLayout(false));
+  document.getElementById('stClearLayoutBtn')?.addEventListener('click', () => saveSellthroughLayout(true));
   document.getElementById('openSalesFromWeekly')?.addEventListener('click', (e) => {
     saveWeeklyDraft();
     const href = salesPageUrlForCurrentSite();

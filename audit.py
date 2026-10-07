@@ -20,6 +20,7 @@ ACTION_LABELS = {
     'user_delete': '刪除人員',
     'site_create': '新增案場',
     'site_delete': '刪除案場',
+    'unit_map_update': '更新去化格局',
 }
 
 

@@ -1649,3 +1649,214 @@ tr.visitor-row-highlight td {
   .budget-week-layout { grid-template-columns: 1fr; }
   .budget-photo-upload { grid-template-columns: 1fr; }
 }
+
+.weekly-page .container {
+  max-width: 1480px;
+}
+.st-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1rem;
+  margin: 0.35rem 0 0.75rem;
+}
+.st-views,
+.st-buildings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.st-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-left: auto;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+.st-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+.st-swatch {
+  display: inline-block;
+  width: 0.85rem;
+  height: 0.85rem;
+  border-radius: 3px;
+  border: 1px solid transparent;
+}
+.st-swatch-reserved {
+  background: #f6c77a;
+  border-color: #d4a017;
+}
+.st-swatch-signed {
+  background: #f3b4b4;
+  border-color: #d45c5c;
+}
+.st-swatch-owner {
+  background: #bfe3c4;
+  border-color: #5aa86a;
+}
+.st-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  margin-bottom: 0.7rem;
+  font-size: 0.9rem;
+  color: var(--text);
+}
+.st-stats b {
+  color: var(--primary);
+}
+.st-scroll {
+  overflow: auto;
+  max-width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #f7fafc;
+}
+.st-grid {
+  border-collapse: separate;
+  border-spacing: 6px;
+  min-width: max-content;
+  margin: 0;
+}
+.st-grid th,
+.st-grid td {
+  padding: 0;
+  vertical-align: middle;
+  text-align: center;
+  background: transparent;
+  border: 0;
+}
+.st-corner {
+  width: 3.1rem;
+  min-width: 3.1rem;
+}
+.st-col-head,
+.st-row-head {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 4.6rem;
+  padding: 0.35rem 0.55rem;
+  border-radius: 8px;
+  background: #2b5f8a;
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.92rem;
+  line-height: 1.2;
+}
+.st-row-head {
+  min-width: 2.6rem;
+  min-height: 3.4rem;
+}
+.st-col-head small {
+  font-weight: 500;
+  font-size: 0.7rem;
+  opacity: 0.85;
+}
+.st-cell {
+  min-width: 5.4rem;
+  width: 5.4rem;
+  height: 4.3rem;
+}
+.st-card {
+  width: 5.2rem;
+  height: 4.1rem;
+  margin: 0 auto;
+  border-radius: 8px;
+  border: 1px solid #e0c36a;
+  background: #fff4cc;
+  box-shadow: 0 1px 2px rgba(201, 162, 39, 0.18);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  padding: 0.55rem 0.25rem 0.3rem;
+}
+.st-card .st-date {
+  position: absolute;
+  top: 3px;
+  right: 4px;
+  font-size: 0.62rem;
+  line-height: 1;
+  padding: 0.12rem 0.28rem;
+  border-radius: 4px;
+  background: #e8c15a;
+  color: #5c4308;
+  font-weight: 700;
+}
+.st-card .st-date.is-old {
+  background: #d5d8de;
+  color: #4b5563;
+}
+.st-card strong {
+  font-size: 1.02rem;
+  font-weight: 800;
+  color: #1e293b;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.15;
+}
+.st-card em {
+  font-style: normal;
+  font-size: 0.68rem;
+  color: #7a5b12;
+  margin-top: 0.05rem;
+}
+.st-card.st-status {
+  border-width: 2px;
+}
+.st-card.st-status-reserved {
+  background: #fde8c8;
+  border-color: #e0a036;
+}
+.st-card.st-status-signed {
+  background: #f8d0d0;
+  border-color: #d45c5c;
+}
+.st-card.st-status-owner {
+  background: #d8f0d0;
+  border-color: #5aa86a;
+}
+.st-dot {
+  width: 0.85rem;
+  height: 0.85rem;
+  border-radius: 50%;
+  display: inline-block;
+}
+.st-status-reserved .st-dot { background: #e39b1a; }
+.st-status-signed .st-dot { background: #d44545; }
+.st-status-owner .st-dot { background: #3d9a55; }
+.st-empty {
+  height: 4.1rem;
+}
+.st-layout {
+  margin-top: 1rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px dashed #c5d4e3;
+  border-radius: 8px;
+  background: #f8fbfe;
+}
+.st-layout summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: var(--primary);
+}
+.st-layout-item {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+.st-layout-item .full {
+  grid-column: 1 / -1;
+}
+@media (max-width: 800px) {
+  .st-layout-item { grid-template-columns: 1fr; }
+}
