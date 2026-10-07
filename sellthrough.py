@@ -115,6 +115,10 @@ def parse_one_unit(token: str) -> Optional[dict]:
         col = _col_id(m.group(1), m.group(2))
         return {'buildingId': m.group(1), 'col': col, 'floor': None, 'raw': token}
 
+    m = re.match(r'^(\d{1,2})F-(\d{1,2})$', t)
+    if m:
+        return {'buildingId': '主', 'col': str(int(m.group(2))), 'floor': int(m.group(1)), 'raw': token}
+
     m = re.match(r'^(\d{1,2})F$', t)
     if m:
         return {'buildingId': '主', 'col': '主', 'floor': int(m.group(1)), 'raw': token}
@@ -128,7 +132,23 @@ def parse_one_unit(token: str) -> Optional[dict]:
     return None
 
 
-def parse_unit_nos(raw) -> list[dict]:
+def _apply_default_building(parsed: Optional[dict], default_building: Optional[str]) -> Optional[dict]:
+    if not parsed or not default_building:
+        return parsed
+    bid = str(parsed.get('buildingId') or '')
+    if bid not in ('主', ''):
+        return parsed
+    out = dict(parsed)
+    out['buildingId'] = default_building
+    col = str(out.get('col') or '')
+    if col.isdigit():
+        out['col'] = _col_id(default_building, col)
+    elif col in ('主', ''):
+        return parsed
+    return out
+
+
+def parse_unit_nos(raw, default_building: Optional[str] = None) -> list[dict]:
     text = str(raw or '').strip()
     if not text:
         return []
@@ -138,8 +158,10 @@ def parse_unit_nos(raw) -> list[dict]:
     out = []
     seen = set()
     for part in parts:
-        parsed = parse_one_unit(part)
+        parsed = _apply_default_building(parse_one_unit(part), default_building)
         if not parsed or parsed.get('floor') in (None, 0):
+            continue
+        if str(parsed.get('col') or '') in ('主', ''):
             continue
         key = (parsed['buildingId'], parsed['col'], parsed['floor'])
         if key in seen:
@@ -184,9 +206,63 @@ def load_unit_map(conn: sqlite3.Connection, site_id: str) -> dict:
     return normalize_unit_map(raw)
 
 
+def _normalize_manual_cell(item) -> Optional[dict]:
+    if not isinstance(item, dict):
+        return None
+    bid = str(item.get('buildingId') or '').strip().upper()
+    col = re.sub(r'[^A-Z0-9]', '', _clean_unit_text(item.get('col') or ''))
+    try:
+        floor = int(item.get('floor'))
+    except (TypeError, ValueError):
+        floor = 0
+    if not bid or not col or not (1 <= floor <= 80):
+        return None
+    status = str(item.get('status') or STATUS_RESERVED)
+    if status not in (STATUS_RESERVED, STATUS_SIGNED, STATUS_OWNER, STATUS_AVAILABLE):
+        status = STATUS_RESERVED
+    date_s = _to_ymd(item.get('date')) or ''
+    unit_price = round(_num(item.get('unitPriceWan')), 2)
+    total = round(_num(item.get('totalWan') or item.get('houseWan')), 2)
+    house = round(_num(item.get('houseWan') or total), 2)
+    ping = _num(item.get('areaPing'))
+    if not unit_price and house and ping:
+        unit_price = round(house / ping, 2)
+    return {
+        'key': _cell_key(bid, col, floor),
+        'buildingId': bid,
+        'col': col,
+        'floor': floor,
+        'status': status,
+        'date': date_s,
+        'rocYm': roc_ym(date_s),
+        'unitPriceWan': unit_price,
+        'totalWan': total,
+        'houseWan': house,
+        'areaPing': ping,
+        'unitNo': str(item.get('unitNo') or f'{col}-{floor}F').strip(),
+        'customerName': str(item.get('customerName') or '手動補登').strip() or '手動補登',
+        'recordType': 'manual',
+        'productType': '',
+        'source': 'manual',
+        'override': bool(item.get('override')),
+    }
+
+
 def save_unit_map(conn: sqlite3.Connection, site_id: str, payload) -> dict:
     ensure_unit_map_column(conn)
-    data = normalize_unit_map(payload)
+    existing = load_unit_map(conn, site_id)
+    payload = payload if isinstance(payload, dict) else {}
+    if payload.get('upsertCell') is not None:
+        data = existing
+        cell = _normalize_manual_cell(payload.get('upsertCell'))
+        manuals = [c for c in (data.get('manualCells') or []) if c.get('key') != (cell or {}).get('key')]
+        if cell and cell.get('status') != STATUS_AVAILABLE:
+            manuals.append(cell)
+        data['manualCells'] = manuals
+    else:
+        data = normalize_unit_map(payload)
+        if 'manualCells' not in payload:
+            data['manualCells'] = existing.get('manualCells') or []
     conn.execute(
         'UPDATE sites SET unit_map = ? WHERE id = ?',
         (json.dumps(data, ensure_ascii=False), site_id),
@@ -228,7 +304,15 @@ def normalize_unit_map(raw) -> dict:
             'floors': floors,
             'ownerUnits': owners,
         })
-    return {'buildings': out}
+    manuals = []
+    seen_m = set()
+    for item in data.get('manualCells') or []:
+        cell = _normalize_manual_cell(item)
+        if not cell or cell['key'] in seen_m:
+            continue
+        seen_m.add(cell['key'])
+        manuals.append(cell)
+    return {'buildings': out, 'manualCells': manuals}
 
 
 def _normalize_columns(raw) -> list[dict]:
@@ -372,6 +456,18 @@ def _house_total_wan(deal: dict) -> float:
     return total
 
 
+def _contract_house_wan(deal: dict) -> float:
+    """合約房價（房售價），供實登單價＝合約房價／坪數。"""
+    house = _num(deal.get('houseSalePrice'))
+    if house:
+        return house
+    contract = _num(deal.get('contractTotal')) or _num(deal.get('totalPrice'))
+    parking = _num(deal.get('parkingSalePrice'))
+    if contract and parking and contract > parking:
+        return contract - parking
+    return contract
+
+
 def _total_wan(deal: dict) -> float:
     total = _num(deal.get('actualTotalPrice'))
     if total:
@@ -384,7 +480,7 @@ def _total_wan(deal: dict) -> float:
 
 
 def _unit_price_wan(deal: dict, ping: float) -> float:
-    house = _house_total_wan(deal)
+    house = _contract_house_wan(deal)
     area = ping or _num(deal.get('areaPing'))
     if house and area:
         return round(house / area, 2)
@@ -432,6 +528,62 @@ def _pick_better_cell(current: Optional[dict], incoming: dict) -> dict:
     return incoming if (incoming.get('date') or '') >= (current.get('date') or '') else current
 
 
+def _looks_parking(deal: dict) -> bool:
+    blob = f"{deal.get('unitNo') or ''} {deal.get('productType') or ''}"
+    if '車位' in blob or blob.strip().endswith('車'):
+        if _num(deal.get('areaPing')) <= 0:
+            return True
+    return False
+
+
+def _expand_buildings_with_cells(buildings: list[dict], cells: list[dict]) -> tuple[list[dict], bool]:
+    if not buildings:
+        return buildings, False
+    by_id = {b['id']: b for b in buildings}
+    changed = False
+    for cell in cells:
+        if cell.get('status') not in (STATUS_RESERVED, STATUS_SIGNED, STATUS_OWNER):
+            continue
+        bid = cell['buildingId']
+        b = by_id.get(bid)
+        if not b:
+            name = f'{bid}棟' if re.match(r'^[A-Z]$', str(bid)) else (bid if bid != '主' else '主棟')
+            b = {'id': bid, 'name': name, 'columns': [], 'floors': [], 'ownerUnits': []}
+            buildings.append(b)
+            by_id[bid] = b
+            changed = True
+        col_ids = {c['id'] for c in (b.get('columns') or [])}
+        if cell['col'] not in col_ids:
+            b['columns'].append({'id': cell['col'], 'ping': _num(cell.get('areaPing'))})
+            b['columns'].sort(key=lambda c: _natural_col_key(c['id']))
+            changed = True
+        floors = list(b.get('floors') or [])
+        if cell['floor'] not in floors:
+            floors.append(int(cell['floor']))
+            lo, hi = min(floors), max(floors)
+            b['floors'] = list(range(hi, lo - 1, -1))
+            changed = True
+    buildings.sort(key=lambda b: (0 if re.match(r'^[A-Z]$', str(b['id'])) else 1, str(b['id'])))
+    return buildings, changed
+
+
+def _remap_main_building(cells: list[dict], default_building: Optional[str]) -> None:
+    if default_building:
+        only = default_building
+    else:
+        letters = {c['buildingId'] for c in cells if re.match(r'^[A-Z]$', str(c.get('buildingId') or ''))}
+        if len(letters) != 1:
+            return
+        only = next(iter(letters))
+    for cell in cells:
+        if cell.get('buildingId') != '主':
+            continue
+        cell['buildingId'] = only
+        if str(cell.get('col') or '').isdigit():
+            cell['col'] = _col_id(only, cell['col'])
+        cell['key'] = _cell_key(cell['buildingId'], cell['col'], cell['floor'])
+
+
 def build_sellthrough(conn: sqlite3.Connection, site_id: str, as_of: Optional[str] = None) -> dict:
     as_of_ymd = _to_ymd(as_of)
     rows = conn.execute(
@@ -444,26 +596,76 @@ def build_sellthrough(conn: sqlite3.Connection, site_id: str, as_of: Optional[st
     for b in saved_map.get('buildings') or []:
         owner_keys.update(b.get('ownerUnits') or [])
 
+    default_building = None
+    saved_buildings = saved_map.get('buildings') or []
+    if len(saved_buildings) == 1:
+        default_building = saved_buildings[0].get('id')
+
     parsed_cells = []
-    unparsed = []
+    missing = []
     ping_by_col = {}
+    ledger_keys = set()
+    after_as_of_count = 0
     for deal in deals:
+        rtype = str(deal.get('recordType') or '')
         event_date = _deal_event_date(deal)
-        if as_of_ymd and event_date and event_date > as_of_ymd:
+        raw_unit = str(deal.get('unitNo') or '').strip()
+        if rtype == 'refund':
             continue
-        units = parse_unit_nos(deal.get('unitNo'))
+        if _looks_parking(deal):
+            continue
+        if as_of_ymd and event_date and event_date > as_of_ymd:
+            after_as_of_count += 1
+            missing.append({
+                'reason': 'afterAsOf',
+                'unitNo': raw_unit,
+                'customerName': deal.get('customerName') or '',
+                'dealId': deal.get('id'),
+                'date': event_date,
+                'hint': f'成交日 {event_date} 晚於本週日 {as_of_ymd}，未列入此週去化圖',
+            })
+            continue
+        units = parse_unit_nos(raw_unit, default_building)
         if not units:
-            raw = str(deal.get('unitNo') or '').strip()
-            if raw:
-                unparsed.append(raw)
+            one = _apply_default_building(parse_one_unit(raw_unit), default_building)
+            if one and one.get('floor') in (None, 0):
+                missing.append({
+                    'reason': 'noFloor',
+                    'unitNo': raw_unit,
+                    'customerName': deal.get('customerName') or '',
+                    'dealId': deal.get('id'),
+                    'date': event_date or '',
+                    'hint': '有戶別但缺樓層，請改成 A1-10F，或點格子手動補登',
+                })
+                ledger_keys.add(f'raw:{raw_unit or deal.get("id")}')
+            elif raw_unit:
+                missing.append({
+                    'reason': 'unparsed',
+                    'unitNo': raw_unit,
+                    'customerName': deal.get('customerName') or '',
+                    'dealId': deal.get('id'),
+                    'date': event_date or '',
+                    'hint': '戶號無法對應樓層，請到銷售總表改成 A1-10F，或點空格手動補登',
+                })
+                ledger_keys.add(f'raw:{raw_unit}')
+            elif rtype in ('deal', 'unreported', 'signing', 'purchase'):
+                missing.append({
+                    'reason': 'unparsed',
+                    'unitNo': '',
+                    'customerName': deal.get('customerName') or '',
+                    'dealId': deal.get('id'),
+                    'date': event_date or '',
+                    'hint': '此筆沒有戶別，請到銷售總表補戶號',
+                })
+                ledger_keys.add(f'id:{deal.get("id")}')
             continue
         ping = _num(deal.get('areaPing'))
         status = _deal_status(deal)
         date_s = event_date or ''
         for u in units:
             key = _cell_key(u['buildingId'], u['col'], u['floor'])
-            if key in owner_keys:
-                status = STATUS_OWNER
+            ledger_keys.add(key)
+            cell_status = STATUS_OWNER if key in owner_keys else status
             if ping:
                 ping_by_col.setdefault((u['buildingId'], u['col']), ping)
             parsed_cells.append({
@@ -471,18 +673,23 @@ def build_sellthrough(conn: sqlite3.Connection, site_id: str, as_of: Optional[st
                 'buildingId': u['buildingId'],
                 'col': u['col'],
                 'floor': u['floor'],
-                'status': status,
+                'status': cell_status,
                 'date': date_s,
                 'rocYm': roc_ym(date_s),
                 'unitPriceWan': _unit_price_wan(deal, ping),
                 'totalWan': round(_total_wan(deal), 2),
                 'houseWan': round(_house_total_wan(deal), 2),
+                'contractHouseWan': round(_contract_house_wan(deal), 2),
                 'areaPing': ping,
                 'unitNo': deal.get('unitNo') or '',
                 'customerName': deal.get('customerName') or '',
                 'recordType': deal.get('recordType') or '',
                 'productType': deal.get('productType') or '',
+                'source': 'sales',
+                'dealId': deal.get('id'),
             })
+
+    _remap_main_building(parsed_cells, default_building)
 
     merged = {}
     for cell in parsed_cells:
@@ -514,10 +721,20 @@ def build_sellthrough(conn: sqlite3.Connection, site_id: str, as_of: Optional[st
                 'customerName': '業主戶',
                 'recordType': '',
                 'productType': '',
+                'source': 'owner',
             }
+
+    for mc in saved_map.get('manualCells') or []:
+        if mc.get('status') == STATUS_AVAILABLE:
+            continue
+        current = merged.get(mc['key'])
+        if not current or current.get('status') == STATUS_AVAILABLE or mc.get('override'):
+            merged[mc['key']] = dict(mc)
+            ledger_keys.add(mc['key'])
 
     buildings = saved_map.get('buildings') or []
     inferred = False
+    expanded = False
     if not buildings:
         buildings = infer_buildings_from_cells(list(merged.values()), ping_by_col)
         inferred = True
@@ -526,6 +743,7 @@ def build_sellthrough(conn: sqlite3.Connection, site_id: str, as_of: Optional[st
             for col in b.get('columns') or []:
                 if not col.get('ping'):
                     col['ping'] = ping_by_col.get((b['id'], col['id']), 0) or 0
+        buildings, expanded = _expand_buildings_with_cells(buildings, list(merged.values()))
 
     ping_lookup = {}
     for b in buildings:
@@ -536,8 +754,9 @@ def build_sellthrough(conn: sqlite3.Connection, site_id: str, as_of: Optional[st
         ping = _num(cell.get('areaPing')) or ping_lookup.get((cell['buildingId'], cell['col']), 0)
         if ping and not cell.get('areaPing'):
             cell['areaPing'] = ping
-        if ping and not cell.get('unitPriceWan') and cell.get('houseWan'):
-            cell['unitPriceWan'] = round(_num(cell.get('houseWan')) / ping, 2)
+        contract_house = _num(cell.get('contractHouseWan'))
+        if ping and not cell.get('unitPriceWan') and contract_house:
+            cell['unitPriceWan'] = round(contract_house / ping, 2)
 
     stats = {
         'total': 0,
@@ -565,15 +784,38 @@ def build_sellthrough(conn: sqlite3.Connection, site_id: str, as_of: Optional[st
                     stats['available'] += 1
     denom = max(stats['total'] - stats['owner'], 0)
     stats['rate'] = round(stats['sold'] / denom * 100, 2) if denom else 0
+    stats['ledgerUnits'] = len(ledger_keys)
+    stats['afterAsOf'] = after_as_of_count
+    stats['expanded'] = expanded
 
-    unique_unparsed = list(dict.fromkeys(unparsed))[:40]
+    layout_keys = set()
+    for b in buildings:
+        for col in b.get('columns') or []:
+            for floor in b.get('floors') or []:
+                layout_keys.add(_cell_key(b['id'], col['id'], floor))
+    for cell in merged.values():
+        if cell.get('status') not in (STATUS_RESERVED, STATUS_SIGNED, STATUS_OWNER):
+            continue
+        if cell.get('key') not in layout_keys:
+            missing.append({
+                'reason': 'outOfLayout',
+                'unitNo': cell.get('unitNo') or f"{cell.get('col')}-{cell.get('floor')}F",
+                'customerName': cell.get('customerName') or '',
+                'dealId': cell.get('dealId'),
+                'date': cell.get('date') or '',
+                'hint': '此戶不在目前格局範圍，已嘗試自動補欄；若仍不見請展開格局加入該戶別／樓層',
+            })
+
+    unparsed = [m['unitNo'] for m in missing if m.get('reason') == 'unparsed' and m.get('unitNo')]
     return {
         'siteId': site_id,
         'asOf': as_of_ymd or '',
         'inferred': inferred,
+        'expanded': expanded,
         'buildings': buildings,
         'cells': merged,
         'stats': stats,
-        'unparsed': unique_unparsed,
+        'unparsed': list(dict.fromkeys(unparsed))[:40],
+        'missing': missing,
         'unitMap': saved_map,
     }

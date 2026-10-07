@@ -1860,3 +1860,69 @@ tr.visitor-row-highlight td {
 @media (max-width: 800px) {
   .st-layout-item { grid-template-columns: 1fr; }
 }
+.st-all-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.88rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+.st-empty {
+  height: 4.1rem;
+  border-radius: 8px;
+  border: 1px dashed transparent;
+  cursor: pointer;
+}
+.st-empty:hover,
+.st-card:hover {
+  outline: 2px solid #8fb3d4;
+}
+.st-card {
+  cursor: pointer;
+}
+.st-missing {
+  margin-top: 0.85rem;
+}
+.st-missing-box {
+  border: 1px solid #f0d9a6;
+  background: #fffaf0;
+  border-radius: 8px;
+  padding: 0.7rem 0.85rem;
+}
+.st-missing-box h3 {
+  margin: 0 0 0.4rem;
+  font-size: 0.95rem;
+  color: #9a6700;
+}
+.st-missing-box ul {
+  margin: 0;
+  padding-left: 1.15rem;
+  font-size: 0.88rem;
+}
+.st-missing-box li {
+  margin: 0.2rem 0;
+}
+.st-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 80;
+  padding: 1rem;
+}
+.st-modal.hidden { display: none; }
+.st-modal-card {
+  width: min(520px, 100%);
+  background: #fff;
+  border-radius: 12px;
+  padding: 1.1rem 1.2rem 1.2rem;
+  box-shadow: 0 12px 40px rgba(15, 23, 42, 0.18);
+}
+.st-modal-card h3 {
+  margin: 0 0 0.35rem;
+  color: var(--primary);
+}

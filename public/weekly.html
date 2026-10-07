@@ -182,7 +182,7 @@
 
       <section class="card" id="sellthroughCard">
         <h2>去化分析圖</h2>
-        <p class="hint">依銷售總表戶別自動對應樓層（如 A1-10F）。可切換單價／總價／狀況；統計截至本週日。空格＝尚未成交。若缺戶或缺樓，請展開「戶別格局」補齊（每個案子各自設定）。</p>
+        <p class="hint">依銷售總表戶別自動對應樓層（如 A1-10F）。可切換單價／總價／狀況。單價＝合約房價÷坪數（實登）。空格＝尚未成交，<strong>可點空格手動補登</strong>。對不上的戶會列在圖下方，也可到銷售總表改戶號。</p>
         <div class="st-toolbar">
           <div class="st-views" id="stViewBtns">
             <button type="button" class="tab-btn active" data-st-view="unit">單價</button>
@@ -190,6 +190,7 @@
             <button type="button" class="tab-btn" data-st-view="status">狀況</button>
           </div>
           <div class="st-buildings" id="stBuildingBtns"></div>
+          <label class="st-all-toggle"><input type="checkbox" id="stIncludeAll" checked> 含本週日之後成交</label>
           <div class="st-legend">
             <span><i class="st-swatch st-swatch-reserved"></i>訂足</span>
             <span><i class="st-swatch st-swatch-signed"></i>簽約</span>
@@ -198,7 +199,41 @@
         </div>
         <div id="stStats" class="st-stats"></div>
         <div id="stGridWrap" class="st-scroll"></div>
+        <div id="stMissing" class="st-missing"></div>
         <p id="stUnparsed" class="hint"></p>
+        <div id="stCellModal" class="st-modal hidden">
+          <div class="st-modal-card">
+            <h3 id="stCellTitle">補登戶別</h3>
+            <p id="stCellSource" class="hint"></p>
+            <div class="search-grid">
+              <div class="form-group">
+                <label for="stCellStatus">狀況</label>
+                <select id="stCellStatus">
+                  <option value="reserved">訂足</option>
+                  <option value="signed">簽約</option>
+                  <option value="owner">業主戶</option>
+                  <option value="available">未售（清除）</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="stCellDate">成交／簽約日</label>
+                <input type="date" id="stCellDate">
+              </div>
+              <div class="form-group">
+                <label for="stCellUnitPrice">單價（萬/坪）</label>
+                <input type="number" step="0.01" min="0" id="stCellUnitPrice">
+              </div>
+              <div class="form-group">
+                <label for="stCellTotal">總價（萬）</label>
+                <input type="number" step="0.01" min="0" id="stCellTotal">
+              </div>
+            </div>
+            <div class="form-actions" style="margin-top:0.85rem;">
+              <button type="button" id="stCellSaveBtn" class="btn btn-primary">儲存此格</button>
+              <button type="button" id="stCellCancelBtn" class="btn btn-outline">取消</button>
+            </div>
+          </div>
+        </div>
         <details class="st-layout" id="stLayoutPanel">
           <summary>戶別格局設定（補齊未售戶／業主戶）</summary>
           <p class="hint">戶別用逗號分隔，例如 <code>A1, A2, A3, A5</code>。坪數可寫 <code>A1:46.6, A2:23.61</code>。業主戶寫 <code>A1-29F, A15-17F</code>。</p>

@@ -1523,6 +1523,7 @@ function applySuggestedFromSales() {
 let sellthroughData = null;
 let stView = 'unit';
 let stBuildingId = '';
+let stEditCell = null;
 
 function stFmt(n, digits = 2) {
   const v = Number(n);
@@ -1543,12 +1544,11 @@ function renderSellthrough(data, opts = {}) {
   const bbtns = document.getElementById('stBuildingBtns');
   if (!wrap) return;
   if (!data || !(data.buildings || []).length) {
-    wrap.innerHTML = '<p class="hint" style="padding:0.8rem;">銷售總表尚無可用戶別（請用 A1-10F 這類格式登錄），或先設定戶別格局。</p>';
+    wrap.innerHTML = '<p class="hint" style="padding:0.8rem;">銷售總表尚無可用戶別（請用 A1-10F 這類格式登錄），或先設定戶別格局。也可點下方「戶別格局」先建格子後再點空格補登。</p>';
     if (statsEl) statsEl.innerHTML = '';
     if (bbtns) bbtns.innerHTML = '';
-    if (unparsedEl) unparsedEl.textContent = (data?.unparsed || []).length
-      ? `無法對應樓層的戶別：${data.unparsed.join('、')}`
-      : '';
+    renderSellthroughMissing(data);
+    if (unparsedEl) unparsedEl.textContent = '';
     if (refreshLayout) renderSellthroughLayout(data);
     return;
   }
@@ -1571,15 +1571,14 @@ function renderSellthrough(data, opts = {}) {
       <span>業主戶 <b>${s.owner || 0}</b></span>
       <span>未售 <b>${s.available || 0}</b></span>
       <span>去化率 <b>${s.rate || 0}%</b></span>
+      ${s.ledgerUnits ? `<span>銷售總表戶數 <b>${s.ledgerUnits}</b></span>` : ''}
       ${data.inferred ? '<span class="hint">格局由成交戶號推估</span>' : ''}
-      ${data.asOf ? `<span class="hint">截至 ${escapeHtml(data.asOf)}</span>` : ''}
+      ${data.expanded ? '<span class="hint">已自動補上格局外成交戶</span>' : ''}
+      ${data.asOf ? `<span class="hint">截至 ${escapeHtml(data.asOf)}</span>` : '<span class="hint">顯示全部成交</span>'}
     `;
   }
-  if (unparsedEl) {
-    unparsedEl.textContent = (data.unparsed || []).length
-      ? `無法對應樓層的戶別：${data.unparsed.join('、')}`
-      : '';
-  }
+  renderSellthroughMissing(data);
+  if (unparsedEl) unparsedEl.textContent = '';
   const building = buildings.find((b) => b.id === stBuildingId) || buildings[0];
   const cells = data.cells || {};
   const rocNow = currentRocYear();
@@ -1591,22 +1590,24 @@ function renderSellthrough(data, opts = {}) {
   const body = (building.floors || []).map((floor) => {
     const tds = (building.columns || []).map((col) => {
       const cell = cells[`${building.id}|${col.id}|${floor}`];
+      const hit = `data-st-col="${escapeHtml(col.id)}" data-st-floor="${floor}"`;
       if (!cell || cell.status === 'available') {
-        return '<td class="st-cell"><div class="st-empty"></div></td>';
+        return `<td class="st-cell"><div class="st-empty" ${hit} title="點此手動補登 ${escapeHtml(col.id)}-${floor}F"></div></td>`;
       }
       if (stView === 'status') {
         const label = cell.status === 'signed' ? '簽約' : cell.status === 'owner' ? '業主戶' : '訂足';
-        return `<td class="st-cell"><div class="st-card st-status st-status-${escapeHtml(cell.status)}" title="${escapeHtml(cell.unitNo || '')} ${escapeHtml(cell.customerName || '')} ${label}"><span class="st-dot"></span></div></td>`;
+        return `<td class="st-cell"><div class="st-card st-status st-status-${escapeHtml(cell.status)}" ${hit} title="${escapeHtml(cell.unitNo || '')} ${escapeHtml(cell.customerName || '')} ${label}"><span class="st-dot"></span></div></td>`;
       }
       const val = stView === 'total' ? cell.totalWan || cell.houseWan : cell.unitPriceWan;
       const shown = stFmt(val, 2);
       if (!shown && cell.status === 'owner') {
-        return `<td class="st-cell"><div class="st-card st-status st-status-owner" title="業主戶"><span class="st-dot"></span></div></td>`;
+        return `<td class="st-cell"><div class="st-card st-status st-status-owner" ${hit} title="業主戶"><span class="st-dot"></span></div></td>`;
       }
       const date = cell.rocYm || '';
       const y = Number(String(date).split('/')[0] || 0);
       const oldCls = y && y < rocNow ? ' is-old' : '';
-      return `<td class="st-cell"><div class="st-card" title="${escapeHtml(cell.unitNo || '')} ${escapeHtml(cell.customerName || '')}">
+      const src = cell.source === 'manual' ? '手動補登' : '';
+      return `<td class="st-cell"><div class="st-card" ${hit} title="${escapeHtml(cell.unitNo || '')} ${escapeHtml(cell.customerName || '')} ${src}">
         ${date ? `<span class="st-date${oldCls}">${escapeHtml(date)}</span>` : ''}
         <strong>${escapeHtml(shown || '—')}</strong>
         <em>${unitLabel}</em>
@@ -1658,6 +1659,113 @@ function renderSellthroughLayout(data) {
   el.innerHTML = rows.map((b, i) => layoutBuildingHtml(b, i)).join('');
 }
 
+function missingReasonLabel(reason) {
+  return {
+    unparsed: '戶號無法對應',
+    noFloor: '缺樓層',
+    afterAsOf: '晚於本週日',
+    outOfLayout: '超出格局',
+  }[reason] || reason;
+}
+
+function renderSellthroughMissing(data) {
+  const el = document.getElementById('stMissing');
+  if (!el) return;
+  const rows = (data && data.missing) || [];
+  const sold = Number(data?.stats?.sold) || 0;
+  const ledger = Number(data?.stats?.ledgerUnits) || 0;
+  if (!rows.length && (!ledger || ledger === sold)) {
+    el.innerHTML = '';
+    return;
+  }
+  const items = rows.map((m) => {
+    const who = [m.unitNo || '（無戶號）', m.customerName].filter(Boolean).join('／');
+    return `<li><strong>${escapeHtml(missingReasonLabel(m.reason))}</strong>：${escapeHtml(who)}${m.hint ? ` — ${escapeHtml(m.hint)}` : ''}</li>`;
+  }).join('');
+  const gap = ledger && ledger !== sold
+    ? `<p>銷售總表可對應／登錄 <b>${ledger}</b> 戶，圖上目前 <b>${sold}</b> 戶。差額請看下列原因，或直接點格子補登。</p>`
+    : '';
+  const salesHref = salesPageUrlForCurrentSite();
+  el.innerHTML = `
+    <div class="st-missing-box">
+      <h3>未完全上圖</h3>
+      ${gap}
+      ${items ? `<ul>${items}</ul>` : ''}
+      <p class="hint" style="margin:0.45rem 0 0;">可到 <a href="${escapeHtml(salesHref)}">銷售總表</a> 把戶別改成 A1-10F，或點去化圖空格手動補登。</p>
+    </div>`;
+}
+
+function closeSellthroughCellEditor() {
+  stEditCell = null;
+  document.getElementById('stCellModal')?.classList.add('hidden');
+}
+
+function openSellthroughCellEditor(col, floor) {
+  const building = (sellthroughData?.buildings || []).find((b) => b.id === stBuildingId)
+    || (sellthroughData?.buildings || [])[0];
+  if (!building) {
+    showToast('請先設定或載入戶別格局', 'error');
+    return;
+  }
+  const cell = (sellthroughData?.cells || {})[`${building.id}|${col}|${floor}`] || {};
+  stEditCell = { buildingId: building.id, col, floor };
+  document.getElementById('stCellTitle').textContent = `${col}-${floor}F`;
+  const src = document.getElementById('stCellSource');
+  if (cell.source === 'sales') {
+    src.textContent = `目前來自銷售總表：${cell.unitNo || ''} ${cell.customerName || ''}（儲存會覆蓋為此格手動資料）`;
+  } else if (cell.source === 'manual') {
+    src.textContent = '目前為手動補登，可修改或改成未售以清除。';
+  } else {
+    src.textContent = '空格補登後只影響去化圖，不會改銷售總表。建議能改戶號時仍以銷售總表為準。';
+  }
+  document.getElementById('stCellStatus').value = cell.status && cell.status !== 'available' ? cell.status : 'signed';
+  document.getElementById('stCellDate').value = cell.date || '';
+  document.getElementById('stCellUnitPrice').value = cell.unitPriceWan || '';
+  document.getElementById('stCellTotal').value = cell.totalWan || cell.houseWan || '';
+  document.getElementById('stCellModal')?.classList.remove('hidden');
+}
+
+async function saveSellthroughCell() {
+  if (!stEditCell) return;
+  const siteId = document.getElementById('weekSite')?.value || current?.siteId;
+  if (!siteId) {
+    showToast('請先選擇案場', 'error');
+    return;
+  }
+  const status = document.getElementById('stCellStatus').value;
+  const body = {
+    siteId,
+    asOf: document.getElementById('stIncludeAll')?.checked ? '' : (current?.weekEnd || ''),
+    upsertCell: {
+      buildingId: stEditCell.buildingId,
+      col: stEditCell.col,
+      floor: stEditCell.floor,
+      status,
+      date: document.getElementById('stCellDate').value,
+      unitPriceWan: document.getElementById('stCellUnitPrice').value,
+      totalWan: document.getElementById('stCellTotal').value,
+      override: true,
+    },
+  };
+  try {
+    const res = await fetch('/api/sales/unit-map', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const json = await res.json();
+    if (!res.ok) {
+      showToast(json.error || '補登失敗', 'error');
+      return;
+    }
+    closeSellthroughCellEditor();
+    renderSellthrough(json);
+    showToast(status === 'available' ? '已清除此格手動資料' : '已手動補登此戶');
+  } catch {
+    showToast('補登失敗', 'error');
+  }
+}
+
 function collectUnitMapFromForm() {
   const items = Array.from(document.querySelectorAll('#stLayoutEditors [data-st-layout]'));
   const buildings = items.map((box) => {
@@ -1685,7 +1793,8 @@ function collectUnitMapFromForm() {
 
 async function loadSellthrough() {
   const siteId = document.getElementById('weekSite')?.value || current?.siteId;
-  const asOf = current?.weekEnd || '';
+  const includeAll = document.getElementById('stIncludeAll')?.checked !== false;
+  const asOf = includeAll ? '' : (current?.weekEnd || '');
   const wrap = document.getElementById('stGridWrap');
   if (!siteId || !wrap) return;
   wrap.innerHTML = '<p class="hint" style="padding:0.8rem;">載入去化分析…</p>';
@@ -1710,10 +1819,11 @@ async function saveSellthroughLayout(clear = false) {
     showToast('請先選擇案場', 'error');
     return;
   }
-  const body = clear ? { siteId, buildings: [], asOf: current?.weekEnd || '' } : {
+  const asOf = document.getElementById('stIncludeAll')?.checked ? '' : (current?.weekEnd || '');
+  const body = clear ? { siteId, buildings: [], asOf } : {
     siteId,
     ...collectUnitMapFromForm(),
-    asOf: current?.weekEnd || '',
+    asOf,
   };
   try {
     const res = await fetch('/api/sales/unit-map', {
@@ -2006,6 +2116,19 @@ async function init() {
   });
   document.getElementById('stSaveLayoutBtn')?.addEventListener('click', () => saveSellthroughLayout(false));
   document.getElementById('stClearLayoutBtn')?.addEventListener('click', () => saveSellthroughLayout(true));
+  document.getElementById('stIncludeAll')?.addEventListener('change', () => {
+    if (current) loadSellthrough();
+  });
+  document.getElementById('stGridWrap')?.addEventListener('click', (e) => {
+    const hit = e.target.closest('[data-st-col]');
+    if (!hit) return;
+    openSellthroughCellEditor(hit.dataset.stCol, Number(hit.dataset.stFloor));
+  });
+  document.getElementById('stCellSaveBtn')?.addEventListener('click', saveSellthroughCell);
+  document.getElementById('stCellCancelBtn')?.addEventListener('click', closeSellthroughCellEditor);
+  document.getElementById('stCellModal')?.addEventListener('click', (e) => {
+    if (e.target.id === 'stCellModal') closeSellthroughCellEditor();
+  });
   document.getElementById('openSalesFromWeekly')?.addEventListener('click', (e) => {
     saveWeeklyDraft();
     const href = salesPageUrlForCurrentSite();
