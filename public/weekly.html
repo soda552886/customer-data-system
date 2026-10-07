@@ -17,7 +17,7 @@
   <main class="container">
     <section class="card">
       <h2>選擇週次</h2>
-      <p class="hint">系統會自動帶出來人分析（區域／媒體／職業／年齡）、成交比、回訪／有望客，以及依銷售總表產生的去化分析圖（單價／總價／狀況）。去化／請佣／成交手填後儲存。各工地可直接開本頁向長官報告。</p>
+      <p class="hint">系統會自動帶出來人分析（區域／媒體／職業／年齡）、成交比、回訪／有望客，以及依銷售總表產生的去化分析圖（單價／總價，底色即狀況）。去化／請佣／成交手填後儲存。各工地可直接開本頁向長官報告。</p>
       <div class="search-grid">
         <div class="form-group">
           <label for="weekSite">案場 <span class="required">*</span></label>
@@ -182,12 +182,11 @@
 
       <section class="card" id="sellthroughCard">
         <h2>去化分析圖</h2>
-        <p class="hint">依銷售總表戶別自動對應樓層（如 A1-10F）。可切換單價／總價／狀況。單價＝合約房價÷坪數（實登）。空格＝尚未成交，<strong>可點空格手動補登</strong>。對不上的戶會列在圖下方，也可到銷售總表改戶號。</p>
+        <p class="hint">依銷售總表戶別自動對應樓層（如 A1-10F）。可切換單價／總價；底色即狀況（訂足黃、簽約紅、業主戶綠）。單價＝合約房價÷坪數（實登）。空格＝尚未成交，<strong>可點空格手動補登</strong>。對不上的戶會列在圖下方，也可到銷售總表改戶號。</p>
         <div class="st-toolbar">
           <div class="st-views" id="stViewBtns">
             <button type="button" class="tab-btn active" data-st-view="unit">單價</button>
             <button type="button" class="tab-btn" data-st-view="total">總價</button>
-            <button type="button" class="tab-btn" data-st-view="status">狀況</button>
           </div>
           <div class="st-buildings" id="stBuildingBtns"></div>
           <label class="st-all-toggle"><input type="checkbox" id="stIncludeAll" checked> 含本週日之後成交</label>

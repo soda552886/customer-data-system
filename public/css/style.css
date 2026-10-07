@@ -1687,16 +1687,16 @@ tr.visitor-row-highlight td {
   border: 1px solid transparent;
 }
 .st-swatch-reserved {
-  background: #f6c77a;
-  border-color: #d4a017;
+  background: #ffe566;
+  border-color: #e0b800;
 }
 .st-swatch-signed {
-  background: #f3b4b4;
+  background: #f7a3a3;
   border-color: #d45c5c;
 }
 .st-swatch-owner {
-  background: #bfe3c4;
-  border-color: #5aa86a;
+  background: #9fe0ab;
+  border-color: #4caf62;
 }
 .st-stats {
   display: flex;
@@ -1769,8 +1769,8 @@ tr.visitor-row-highlight td {
   margin: 0 auto;
   border-radius: 8px;
   border: 1px solid #e0c36a;
-  background: #fff4cc;
-  box-shadow: 0 1px 2px rgba(201, 162, 39, 0.18);
+  background: #ffe566;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1786,8 +1786,8 @@ tr.visitor-row-highlight td {
   line-height: 1;
   padding: 0.12rem 0.28rem;
   border-radius: 4px;
-  background: #e8c15a;
-  color: #5c4308;
+  background: rgba(255, 255, 255, 0.72);
+  color: inherit;
   font-weight: 700;
 }
 .st-card .st-date.is-old {
@@ -1797,40 +1797,32 @@ tr.visitor-row-highlight td {
 .st-card strong {
   font-size: 1.02rem;
   font-weight: 800;
-  color: #1e293b;
+  color: inherit;
   font-variant-numeric: tabular-nums;
   line-height: 1.15;
 }
 .st-card em {
   font-style: normal;
   font-size: 0.68rem;
-  color: #7a5b12;
+  color: inherit;
+  opacity: 0.78;
   margin-top: 0.05rem;
 }
-.st-card.st-status {
-  border-width: 2px;
+.st-card.st-tone-reserved {
+  background: #ffe566;
+  border-color: #e0b800;
+  color: #5c4308;
 }
-.st-card.st-status-reserved {
-  background: #fde8c8;
-  border-color: #e0a036;
-}
-.st-card.st-status-signed {
-  background: #f8d0d0;
+.st-card.st-tone-signed {
+  background: #f7a3a3;
   border-color: #d45c5c;
+  color: #7f1d1d;
 }
-.st-card.st-status-owner {
-  background: #d8f0d0;
-  border-color: #5aa86a;
+.st-card.st-tone-owner {
+  background: #9fe0ab;
+  border-color: #4caf62;
+  color: #14532d;
 }
-.st-dot {
-  width: 0.85rem;
-  height: 0.85rem;
-  border-radius: 50%;
-  display: inline-block;
-}
-.st-status-reserved .st-dot { background: #e39b1a; }
-.st-status-signed .st-dot { background: #d44545; }
-.st-status-owner .st-dot { background: #3d9a55; }
 .st-empty {
   height: 4.1rem;
 }

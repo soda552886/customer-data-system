@@ -1579,6 +1579,7 @@ function renderSellthrough(data, opts = {}) {
   }
   renderSellthroughMissing(data);
   if (unparsedEl) unparsedEl.textContent = '';
+  if (stView === 'status') stView = 'unit';
   const building = buildings.find((b) => b.id === stBuildingId) || buildings[0];
   const cells = data.cells || {};
   const rocNow = currentRocYear();
@@ -1594,22 +1595,17 @@ function renderSellthrough(data, opts = {}) {
       if (!cell || cell.status === 'available') {
         return `<td class="st-cell"><div class="st-empty" ${hit} title="點此手動補登 ${escapeHtml(col.id)}-${floor}F"></div></td>`;
       }
-      if (stView === 'status') {
-        const label = cell.status === 'signed' ? '簽約' : cell.status === 'owner' ? '業主戶' : '訂足';
-        return `<td class="st-cell"><div class="st-card st-status st-status-${escapeHtml(cell.status)}" ${hit} title="${escapeHtml(cell.unitNo || '')} ${escapeHtml(cell.customerName || '')} ${label}"><span class="st-dot"></span></div></td>`;
-      }
+      const tone = cell.status === 'signed' ? 'signed' : cell.status === 'owner' ? 'owner' : 'reserved';
+      const label = tone === 'signed' ? '簽約' : tone === 'owner' ? '業主戶' : '訂足';
       const val = stView === 'total' ? cell.totalWan || cell.houseWan : cell.unitPriceWan;
       const shown = stFmt(val, 2);
-      if (!shown && cell.status === 'owner') {
-        return `<td class="st-cell"><div class="st-card st-status st-status-owner" ${hit} title="業主戶"><span class="st-dot"></span></div></td>`;
-      }
       const date = cell.rocYm || '';
       const y = Number(String(date).split('/')[0] || 0);
       const oldCls = y && y < rocNow ? ' is-old' : '';
       const src = cell.source === 'manual' ? '手動補登' : '';
-      return `<td class="st-cell"><div class="st-card" ${hit} title="${escapeHtml(cell.unitNo || '')} ${escapeHtml(cell.customerName || '')} ${src}">
+      return `<td class="st-cell"><div class="st-card st-tone-${tone}" ${hit} title="${escapeHtml(cell.unitNo || '')} ${escapeHtml(cell.customerName || '')} ${label} ${src}">
         ${date ? `<span class="st-date${oldCls}">${escapeHtml(date)}</span>` : ''}
-        <strong>${escapeHtml(shown || '—')}</strong>
+        <strong>${escapeHtml(shown || (tone === 'owner' ? '業主' : '—'))}</strong>
         <em>${unitLabel}</em>
       </div></td>`;
     }).join('');
@@ -2094,7 +2090,7 @@ async function init() {
   document.getElementById('stViewBtns')?.addEventListener('click', (e) => {
     const btn = e.target.closest('[data-st-view]');
     if (!btn) return;
-    stView = btn.dataset.stView;
+    stView = btn.dataset.stView === 'total' ? 'total' : 'unit';
     document.querySelectorAll('#stViewBtns [data-st-view]').forEach((el) => {
       el.classList.toggle('active', el.dataset.stView === stView);
     });
