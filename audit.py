@@ -21,6 +21,7 @@ ACTION_LABELS = {
     'site_create': '新增案場',
     'site_delete': '刪除案場',
     'unit_map_update': '更新去化格局',
+    'weekly_photo_upload': '上傳週報備註照片',
 }
 
 

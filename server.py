@@ -30,6 +30,7 @@ from weekly_reports import (
     apply_previous_week_carry, previous_saved_week_data,
     previous_saved_inventory, previous_saved_review_fields, roc_year,
     upsert_weekly_report, week_bounds, safe_week_number,
+    ensure_weekly_upload_dir, WEEKLY_UPLOAD_DIR,
 )
 from sales_ledger import (
     RECORD_TYPES as SALES_RECORD_TYPES, aggregate_for_weekly, build_commission_overview_excel,
@@ -126,6 +127,7 @@ def init_db():
     _ensure_sites_week1_start(conn)
     _ensure_sites_sales_settings(conn)
     ensure_unit_map_column(conn)
+    ensure_weekly_upload_dir()
     conn.commit()
 
     count = conn.execute('SELECT COUNT(*) FROM sites').fetchone()[0]
@@ -1528,6 +1530,94 @@ def api_delete_budget_photo():
     safe = Path(rel).name
     target = BUDGET_UPLOAD_DIR / safe
     if target.exists() and target.is_file() and target.parent.resolve() == BUDGET_UPLOAD_DIR.resolve():
+        target.unlink()
+    conn.close()
+    return jsonify({'success': True})
+
+
+@app.route('/uploads/weekly/<path:filename>')
+def serve_weekly_upload(filename):
+    conn, user, err = auth_guard('manage_weekly_reports')
+    if err:
+        return err
+    conn.close()
+    safe = Path(filename)
+    if safe.is_absolute() or '..' in safe.parts:
+        return jsonify({'error': '無效檔名'}), 400
+    return send_from_directory(WEEKLY_UPLOAD_DIR, str(safe), as_attachment=False)
+
+
+@app.route('/api/weekly/photo', methods=['POST'])
+def api_upload_weekly_photo():
+    conn, user, err = auth_guard('manage_weekly_reports')
+    if err:
+        return err
+    site_id = (request.form.get('siteId') or '').strip()
+    if not site_id:
+        conn.close()
+        return jsonify({'error': '請提供案場'}), 400
+    denied = ensure_site_access(user, site_id)
+    if denied:
+        conn.close()
+        return denied
+    site = get_site_by_id(site_id)
+    if not site:
+        conn.close()
+        return jsonify({'error': '找不到此案場'}), 404
+    file = request.files.get('file')
+    if not file or not file.filename:
+        conn.close()
+        return jsonify({'error': '請選擇照片'}), 400
+    ext = Path(file.filename).suffix.lower()
+    if ext not in BUDGET_PHOTO_EXTS:
+        conn.close()
+        return jsonify({'error': '僅支援 jpg／png／gif／webp'}), 400
+    raw = file.read()
+    if len(raw) > BUDGET_PHOTO_MAX_BYTES:
+        conn.close()
+        return jsonify({'error': '單張照片請小於 8MB'}), 400
+    ensure_weekly_upload_dir()
+    photo_id = uuid.uuid4().hex
+    stored = f'{photo_id}{ext}'
+    (WEEKLY_UPLOAD_DIR / stored).write_bytes(raw)
+    caption = (request.form.get('caption') or '').strip()
+    photo = {
+        'id': photo_id,
+        'filename': secure_filename(file.filename) or stored,
+        'path': stored,
+        'url': f'/uploads/weekly/{stored}',
+        'caption': caption,
+    }
+    log_operation(
+        conn, user, 'weekly_photo_upload',
+        f'上傳週報備註照片：{site["name"]}',
+        entity_type='weekly_report', entity_id=site_id,
+        site_id=site_id, site_name=site['name'],
+        detail={'file': stored},
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True, 'photo': photo})
+
+
+@app.route('/api/weekly/photo', methods=['DELETE'])
+def api_delete_weekly_photo():
+    conn, user, err = auth_guard('manage_weekly_reports')
+    if err:
+        return err
+    body = request.get_json() or {}
+    site_id = (body.get('siteId') or '').strip()
+    rel = (body.get('path') or '').strip()
+    if not site_id or not rel:
+        conn.close()
+        return jsonify({'error': '請提供案場與檔名'}), 400
+    denied = ensure_site_access(user, site_id)
+    if denied:
+        conn.close()
+        return denied
+    safe = Path(rel).name
+    target = WEEKLY_UPLOAD_DIR / safe
+    if target.exists() and target.is_file() and target.parent.resolve() == WEEKLY_UPLOAD_DIR.resolve():
         target.unlink()
     conn.close()
     return jsonify({'success': True})

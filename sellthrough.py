@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+from collections import defaultdict
 from typing import Optional
 
 from sales_ledger import _num, _parse_date, _truthy, row_to_deal
@@ -32,13 +33,27 @@ def ensure_unit_map_column(conn: sqlite3.Connection):
         conn.execute('ALTER TABLE sites ADD COLUMN unit_map TEXT')
 
 
+def _to_halfwidth(s: str) -> str:
+    out = []
+    for ch in s:
+        o = ord(ch)
+        if o == 0x3000:
+            out.append(' ')
+        elif 0xFF01 <= o <= 0xFF5E:
+            out.append(chr(o - 0xFEE0))
+        else:
+            out.append(ch)
+    return ''.join(out)
+
+
 def _clean_unit_text(raw) -> str:
-    s = str(raw or '').strip().upper()
+    s = _to_halfwidth(str(raw or '')).strip().upper()
     s = s.replace('　', ' ')
     s = s.replace('樓', 'F').replace('層', 'F')
     s = s.replace('號', '').replace('戶', '')
     s = s.replace('－', '-').replace('–', '-').replace('—', '-')
     s = s.replace('之', '-')
+    s = s.replace('（', '(').replace('）', ')')
     s = _SPACE.sub('', s)
     return s
 
@@ -74,6 +89,11 @@ def parse_one_unit(token: str) -> Optional[dict]:
         return {'buildingId': m.group(2), 'col': col, 'floor': int(m.group(1)), 'raw': token}
 
     m = re.match(r'^([A-Z])-?(\d{1,2})[-/](\d{1,2})F$', t)
+    if m:
+        col = _col_id(m.group(1), m.group(2))
+        return {'buildingId': m.group(1), 'col': col, 'floor': int(m.group(3)), 'raw': token}
+
+    m = re.match(r'^([A-Z])(\d{1,2})\((\d{1,2})F?\)$', t)
     if m:
         col = _col_id(m.group(1), m.group(2))
         return {'buildingId': m.group(1), 'col': col, 'floor': int(m.group(3)), 'raw': token}
@@ -606,12 +626,19 @@ def build_sellthrough(conn: sqlite3.Connection, site_id: str, as_of: Optional[st
     ping_by_col = {}
     ledger_keys = set()
     after_as_of_count = 0
+    signing_rows = 0
+    deal_rows = 0
     for deal in deals:
         rtype = str(deal.get('recordType') or '')
         event_date = _deal_event_date(deal)
         raw_unit = str(deal.get('unitNo') or '').strip()
         if rtype == 'refund':
             continue
+        has_ping = _num(deal.get('areaPing')) > 0
+        if rtype == 'signing' and has_ping:
+            signing_rows += 1
+        if rtype == 'deal' and has_ping:
+            deal_rows += 1
         if _looks_parking(deal):
             continue
         if as_of_ymd and event_date and event_date > as_of_ymd:
@@ -694,6 +721,27 @@ def build_sellthrough(conn: sqlite3.Connection, site_id: str, as_of: Optional[st
     merged = {}
     for cell in parsed_cells:
         merged[cell['key']] = _pick_better_cell(merged.get(cell['key']), cell)
+
+    by_key_recs = defaultdict(list)
+    for cell in parsed_cells:
+        did = cell.get('dealId')
+        if did and any(x.get('dealId') == did for x in by_key_recs[cell['key']]):
+            continue
+        by_key_recs[cell['key']].append(cell)
+    duplicates = []
+    for key, recs in by_key_recs.items():
+        if len(recs) < 2:
+            continue
+        duplicates.append({
+            'key': key,
+            'unitNo': recs[0].get('unitNo') or f"{recs[0].get('col')}-{recs[0].get('floor')}F",
+            'col': recs[0].get('col'),
+            'floor': recs[0].get('floor'),
+            'count': len(recs),
+            'names': '、'.join(dict.fromkeys(r.get('customerName') or '' for r in recs if r.get('customerName'))),
+            'types': '、'.join(dict.fromkeys(r.get('recordTypeLabel') or r.get('recordType') or '' for r in recs)),
+            'hint': f'同一戶 {len(recs)} 筆，去化圖只算 1 格，不必手動補登',
+        })
 
     for key in owner_keys:
         if key not in merged:
@@ -787,6 +835,9 @@ def build_sellthrough(conn: sqlite3.Connection, site_id: str, as_of: Optional[st
     stats['ledgerUnits'] = len(ledger_keys)
     stats['afterAsOf'] = after_as_of_count
     stats['expanded'] = expanded
+    stats['signingRows'] = signing_rows
+    stats['dealRows'] = deal_rows
+    stats['duplicateUnits'] = len(duplicates)
 
     layout_keys = set()
     for b in buildings:
@@ -817,5 +868,6 @@ def build_sellthrough(conn: sqlite3.Connection, site_id: str, as_of: Optional[st
         'stats': stats,
         'unparsed': list(dict.fromkeys(unparsed))[:40],
         'missing': missing,
+        'duplicates': duplicates[:40],
         'unitMap': saved_map,
     }

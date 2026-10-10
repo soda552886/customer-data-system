@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import sqlite3
 from collections import defaultdict
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Optional
 
 from sales_ledger import _units_from_area_ping, iter_week_deal_rows
@@ -14,6 +16,9 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
 
+
+_DATA_DIR = Path(os.environ.get('DATA_DIR', str(Path(__file__).parent / 'data')))
+WEEKLY_UPLOAD_DIR = _DATA_DIR / 'uploads' / 'weekly'
 
 WEEKDAY_LABELS = ['一', '二', '三', '四', '五', '六', '日']
 HOPE_SINCERITY = {'A', 'A+', 'A-', 'B', 'B+', '有望', '高'}
@@ -211,6 +216,35 @@ def _parse_included_visitor_ids(raw) -> Optional[set]:
     return out
 
 
+def ensure_weekly_upload_dir() -> Path:
+    WEEKLY_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    return WEEKLY_UPLOAD_DIR
+
+
+def normalize_memo_photos(raw) -> list:
+    out = []
+    if not isinstance(raw, list):
+        return out
+    seen = set()
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        path = Path(str(item.get('path') or item.get('filename') or '')).name
+        if not path or path in seen or '..' in path:
+            continue
+        seen.add(path)
+        photo_id = str(item.get('id') or Path(path).stem)
+        filename = str(item.get('filename') or path)
+        out.append({
+            'id': photo_id,
+            'filename': filename,
+            'path': path,
+            'url': f'/uploads/weekly/{path}',
+            'caption': str(item.get('caption') or '').strip(),
+        })
+    return out
+
+
 def empty_manual_payload(start, end, week_number=None, origin=None):
     days = []
     for i in range(7):
@@ -283,6 +317,7 @@ def empty_manual_payload(start, end, week_number=None, origin=None):
         'reviewNotes': '',
         'competitorNotes': '',
         'memo': '',
+        'memoPhotos': [],
         'hopeVisitorIds': None,
     }
 
@@ -298,6 +333,7 @@ def merge_manual(base: dict, saved: Optional[dict]) -> dict:
             out[key] = merged
         else:
             out[key] = val
+    out['memoPhotos'] = normalize_memo_photos(out.get('memoPhotos'))
     if isinstance(out.get('days'), list) and isinstance(base.get('days'), list):
         days = []
         saved_days = {d.get('date'): d for d in out['days'] if isinstance(d, dict)}
@@ -1372,6 +1408,9 @@ def upsert_weekly_report(
         'SELECT id FROM weekly_reports WHERE site_id = ? AND week_start = ?',
         (site_id, week_start),
     ).fetchone()
+    if isinstance(data, dict):
+        data = dict(data)
+        data['memoPhotos'] = normalize_memo_photos(data.get('memoPhotos'))
     payload = json.dumps(data, ensure_ascii=False)
     if existing:
         conn.execute(
@@ -1974,6 +2013,14 @@ def build_weekly_excel(site_name: str, start, end, week_number, manual: dict, au
     ws.append([manual.get('competitorNotes') or ''])
     ws.merge_cells(start_row=ws.max_row, start_column=1, end_row=ws.max_row, end_column=4)
     ws.append(['備註', manual.get('memo') or ''])
+    photo_names = [
+        (p.get('caption') or p.get('filename') or '').strip()
+        for p in (manual.get('memoPhotos') or [])
+        if isinstance(p, dict)
+    ]
+    photo_names = [x for x in photo_names if x]
+    if photo_names:
+        ws.append(['備註照片', '、'.join(photo_names)])
     ws.append([])
     ws.append(['四、銷售成交比'])
     ws.append(['銷售人員', '累計接待', '累計成交', '成交比', '成交金額', '退戶組數', '退戶金額',

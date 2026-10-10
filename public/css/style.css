@@ -1852,6 +1852,27 @@ tr.visitor-row-highlight td {
 @media (max-width: 800px) {
   .st-layout-item { grid-template-columns: 1fr; }
 }
+.weekly-memo-photos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 0.65rem;
+}
+.weekly-memo-upload {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin-top: 0.55rem;
+}
+.weekly-memo-upload input[type="text"] {
+  flex: 1;
+  min-width: 10rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: inherit;
+}
 .st-all-toggle {
   display: inline-flex;
   align-items: center;

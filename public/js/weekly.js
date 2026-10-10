@@ -440,6 +440,9 @@ function collectManualFromForm(baseManual) {
   manual.reviewNotes = document.getElementById('reviewNotes').value;
   manual.competitorNotes = document.getElementById('competitorNotes').value;
   manual.memo = document.getElementById('weekMemo').value;
+  manual.memoPhotos = Array.isArray(current?.manual?.memoPhotos)
+    ? current.manual.memoPhotos.map((p) => ({ ...p }))
+    : [];
   return manual;
 }
 
@@ -1668,9 +1671,17 @@ function renderSellthroughMissing(data) {
   const el = document.getElementById('stMissing');
   if (!el) return;
   const rows = (data && data.missing) || [];
+  const dups = (data && data.duplicates) || [];
   const sold = Number(data?.stats?.sold) || 0;
+  const signed = Number(data?.stats?.signed) || 0;
   const ledger = Number(data?.stats?.ledgerUnits) || 0;
-  if (!rows.length && (!ledger || ledger === sold)) {
+  const signingRows = Number(data?.stats?.signingRows) || 0;
+  const weeklySign = Number(current?.manual?.signingsCum?.units) || 0;
+  const needExplain = rows.length || dups.length
+    || (weeklySign && weeklySign !== signed)
+    || (signingRows && signingRows !== signed)
+    || (ledger && ledger !== sold);
+  if (!needExplain) {
     el.innerHTML = '';
     return;
   }
@@ -1678,17 +1689,91 @@ function renderSellthroughMissing(data) {
     const who = [m.unitNo || '（無戶號）', m.customerName].filter(Boolean).join('／');
     return `<li><strong>${escapeHtml(missingReasonLabel(m.reason))}</strong>：${escapeHtml(who)}${m.hint ? ` — ${escapeHtml(m.hint)}` : ''}</li>`;
   }).join('');
-  const gap = ledger && ledger !== sold
-    ? `<p>銷售總表可對應／登錄 <b>${ledger}</b> 戶，圖上目前 <b>${sold}</b> 戶。差額請看下列原因，或直接點格子補登。</p>`
-    : '';
+  const dupItems = dups.map((d) => {
+    const who = [d.unitNo, d.names].filter(Boolean).join('／');
+    return `<li><strong>同一戶重複 ${d.count} 筆</strong>：${escapeHtml(who)} — ${escapeHtml(d.hint || '圖上只算 1 戶，不必手動補登')}</li>`;
+  }).join('');
+  const countBits = [];
+  if (weeklySign) countBits.push(`上方累計簽約 <b>${weeklySign}</b> 戶`);
+  if (signingRows) countBits.push(`銷售總表簽約 <b>${signingRows}</b> 筆`);
+  countBits.push(`去化圖簽約／已售 <b>${signed}</b>／<b>${sold}</b> 戶`);
   const salesHref = salesPageUrlForCurrentSite();
   el.innerHTML = `
     <div class="st-missing-box">
-      <h3>未完全上圖</h3>
-      ${gap}
-      ${items ? `<ul>${items}</ul>` : ''}
-      <p class="hint" style="margin:0.45rem 0 0;">可到 <a href="${escapeHtml(salesHref)}">銷售總表</a> 把戶別改成 A1-10F，或點去化圖空格手動補登。</p>
+      <h3>戶數對不上時請看這裡</h3>
+      <p>${countBits.join('，')}。去化圖<strong>同一戶只算一格</strong>（成交＋簽約各 KEY 一次仍是一戶），所以筆數常會比累計簽約少，<strong>已上圖的不必再手動補登</strong>。</p>
+      ${dupItems ? `<ul>${dupItems}</ul>` : ''}
+      ${items ? `<p>以下才需要改銷售總表戶號（A1-10F）或點空格補登：</p><ul>${items}</ul>` : '<p class="hint">目前沒有「對不到樓層」的戶號；差的數量多半是重複 KEY。</p>'}
+      <p class="hint" style="margin:0.45rem 0 0;">可到 <a href="${escapeHtml(salesHref)}">銷售總表</a> 核對戶別。</p>
     </div>`;
+}
+
+function memoPhotos() {
+  const list = current?.manual?.memoPhotos;
+  return Array.isArray(list) ? list : [];
+}
+
+function renderMemoPhotos() {
+  const el = document.getElementById('weekMemoPhotos');
+  if (!el) return;
+  const photos = memoPhotos();
+  if (!photos.length) {
+    el.innerHTML = '';
+    return;
+  }
+  el.innerHTML = photos.map((p) => `
+    <figure class="budget-photo-card">
+      <a href="${escapeHtml(p.url)}" target="_blank" rel="noopener">
+        <img src="${escapeHtml(p.url)}" alt="${escapeHtml(p.caption || p.filename || '備註照片')}">
+      </a>
+      <figcaption title="${escapeHtml(p.caption || p.filename || '')}">${escapeHtml(p.caption || p.filename || '')}</figcaption>
+      <button type="button" class="link-btn" data-memo-photo-del="${escapeHtml(p.id || p.path || '')}">刪照片</button>
+    </figure>
+  `).join('');
+}
+
+async function uploadMemoPhoto(file) {
+  if (!file || !current) {
+    showToast('請先載入本週資料', 'error');
+    return;
+  }
+  const body = new FormData();
+  body.append('siteId', current.siteId);
+  body.append('weekStart', current.weekStart || '');
+  body.append('caption', document.getElementById('weekMemoPhotoCaption')?.value.trim() || '');
+  body.append('file', file);
+  try {
+    const res = await fetch('/api/weekly/photo', { method: 'POST', body });
+    const json = await res.json();
+    if (!res.ok) {
+      showToast(json.error || '上傳失敗', 'error');
+      return;
+    }
+    current.manual = current.manual || {};
+    current.manual.memoPhotos = [...memoPhotos(), json.photo];
+    document.getElementById('weekMemoPhotoCaption').value = '';
+    renderMemoPhotos();
+    showToast('已附上照片，記得按儲存週報');
+  } catch {
+    showToast('上傳失敗', 'error');
+  }
+}
+
+async function deleteMemoPhoto(photoId) {
+  if (!current) return;
+  const photo = memoPhotos().find((p) => String(p.id) === String(photoId) || String(p.path) === String(photoId));
+  if (!photo) return;
+  try {
+    await fetch('/api/weekly/photo', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ siteId: current.siteId, path: photo.path }),
+    });
+  } catch { /* ignore */ }
+  current.manual.memoPhotos = memoPhotos().filter(
+    (p) => String(p.id) !== String(photoId) && String(p.path) !== String(photoId),
+  );
+  renderMemoPhotos();
 }
 
 function closeSellthroughCellEditor() {
@@ -1867,6 +1952,9 @@ function renderAll(payload) {
   document.getElementById('reviewNotes').value = manual.reviewNotes || '';
   document.getElementById('competitorNotes').value = manual.competitorNotes || '';
   document.getElementById('weekMemo').value = manual.memo || '';
+  current.manual = current.manual || {};
+  current.manual.memoPhotos = Array.isArray(manual.memoPhotos) ? manual.memoPhotos : [];
+  renderMemoPhotos();
   renderConversion(auto, manual);
   renderVisitorMini('returnList', auto.returnVisits, '本週尚無回訪');
   renderHopeSection(auto, manual);
@@ -2124,6 +2212,16 @@ async function init() {
   document.getElementById('stCellCancelBtn')?.addEventListener('click', closeSellthroughCellEditor);
   document.getElementById('stCellModal')?.addEventListener('click', (e) => {
     if (e.target.id === 'stCellModal') closeSellthroughCellEditor();
+  });
+  document.getElementById('weekMemoPhotoFile')?.addEventListener('change', async (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (file) await uploadMemoPhoto(file);
+  });
+  document.getElementById('weekMemoPhotos')?.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-memo-photo-del]');
+    if (!btn) return;
+    deleteMemoPhoto(btn.dataset.memoPhotoDel);
   });
   document.getElementById('openSalesFromWeekly')?.addEventListener('click', (e) => {
     saveWeeklyDraft();

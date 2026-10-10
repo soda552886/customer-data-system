@@ -83,6 +83,15 @@
         <div class="form-group full-width" style="margin-top:1rem;">
           <label for="weekMemo">備註</label>
           <textarea id="weekMemo" rows="2"></textarea>
+          <div class="weekly-memo-photos" id="weekMemoPhotos"></div>
+          <div class="weekly-memo-upload">
+            <input type="text" id="weekMemoPhotoCaption" placeholder="照片說明（選填）">
+            <label class="btn btn-outline budget-file-btn">
+              上傳照片
+              <input type="file" id="weekMemoPhotoFile" accept="image/*" hidden>
+            </label>
+          </div>
+          <p class="hint">可附 jpg／png／gif／webp，單張小於 8MB。上傳後請再按「儲存週報」。</p>
         </div>
       </section>
 
