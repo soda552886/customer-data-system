@@ -507,6 +507,26 @@ def _unit_price_wan(deal: dict, ping: float) -> float:
     return 0
 
 
+def _fill_sequential_cols(cols) -> list[str]:
+    groups = {}
+    leftover = []
+    for cid in cols:
+        m = re.match(r'^([A-Z]+)(\d+)$', str(cid))
+        if not m:
+            leftover.append(str(cid))
+            continue
+        groups.setdefault(m.group(1), []).append(int(m.group(2)))
+    out = []
+    for letter, nums in sorted(groups.items()):
+        lo, hi = min(nums), max(nums)
+        if 0 <= hi - lo <= 15:
+            out.extend(f'{letter}{n}' for n in range(lo, hi + 1))
+        else:
+            out.extend(f'{letter}{n}' for n in sorted(set(nums)))
+    out.extend(leftover)
+    return list(dict.fromkeys(out))
+
+
 def infer_buildings_from_cells(cells: list[dict], ping_by_col: dict) -> list[dict]:
     by_b = {}
     for cell in cells:
@@ -519,10 +539,13 @@ def infer_buildings_from_cells(cells: list[dict], ping_by_col: dict) -> list[dic
         floors = sorted(rec['floors'], reverse=True)
         if floors:
             lo, hi = min(floors), max(floors)
+            # 未售樓層也要出空格：至少從 2F 畫到已售最高樓
+            if lo > 2:
+                lo = 2
             if 1 <= lo <= hi <= 80 and (hi - lo) <= 60:
                 floors = list(range(hi, lo - 1, -1))
         columns = []
-        for cid in sorted(rec['cols'], key=_natural_col_key):
+        for cid in _fill_sequential_cols(rec['cols']):
             columns.append({'id': cid, 'ping': ping_by_col.get((bid, cid), 0)})
         name = f'{bid}棟' if re.match(r'^[A-Z]$', bid) else (bid if bid != '主' else '主棟')
         buildings.append({

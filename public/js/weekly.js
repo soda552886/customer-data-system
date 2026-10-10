@@ -1575,7 +1575,7 @@ function renderSellthrough(data, opts = {}) {
       <span>未售 <b>${s.available || 0}</b></span>
       <span>去化率 <b>${s.rate || 0}%</b></span>
       ${s.ledgerUnits ? `<span>銷售總表戶數 <b>${s.ledgerUnits}</b></span>` : ''}
-      ${data.inferred ? '<span class="hint">格局由成交戶號推估</span>' : ''}
+      ${data.inferred ? '<span class="hint">尚未儲存格局：先顯示 2F～已售最高樓空格；其他戶別／更高樓請在下方「戶別格局」補上後儲存</span>' : ''}
       ${data.expanded ? '<span class="hint">已自動補上格局外成交戶</span>' : ''}
       ${data.asOf ? `<span class="hint">截至 ${escapeHtml(data.asOf)}</span>` : '<span class="hint">顯示全部成交</span>'}
     `;
@@ -1616,17 +1616,21 @@ function renderSellthrough(data, opts = {}) {
   }).join('');
   wrap.innerHTML = `<table class="st-grid"><thead><tr><th class="st-corner"></th>${head}</tr></thead><tbody>${body}</tbody></table>`;
   if (refreshLayout) renderSellthroughLayout(data);
+  const layoutPanel = document.getElementById('stLayoutPanel');
+  if (layoutPanel && data.inferred) layoutPanel.open = true;
 }
 
-function layoutBuildingHtml(b, idx) {
+function layoutBuildingHtml(b, idx, inferred = false) {
   const cols = (b.columns || []).map((c) => c.id).join(', ');
   const pings = (b.columns || [])
     .filter((c) => Number(c.ping) > 0)
     .map((c) => `${c.id}:${c.ping}`)
     .join(', ');
   const floors = b.floors || [];
-  const floorMax = floors.length ? floors[0] : '';
-  const floorMin = floors.length ? floors[floors.length - 1] : '';
+  const soldMax = floors.length ? Number(floors[0]) : 12;
+  const soldMin = floors.length ? Number(floors[floors.length - 1]) : 2;
+  const floorMax = soldMax || '';
+  const floorMin = inferred ? Math.min(soldMin || 2, 2) : (soldMin || '');
   const owners = (b.ownerUnits || []).map((k) => {
     const p = String(k).split('|');
     return p.length === 3 ? `${p[1]}-${p[2]}F` : k;
@@ -1653,9 +1657,10 @@ function layoutBuildingHtml(b, idx) {
 function renderSellthroughLayout(data) {
   const el = document.getElementById('stLayoutEditors');
   if (!el) return;
+  const inferred = Boolean(data && data.inferred && !(data.unitMap?.buildings || []).length);
   const buildings = (data && (data.unitMap?.buildings?.length ? data.unitMap.buildings : data.buildings)) || [];
   const rows = buildings.length ? buildings : [{ id: 'A', name: 'A棟', columns: [], floors: [15, 2], ownerUnits: [] }];
-  el.innerHTML = rows.map((b, i) => layoutBuildingHtml(b, i)).join('');
+  el.innerHTML = rows.map((b, i) => layoutBuildingHtml(b, i, inferred)).join('');
 }
 
 function missingReasonLabel(reason) {
