@@ -1939,3 +1939,27 @@ tr.visitor-row-highlight td {
   margin: 0 0 0.35rem;
   color: var(--primary);
 }
+
+.week-all-site-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--primary);
+  font-weight: 700;
+  cursor: pointer;
+  text-decoration: underline;
+  font-size: inherit;
+  font-family: inherit;
+}
+.week-all-site-btn:hover { color: var(--primary-light); }
+#weekAllTable td,
+#weekAllTable th {
+  white-space: nowrap;
+}
+#weekAllTable tbody tr.week-all-has-deal td {
+  background: #f3faf5;
+}
+#weekAllTable tbody tr.week-all-error td {
+  background: #fdf2f2;
+  color: var(--text-muted);
+}

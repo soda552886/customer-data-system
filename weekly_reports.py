@@ -1167,6 +1167,66 @@ def inventory_summary(manual: dict) -> dict:
     }
 
 
+def build_weekly_overview_row(conn: sqlite3.Connection, site: dict, start, end, *, active_staff=None) -> dict:
+    """Compact per-site weekly KPIs for the all-sites overview."""
+    site_id = site['id']
+    origin = site.get('week1Start') or site.get('week1_start') or None
+    week_start_s = start.isoformat() if hasattr(start, 'isoformat') else str(start)
+    saved = load_weekly_report(conn, site_id, week_start_s)
+    base = empty_manual_payload(start, end, origin=origin)
+    manual = merge_manual(base, (saved or {}).get('data') if saved else None)
+    if not saved:
+        manual = apply_previous_week_carry(
+            manual,
+            previous_saved_week_data(conn, site_id, week_start_s),
+        )
+    phone_sum = phone_total_from_manual(manual)
+    auto = build_auto_stats(
+        conn, site_id, start, end,
+        included_visitor_ids=None,
+        active_staff=active_staff,
+        week_phone_total=phone_sum,
+    )
+    t = auto.get('totals') or {}
+    p = auto.get('period') or {}
+    inv = inventory_summary(manual)
+    inv_raw = manual.get('inventory') or {}
+    deals = manual.get('deals') or {}
+    deals_cum = manual.get('dealsCum') or {}
+    signings = manual.get('signings') or {}
+    signings_cum = manual.get('signingsCum') or {}
+    mw = p.get('month') or {}
+    week_no = default_week_number(start, origin) if origin else (
+        (saved or {}).get('weekNumber') or manual.get('weekNumber') or default_week_number(start, origin)
+    )
+    return {
+        'siteId': site_id,
+        'siteName': site.get('name') or site_id,
+        'group': site.get('group') or site.get('group_type') or '',
+        'saved': bool(saved),
+        'updatedAt': (saved or {}).get('updatedAt'),
+        'weekNumber': week_no,
+        'week1Start': origin or '',
+        'visits': t.get('actualTotal') if t.get('actualTotal') is not None else t.get('total') or 0,
+        'reportedVisits': t.get('reportedTotal') if t.get('reportedTotal') is not None else t.get('total') or 0,
+        'newVisits': t.get('new') or 0,
+        'returnVisits': t.get('return') or 0,
+        'phoneCalls': phone_sum,
+        'customerDeals': t.get('deal') or 0,
+        'weekDealUnits': _num(deals.get('units')),
+        'weekDealParking': _num(deals.get('parking')),
+        'weekDealAmount': _num(deals.get('amount')),
+        'cumDealUnits': _num(deals_cum.get('units')),
+        'weekSignUnits': _num(signings.get('units')),
+        'cumSignUnits': _num(signings_cum.get('units')),
+        'monthVisits': mw.get('visits') or 0,
+        'monthDeals': mw.get('deals') or 0,
+        'soldUnits': _num(inv_raw.get('soldUnits')),
+        'totalUnits': _num(inv_raw.get('totalUnits')),
+        'unitRate': inv.get('unitRate') or 0,
+    }
+
+
 def commission_summary(manual: dict) -> dict:
     c = manual.get('commission') or {}
     claimable_amt = _num(c.get('claimableAmount'))

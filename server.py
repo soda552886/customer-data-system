@@ -23,7 +23,8 @@ from auth import (
 from audit import init_audit_table, log_operation, row_to_log_dict
 from config.sites import SITES as DEFAULT_SITES
 from weekly_reports import (
-    build_auto_stats, build_weekly_excel, commission_summary, default_week_number,
+    build_auto_stats, build_weekly_excel, build_weekly_overview_row, commission_summary,
+    default_week_number,
     empty_manual_payload, enrich_dims_with_phones, init_weekly_tables, inventory_summary,
     list_weekly_reports, load_weekly_report, merge_manual, monday_of,
     normalize_phone_calls_detail, normalize_week1_start, phone_total_from_manual,
@@ -1700,6 +1701,67 @@ def weekly_summary():
             'commission': commission_summary(manual),
         },
         'history': history,
+    })
+
+
+@app.route('/api/weekly/summary-all')
+def weekly_summary_all():
+    conn, user, err = auth_guard('manage_weekly_reports')
+    if err:
+        return err
+
+    week_start = (request.args.get('weekStart') or '').strip()
+    if not week_start:
+        conn.close()
+        return jsonify({'error': '請提供週起始日（週一）'}), 400
+
+    try:
+        start, end = week_bounds(week_start)
+    except ValueError as e:
+        conn.close()
+        return jsonify({'error': str(e)}), 400
+
+    sites = [s for s in load_sites() if user_can_access_site(user, s['id'])]
+    rows = []
+    for site in sites:
+        try:
+            active_staff = get_active_sales_staff(conn, site['id'])
+            rows.append(build_weekly_overview_row(
+                conn, site, start, end, active_staff=active_staff,
+            ))
+        except Exception:
+            app.logger.exception('weekly summary-all failed site=%s week=%s', site.get('id'), week_start)
+            rows.append({
+                'siteId': site['id'],
+                'siteName': site.get('name') or site['id'],
+                'error': '載入失敗',
+            })
+
+    def _sum(key):
+        return round(sum((r.get(key) or 0) for r in rows if not r.get('error')), 2)
+
+    conn.close()
+    return jsonify({
+        'weekStart': start.isoformat(),
+        'weekEnd': end.isoformat(),
+        'rocLabel': f'{roc_year(start)}/{start.month}/{start.day}-{roc_year(end)}/{end.month}/{end.day}',
+        'sites': rows,
+        'totals': {
+            'siteCount': len(rows),
+            'saved': sum(1 for r in rows if r.get('saved')),
+            'visits': _sum('visits'),
+            'newVisits': _sum('newVisits'),
+            'returnVisits': _sum('returnVisits'),
+            'phoneCalls': _sum('phoneCalls'),
+            'customerDeals': _sum('customerDeals'),
+            'weekDealUnits': _sum('weekDealUnits'),
+            'weekDealAmount': _sum('weekDealAmount'),
+            'cumDealUnits': _sum('cumDealUnits'),
+            'weekSignUnits': _sum('weekSignUnits'),
+            'cumSignUnits': _sum('cumSignUnits'),
+            'monthVisits': _sum('monthVisits'),
+            'monthDeals': _sum('monthDeals'),
+        },
     })
 
 

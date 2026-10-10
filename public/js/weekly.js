@@ -5,6 +5,7 @@ let mediaOptions = [];
 let draftSaveTimer = null;
 let pendingWeekCarry = null;
 
+const ALL_SITES_ID = '__all__';
 const WEEKLY_CTX_KEY = 'weekly_report_ctx';
 const WEEKLY_DRAFT_KEY = 'weekly_report_draft';
 const REVIEW_CARRY_KEYS = ['reviewNotes', 'competitorNotes', 'memo'];
@@ -69,12 +70,36 @@ function weekNumberFromOrigin(weekStart, origin) {
 
 function currentSite() {
   const id = document.getElementById('weekSite')?.value;
+  if (!id || id === ALL_SITES_ID) return null;
   return sites.find((s) => s.id === id) || null;
+}
+
+function isAllSitesMode() {
+  return document.getElementById('weekSite')?.value === ALL_SITES_ID;
 }
 
 function salesPageUrlForCurrentSite() {
   const siteId = document.getElementById('weekSite')?.value || current?.siteId || '';
-  return siteId ? `/sales.html?siteId=${encodeURIComponent(siteId)}` : '/sales.html';
+  if (!siteId || siteId === ALL_SITES_ID) return '/sales.html';
+  return `/sales.html?siteId=${encodeURIComponent(siteId)}`;
+}
+
+function syncAllSitesChrome() {
+  const all = isAllSitesMode();
+  const week1Group = document.getElementById('week1Start')?.closest('.form-group');
+  const weekNoGroup = document.getElementById('weekNumber')?.closest('.form-group');
+  const saveWeek1 = document.getElementById('saveWeek1Btn');
+  const loadBtn = document.getElementById('loadWeekBtn');
+  const emptyP = document.getElementById('weekEmpty')?.querySelector('p');
+  if (week1Group) week1Group.classList.toggle('hidden', all);
+  if (weekNoGroup) weekNoGroup.classList.toggle('hidden', all);
+  if (saveWeek1) saveWeek1.classList.toggle('hidden', all);
+  if (loadBtn) loadBtn.textContent = all ? '載入全部案場' : '載入本週資料';
+  if (emptyP) {
+    emptyP.textContent = all
+      ? '請選擇週次後按「載入全部案場」'
+      : '請選擇案場與週次後按「載入本週資料」';
+  }
 }
 
 function syncOpenSalesLink() {
@@ -89,6 +114,7 @@ function syncWeek1StartField() {
 }
 
 function applySuggestedWeekNumber() {
+  if (isAllSitesMode()) return;
   const origin = document.getElementById('week1Start')?.value || currentSite()?.week1Start;
   const n = weekNumberFromOrigin(
     document.getElementById('weekStart')?.value,
@@ -294,6 +320,15 @@ async function loadSites() {
   const res = await fetch('/api/sites');
   sites = await res.json();
   const sel = document.getElementById('weekSite');
+  sel.innerHTML = '';
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = '請選擇案場';
+  sel.appendChild(placeholder);
+  const allOpt = document.createElement('option');
+  allOpt.value = ALL_SITES_ID;
+  allOpt.textContent = '全部案場';
+  sel.appendChild(allOpt);
   sites.forEach((s) => {
     const opt = document.createElement('option');
     opt.value = s.id;
@@ -303,6 +338,7 @@ async function loadSites() {
   const duoyi = sites.find((s) => s.id === 'libao_duoyi' || s.name.includes('鐸藝'));
   if (duoyi) sel.value = duoyi.id;
   syncWeek1StartField();
+  syncAllSitesChrome();
 }
 
 async function loadMeta() {
@@ -322,7 +358,7 @@ async function loadMeta() {
 }
 
 async function loadFieldOptions(siteId) {
-  if (!siteId) return;
+  if (!siteId || siteId === ALL_SITES_ID) return;
   try {
     const res = await fetch(`/api/fields?siteId=${encodeURIComponent(siteId)}`);
     if (!res.ok) return;
@@ -1932,6 +1968,7 @@ async function saveSellthroughLayout(clear = false) {
 function renderAll(payload) {
   current = payload;
   document.getElementById('weekEmpty').classList.add('hidden');
+  document.getElementById('weekAllOverview')?.classList.add('hidden');
   document.getElementById('weekWorkspace').classList.remove('hidden');
   document.getElementById('weekNumber').value = payload.weekNumber || '';
   if (payload.week1Start != null && document.getElementById('week1Start')) {
@@ -1975,9 +2012,136 @@ function renderAll(payload) {
   loadSellthrough();
 }
 
+function fmtWeekAllNum(n) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return '0';
+  return Number.isInteger(v) ? String(v) : String(Math.round(v * 100) / 100);
+}
+
+function renderWeekAll(payload) {
+  current = null;
+  document.getElementById('weekEmpty').classList.add('hidden');
+  document.getElementById('weekWorkspace').classList.add('hidden');
+  const overview = document.getElementById('weekAllOverview');
+  overview.classList.remove('hidden');
+
+  const t = payload.totals || {};
+  const kpi = [
+    { label: '案場', value: `${t.siteCount ?? 0} 個` },
+    { label: '已存週報', value: `${t.saved ?? 0} 份` },
+    { label: '來人合計', value: `${fmtWeekAllNum(t.visits)} 組` },
+    { label: '新客／回訪', value: `${fmtWeekAllNum(t.newVisits)} / ${fmtWeekAllNum(t.returnVisits)}` },
+    { label: '來電合計', value: `${fmtWeekAllNum(t.phoneCalls)} 通` },
+    { label: '客資成交', value: `${fmtWeekAllNum(t.customerDeals)} 筆` },
+    { label: '本週成交', value: `${fmtWeekAllNum(t.weekDealUnits)} 戶` },
+    { label: '成交金額', value: `${fmtWeekAllNum(t.weekDealAmount)} 萬` },
+    { label: '累計成交', value: `${fmtWeekAllNum(t.cumDealUnits)} 戶` },
+    { label: '本週簽約', value: `${fmtWeekAllNum(t.weekSignUnits)} 戶` },
+  ];
+  document.getElementById('weekAllKpi').innerHTML = kpi.map((it) => `
+    <div class="stat-card">
+      <div class="stat-label">${escapeHtml(it.label)}</div>
+      <div class="stat-value">${escapeHtml(it.value)}</div>
+    </div>
+  `).join('');
+
+  const rows = payload.sites || [];
+  const tbody = document.querySelector('#weekAllTable tbody');
+  tbody.innerHTML = rows.map((r) => {
+    if (r.error) {
+      return `<tr class="week-all-error">
+        <td><button type="button" class="week-all-site-btn" data-open-site="${escapeHtml(r.siteId)}">${escapeHtml(r.siteName)}</button></td>
+        <td colspan="14">${escapeHtml(r.error)}</td>
+      </tr>`;
+    }
+    const sold = r.totalUnits
+      ? `${fmtWeekAllNum(r.soldUnits)}／${fmtWeekAllNum(r.totalUnits)}`
+      : (r.soldUnits ? fmtWeekAllNum(r.soldUnits) : '—');
+    const rate = r.totalUnits ? `${fmtWeekAllNum(r.unitRate)}%` : '—';
+    const cls = (Number(r.weekDealUnits) || Number(r.customerDeals)) ? 'week-all-has-deal' : '';
+    return `<tr class="${cls}">
+      <td><button type="button" class="week-all-site-btn" data-open-site="${escapeHtml(r.siteId)}">${escapeHtml(r.siteName)}</button></td>
+      <td>${r.weekNumber != null ? escapeHtml(r.weekNumber) : '—'}</td>
+      <td>${r.saved ? `已存${r.updatedAt ? `<br><small>${escapeHtml(r.updatedAt)}</small>` : ''}` : '未存'}</td>
+      <td>${fmtWeekAllNum(r.visits)}</td>
+      <td>${fmtWeekAllNum(r.newVisits)} / ${fmtWeekAllNum(r.returnVisits)}</td>
+      <td>${fmtWeekAllNum(r.phoneCalls)}</td>
+      <td>${fmtWeekAllNum(r.customerDeals)}</td>
+      <td>${fmtWeekAllNum(r.weekDealUnits)} 戶</td>
+      <td>${fmtWeekAllNum(r.weekDealAmount)} 萬</td>
+      <td>${fmtWeekAllNum(r.cumDealUnits)} 戶</td>
+      <td>${fmtWeekAllNum(r.weekSignUnits)} 戶</td>
+      <td>${fmtWeekAllNum(r.cumSignUnits)} 戶</td>
+      <td>${escapeHtml(sold)}</td>
+      <td>${escapeHtml(rate)}</td>
+      <td>${fmtWeekAllNum(r.monthVisits)} / ${fmtWeekAllNum(r.monthDeals)}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="15">沒有可顯示的案場</td></tr>';
+
+  const tf = document.querySelector('#weekAllTable tfoot');
+  tf.innerHTML = `<tr>
+    <th>合計</th>
+    <th></th>
+    <th>${fmtWeekAllNum(t.saved)} 份已存</th>
+    <th>${fmtWeekAllNum(t.visits)}</th>
+    <th>${fmtWeekAllNum(t.newVisits)} / ${fmtWeekAllNum(t.returnVisits)}</th>
+    <th>${fmtWeekAllNum(t.phoneCalls)}</th>
+    <th>${fmtWeekAllNum(t.customerDeals)}</th>
+    <th>${fmtWeekAllNum(t.weekDealUnits)} 戶</th>
+    <th>${fmtWeekAllNum(t.weekDealAmount)} 萬</th>
+    <th>${fmtWeekAllNum(t.cumDealUnits)} 戶</th>
+    <th>${fmtWeekAllNum(t.weekSignUnits)} 戶</th>
+    <th>${fmtWeekAllNum(t.cumSignUnits)} 戶</th>
+    <th></th><th></th>
+    <th>${fmtWeekAllNum(t.monthVisits)} / ${fmtWeekAllNum(t.monthDeals)}</th>
+  </tr>`;
+}
+
+async function openSiteFromAll(siteId) {
+  if (!siteId) return;
+  document.getElementById('weekSite').value = siteId;
+  syncAllSitesChrome();
+  syncWeek1StartField();
+  applySuggestedWeekNumber();
+  saveWeeklyContext();
+  syncOpenSalesLink();
+  await loadFieldOptions(siteId);
+  await loadWeek();
+}
+
+async function loadWeekAll() {
+  const weekStart = document.getElementById('weekStart').value;
+  if (!weekStart) {
+    showToast('請選擇週起始日', 'error');
+    return;
+  }
+  updateRangeLabel();
+  saveWeeklyContext();
+  try {
+    const params = new URLSearchParams({
+      weekStart: document.getElementById('weekStart').value,
+      _: String(Date.now()),
+    });
+    const res = await fetch(`/api/weekly/summary-all?${params}`, { cache: 'no-store' });
+    const json = await res.json();
+    if (!res.ok) {
+      showToast(json.error || '載入失敗', 'error');
+      return;
+    }
+    renderWeekAll(json);
+    showToast(`已載入 ${json.totals?.siteCount ?? 0} 個案場`);
+  } catch {
+    showToast('載入失敗', 'error');
+  }
+}
+
 async function loadWeek() {
   const siteId = document.getElementById('weekSite').value;
   const weekStart = document.getElementById('weekStart').value;
+  if (siteId === ALL_SITES_ID) {
+    await loadWeekAll();
+    return;
+  }
   if (!siteId || !weekStart) {
     showToast('請選擇案場與週起始日', 'error');
     return;
@@ -2015,8 +2179,8 @@ async function loadWeek() {
 
 async function saveWeek1Start() {
   const siteId = document.getElementById('weekSite').value;
-  if (!siteId) {
-    showToast('請先選擇案場', 'error');
+  if (!siteId || siteId === ALL_SITES_ID) {
+    showToast('請先選擇單一案場', 'error');
     return;
   }
   const el = document.getElementById('week1Start');
@@ -2157,6 +2321,7 @@ async function init() {
   await loadMeta();
   const shouldAutoLoad = restoreWeeklyContext();
   syncWeek1StartField();
+  syncAllSitesChrome();
   syncOpenSalesLink();
   if (!document.getElementById('weekNumber').value) applySuggestedWeekNumber();
   await loadFieldOptions(document.getElementById('weekSite').value);
@@ -2167,11 +2332,21 @@ async function init() {
     saveWeeklyContext();
   });
   document.getElementById('weekSite').addEventListener('change', () => {
+    syncAllSitesChrome();
     syncWeek1StartField();
     applySuggestedWeekNumber();
     saveWeeklyContext();
     loadFieldOptions(document.getElementById('weekSite').value);
     syncOpenSalesLink();
+    document.getElementById('weekWorkspace')?.classList.add('hidden');
+    document.getElementById('weekAllOverview')?.classList.add('hidden');
+    document.getElementById('weekEmpty')?.classList.remove('hidden');
+    current = null;
+  });
+  document.getElementById('weekAllTable')?.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-open-site]');
+    if (!btn) return;
+    openSiteFromAll(btn.dataset.openSite);
   });
   document.getElementById('weekNumber').addEventListener('input', saveWeeklyContext);
   document.getElementById('loadWeekBtn').addEventListener('click', loadWeek);
