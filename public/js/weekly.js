@@ -1564,6 +1564,65 @@ let stView = 'unit';
 let stBuildingId = '';
 let stEditCell = null;
 
+const SITE_FLOORPLANS = [
+  {
+    match: (id, name) => id === 'xinrun' || /世界都心/.test(name || ''),
+    plans: [{ title: '新潤世界都心｜全區標準層平面圖', src: '/img/floorplans/xinrun.jpg' }],
+  },
+  {
+    match: (id, name) => /如嶼|宏樸/.test(name || '') || /ruyu|hongpu/.test(id || ''),
+    plans: [{ title: '宏樸如嶼｜3F–12F 全區平面配置', src: '/img/floorplans/hongpu-ruyu.png' }],
+  },
+];
+
+function floorplansForCurrentSite() {
+  const site = currentSite() || sites.find((s) => s.id === current?.siteId) || {};
+  const id = site.id || current?.siteId || '';
+  const name = site.name || current?.siteName || '';
+  const found = SITE_FLOORPLANS.find((item) => item.match(id, name));
+  return found ? found.plans : [];
+}
+
+function syncStPlanButton() {
+  const btn = document.getElementById('stPlanBtn');
+  const plans = floorplansForCurrentSite();
+  if (btn) btn.classList.toggle('hidden', !plans.length);
+  if (!plans.length && stView === 'plan') stView = 'unit';
+}
+
+function syncStViewButtons() {
+  document.querySelectorAll('#stViewBtns [data-st-view]').forEach((el) => {
+    el.classList.toggle('active', el.dataset.stView === stView);
+  });
+}
+
+function closeFloorplanLightbox() {
+  const box = document.getElementById('stFloorplanLightbox');
+  const img = document.getElementById('stFloorplanLightboxImg');
+  if (box) box.classList.add('hidden');
+  if (img) img.removeAttribute('src');
+}
+
+function openFloorplanLightbox(src, title) {
+  const box = document.getElementById('stFloorplanLightbox');
+  const img = document.getElementById('stFloorplanLightboxImg');
+  if (!box || !img || !src) return;
+  img.src = src;
+  img.alt = title || '平面圖放大';
+  box.classList.remove('hidden');
+}
+
+function renderFloorplanView(plans) {
+  const wrap = document.getElementById('stGridWrap');
+  if (!wrap) return;
+  wrap.innerHTML = (plans || []).map((p) => `
+    <div class="st-floorplan">
+      <p class="st-floorplan-caption">${escapeHtml(p.title || '平面圖')}（點圖放大）</p>
+      <img src="${escapeHtml(p.src)}" alt="${escapeHtml(p.title || '平面圖')}" data-st-floorplan="${escapeHtml(p.src)}" data-st-floorplan-title="${escapeHtml(p.title || '平面圖')}">
+    </div>
+  `).join('') || '<p class="hint" style="padding:0.8rem;">此案場尚未設定平面圖</p>';
+}
+
 function stFmt(n, digits = 2) {
   const v = Number(n);
   if (!Number.isFinite(v) || v === 0) return '';
@@ -1582,6 +1641,26 @@ function renderSellthrough(data, opts = {}) {
   const unparsedEl = document.getElementById('stUnparsed');
   const bbtns = document.getElementById('stBuildingBtns');
   if (!wrap) return;
+  syncStPlanButton();
+  syncStViewButtons();
+  const plans = floorplansForCurrentSite();
+  if (stView === 'plan') {
+    if (bbtns) bbtns.innerHTML = '';
+    const s = (data && data.stats) || {};
+    if (statsEl) {
+      statsEl.innerHTML = data ? `
+        <span>總戶 <b>${s.total || 0}</b></span>
+        <span>已售 <b>${s.sold || 0}</b></span>
+        <span>去化率 <b>${s.rate || 0}%</b></span>
+        <span class="hint">平面圖僅供對照戶別位置，成交狀況仍看單價／總價圖</span>
+      ` : '';
+    }
+    renderFloorplanView(plans);
+    renderSellthroughMissing(data);
+    if (unparsedEl) unparsedEl.textContent = '';
+    if (refreshLayout) renderSellthroughLayout(data);
+    return;
+  }
   if (!data || !(data.buildings || []).length) {
     wrap.innerHTML = '<p class="hint" style="padding:0.8rem;">銷售總表尚無可用戶別（請用 A1-10F 這類格式登錄），或先設定戶別格局。也可點下方「戶別格局」先建格子後再點空格補登。</p>';
     if (statsEl) statsEl.innerHTML = '';
@@ -2358,11 +2437,12 @@ async function init() {
   document.getElementById('stViewBtns')?.addEventListener('click', (e) => {
     const btn = e.target.closest('[data-st-view]');
     if (!btn) return;
-    stView = btn.dataset.stView === 'total' ? 'total' : 'unit';
-    document.querySelectorAll('#stViewBtns [data-st-view]').forEach((el) => {
-      el.classList.toggle('active', el.dataset.stView === stView);
-    });
-    if (sellthroughData) renderSellthrough(sellthroughData, { refreshLayout: false });
+    const next = btn.dataset.stView;
+    stView = next === 'total' || next === 'plan' ? next : 'unit';
+    syncStViewButtons();
+    if (sellthroughData || stView === 'plan') {
+      renderSellthrough(sellthroughData, { refreshLayout: false });
+    }
   });
   document.getElementById('stBuildingBtns')?.addEventListener('click', (e) => {
     const btn = e.target.closest('[data-st-building]');
@@ -2384,10 +2464,16 @@ async function init() {
     if (current) loadSellthrough();
   });
   document.getElementById('stGridWrap')?.addEventListener('click', (e) => {
+    const plan = e.target.closest('[data-st-floorplan]');
+    if (plan) {
+      openFloorplanLightbox(plan.dataset.stFloorplan, plan.dataset.stFloorplanTitle);
+      return;
+    }
     const hit = e.target.closest('[data-st-col]');
     if (!hit) return;
     openSellthroughCellEditor(hit.dataset.stCol, Number(hit.dataset.stFloor));
   });
+  document.getElementById('stFloorplanLightbox')?.addEventListener('click', closeFloorplanLightbox);
   document.getElementById('stCellSaveBtn')?.addEventListener('click', saveSellthroughCell);
   document.getElementById('stCellCancelBtn')?.addEventListener('click', closeSellthroughCellEditor);
   document.getElementById('stCellModal')?.addEventListener('click', (e) => {
