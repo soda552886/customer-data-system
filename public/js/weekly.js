@@ -1563,15 +1563,39 @@ let sellthroughData = null;
 let stView = 'unit';
 let stBuildingId = '';
 let stEditCell = null;
+let stPlanIndex = 0;
 
 const SITE_FLOORPLANS = [
   {
     match: (id, name) => id === 'xinrun' || /世界都心/.test(name || ''),
-    plans: [{ title: '新潤世界都心｜全區標準層平面圖', src: '/img/floorplans/xinrun.jpg' }],
+    plans: [{ tab: '標準層', title: '新潤世界都心｜全區標準層平面圖', src: '/img/floorplans/xinrun.jpg' }],
   },
   {
     match: (id, name) => /如嶼|宏樸/.test(name || '') || /ruyu|hongpu/.test(id || ''),
-    plans: [{ title: '宏樸如嶼｜3F–12F 全區平面配置', src: '/img/floorplans/hongpu-ruyu.png' }],
+    plans: [{ tab: '3F–12F', title: '宏樸如嶼｜3F–12F 全區平面配置', src: '/img/floorplans/hongpu-ruyu.png' }],
+  },
+  {
+    match: (id, name) => id === 'libao_duoyi' || /鐸藝/.test(name || ''),
+    plans: [
+      { tab: '3F 事務所', title: '麗寶鐸藝｜3F 一般事務所', src: '/img/floorplans/libao-duoyi-3f.png' },
+      { tab: '8F 住宅', title: '麗寶鐸藝｜8F 住宅', src: '/img/floorplans/libao-duoyi-8f.png' },
+    ],
+  },
+  {
+    match: (id, name) => /m[eé]tro/i.test(`${id} ${name}`) || /圓山/.test(name || ''),
+    plans: [{ tab: '8F–10F 全棟', title: '麗寶Métro｜8F–10F 全棟平面配置', src: '/img/floorplans/libao-metro.jpg' }],
+  },
+  {
+    match: (id, name) => id === 'shouyu' || /首御/.test(name || ''),
+    plans: [{ tab: '3F–5F', title: '首御臨沂｜3F–5F 平面配置', src: '/img/floorplans/shouyu.jpg' }],
+  },
+  {
+    match: (id, name) => id === 'shouxue' || /首學/.test(name || ''),
+    plans: [
+      { tab: '8F–9F', title: '首學杭州｜8F–9F 平面配置', src: '/img/floorplans/shouxue-8f9f.jpg' },
+      { tab: '10F', title: '首學杭州｜10F 平面配置', src: '/img/floorplans/shouxue-10f.jpg' },
+      { tab: '14F', title: '首學杭州｜14F 平面配置', src: '/img/floorplans/shouxue-14f.jpg' },
+    ],
   },
 ];
 
@@ -1615,12 +1639,27 @@ function openFloorplanLightbox(src, title) {
 function renderFloorplanView(plans) {
   const wrap = document.getElementById('stGridWrap');
   if (!wrap) return;
-  wrap.innerHTML = (plans || []).map((p) => `
+  const list = plans || [];
+  if (!list.length) {
+    wrap.innerHTML = '<p class="hint" style="padding:0.8rem;">此案場尚未設定平面圖</p>';
+    return;
+  }
+  if (stPlanIndex < 0 || stPlanIndex >= list.length) stPlanIndex = 0;
+  const tabs = list.length > 1 ? `
+    <div class="st-floorplan-tabs">
+      ${list.map((p, i) => `
+        <button type="button" class="tab-btn${i === stPlanIndex ? ' active' : ''}" data-st-plan-idx="${i}">${escapeHtml(p.tab || p.title || `圖 ${i + 1}`)}</button>
+      `).join('')}
+    </div>
+  ` : '';
+  const p = list[stPlanIndex];
+  wrap.innerHTML = `
+    ${tabs}
     <div class="st-floorplan">
       <p class="st-floorplan-caption">${escapeHtml(p.title || '平面圖')}（點圖放大）</p>
       <img src="${escapeHtml(p.src)}" alt="${escapeHtml(p.title || '平面圖')}" data-st-floorplan="${escapeHtml(p.src)}" data-st-floorplan-title="${escapeHtml(p.title || '平面圖')}">
     </div>
-  `).join('') || '<p class="hint" style="padding:0.8rem;">此案場尚未設定平面圖</p>';
+  `;
 }
 
 function stFmt(n, digits = 2) {
@@ -2178,6 +2217,7 @@ function renderWeekAll(payload) {
 
 async function openSiteFromAll(siteId) {
   if (!siteId) return;
+  stPlanIndex = 0;
   document.getElementById('weekSite').value = siteId;
   syncAllSitesChrome();
   syncWeek1StartField();
@@ -2421,6 +2461,7 @@ async function init() {
     document.getElementById('weekAllOverview')?.classList.add('hidden');
     document.getElementById('weekEmpty')?.classList.remove('hidden');
     current = null;
+    stPlanIndex = 0;
   });
   document.getElementById('weekAllTable')?.addEventListener('click', (e) => {
     const btn = e.target.closest('[data-open-site]');
@@ -2464,6 +2505,12 @@ async function init() {
     if (current) loadSellthrough();
   });
   document.getElementById('stGridWrap')?.addEventListener('click', (e) => {
+    const tab = e.target.closest('[data-st-plan-idx]');
+    if (tab) {
+      stPlanIndex = Number(tab.dataset.stPlanIdx) || 0;
+      renderFloorplanView(floorplansForCurrentSite());
+      return;
+    }
     const plan = e.target.closest('[data-st-floorplan]');
     if (plan) {
       openFloorplanLightbox(plan.dataset.stFloorplan, plan.dataset.stFloorplanTitle);

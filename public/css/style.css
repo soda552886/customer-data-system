@@ -1882,6 +1882,12 @@ tr.visitor-row-highlight td {
   cursor: pointer;
   user-select: none;
 }
+.st-floorplan-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding: 0.75rem 0.85rem 0;
+}
 .st-floorplan {
   padding: 0.75rem 0.85rem 1rem;
 }
