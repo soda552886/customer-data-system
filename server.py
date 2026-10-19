@@ -50,7 +50,7 @@ from field_options import (
     load_site_option_overrides, load_site_report_export_config,
     normalize_hidden_fields_payload, normalize_report_export_payload, normalize_save_payload,
     save_site_hidden_fields, save_site_option_overrides, save_site_report_export_config,
-    SALES_STAFF_FIELD_KEY, resolve_field_options, staff_departed_map,
+    SALES_STAFF_FIELD_KEY, append_site_sales_staff, resolve_field_options, staff_departed_map,
 )
 
 BASE_DIR = Path(__file__).parent
@@ -3269,6 +3269,49 @@ def update_site_field_options(site_id):
     config['siteName'] = row['name']
     conn.close()
     return jsonify({'success': True, **config})
+
+
+@app.route('/api/sites/<site_id>/sales-staff', methods=['POST'])
+def add_site_sales_staff(site_id):
+    conn, user, err = auth_guard()
+    if err:
+        return err
+    if not (
+        user_has_permission(user, 'manage_field_options')
+        or user_has_permission(user, 'manage_weekly_reports')
+        or user_has_permission(user, 'edit_customers')
+    ):
+        conn.close()
+        return jsonify({'error': '權限不足', 'code': 'FORBIDDEN'}), 403
+    row = conn.execute('SELECT id, name FROM sites WHERE id = ?', (site_id,)).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({'error': '找不到此案場'}), 404
+    denied = ensure_site_access(user, site_id)
+    if denied:
+        conn.close()
+        return denied
+    name = ((request.get_json() or {}).get('name') or '').strip()
+    if not name:
+        conn.close()
+        return jsonify({'error': '請輸入銷售人員姓名'}), 400
+    if name in ('__add_staff__', '＋ 新增人員…', '+ 新增人員…'):
+        conn.close()
+        return jsonify({'error': '請輸入有效姓名'}), 400
+    try:
+        enabled = append_site_sales_staff(conn, site_id, name, SALES_STAFF)
+    except ValueError as e:
+        conn.close()
+        return jsonify({'error': str(e)}), 400
+    log_operation(
+        conn, user, 'field_options_update',
+        f'新增「{row["name"]}」銷售人員 {name}',
+        site_id=site_id, site_name=row['name'],
+        detail={'salesStaffAdded': name},
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True, 'name': name, 'activeStaff': enabled})
 
 
 @app.route('/api/report-columns')

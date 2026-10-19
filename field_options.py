@@ -146,6 +146,24 @@ def save_site_option_overrides(conn: sqlite3.Connection, site_id: str, config: d
         )
 
 
+def append_site_sales_staff(conn: sqlite3.Connection, site_id: str, name: str, sales_staff: dict) -> list:
+    """Add a salesperson to the site's active list (creates override if needed)."""
+    name = str(name or '').strip()
+    if not name:
+        raise ValueError('請輸入銷售人員姓名')
+    overrides = load_site_option_overrides(conn, site_id)
+    defaults = list((sales_staff or {}).get(site_id) or [])
+    _, enabled, _ = resolve_field_options(defaults, overrides, SALES_STAFF_FIELD_KEY)
+    enabled = list(enabled)
+    departed = staff_departed_map(overrides)
+    departed.pop(name, None)
+    if name not in enabled:
+        enabled.append(name)
+    overrides[SALES_STAFF_FIELD_KEY] = {'enabled': enabled, 'departed': departed}
+    save_site_option_overrides(conn, site_id, overrides)
+    return enabled
+
+
 def staff_departed_map(overrides: dict) -> dict:
     """未在職銷售：resigned＝已離職，transferred＝已調離原工地。"""
     raw = (overrides or {}).get(SALES_STAFF_FIELD_KEY)

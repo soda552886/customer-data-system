@@ -633,12 +633,12 @@ function buildEditForm() {
         if (field.dynamicStaff) {
           options = fieldConfig.salesStaff[siteId] || [];
         }
-        if (!options.length) {
+        if (!options.length && !field.dynamicStaff) {
           const input = document.createElement('input');
           input.type = 'text';
           input.id = `edit_${field.key}`;
           input.name = field.key;
-          input.placeholder = field.dynamicStaff ? '請輸入銷售人員姓名' : `請輸入${field.label}`;
+          input.placeholder = `請輸入${field.label}`;
           group.appendChild(input);
         } else {
           const input = document.createElement('select');
@@ -654,6 +654,22 @@ function buildEditForm() {
             o.textContent = opt;
             input.appendChild(o);
           });
+          if (field.dynamicStaff) {
+            appendAddStaffOption(input);
+            bindAddStaffSelect(input, () => document.getElementById('editSite').value, (result) => {
+              const sid = document.getElementById('editSite').value;
+              const list = fieldConfig.salesStaff[sid] || [];
+              fieldConfig.salesStaff[sid] = result.persisted && result.activeStaff?.length
+                ? result.activeStaff
+                : (list.includes(result.name) ? list : [...list, result.name]);
+              ['salesperson1', 'salesperson2'].forEach((key) => {
+                const el = document.getElementById(`edit_${key}`);
+                if (el && el.tagName === 'SELECT') insertStaffOption(el, result.name);
+              });
+              input.value = result.name;
+              showToast(result.persisted ? `已新增「${result.name}」` : `已加入本頁「${result.name}」`);
+            });
+          }
           group.appendChild(input);
         }
       } else if (field.type === 'multiselect') {
@@ -783,7 +799,7 @@ function collectEditFormData() {
         data[field.key] = Array.from(checked).map((cb) => cb.value);
       } else {
         const el = document.getElementById(`edit_${field.key}`);
-        if (el) data[field.key] = el.value;
+        if (el) data[field.key] = el.value === ADD_STAFF_VALUE ? '' : el.value;
       }
     });
   });

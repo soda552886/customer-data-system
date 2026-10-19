@@ -337,12 +337,20 @@ function staffOffSiteLabel(name) {
 function fillStaffSelects() {
   ['fSales1', 'fSales2'].forEach((id) => {
     const sel = document.getElementById(id);
-    const cur = sel.value;
+    const cur = sel.value === ADD_STAFF_VALUE ? '' : sel.value;
     sel.innerHTML = '<option value="">未填</option>';
     activeStaff.forEach((name) => sel.appendChild(new Option(name, name)));
     if (cur && ![...sel.options].some((o) => o.value === cur)) {
       sel.appendChild(new Option(staffOffSiteLabel(cur), cur));
     }
+    appendAddStaffOption(sel);
+    bindAddStaffSelect(sel, () => document.getElementById('salesSite').value, (result) => {
+      if (result.persisted && result.activeStaff?.length) activeStaff = result.activeStaff;
+      else if (!activeStaff.includes(result.name)) activeStaff.push(result.name);
+      fillStaffSelects();
+      sel.value = result.name;
+      showToast(result.persisted ? `已新增「${result.name}」` : `已加入本頁「${result.name}」`);
+    });
     sel.value = cur;
   });
 }
@@ -377,8 +385,8 @@ function collectForm() {
     signDate: document.getElementById('fSignDate').value || null,
     ownerSaleReportDate: document.getElementById('fOwnerSaleReportDate').value || null,
     ownerSignReportDate: document.getElementById('fOwnerSignReportDate').value || null,
-    salesperson1: document.getElementById('fSales1').value,
-    salesperson2: document.getElementById('fSales2').value,
+    salesperson1: document.getElementById('fSales1').value === ADD_STAFF_VALUE ? '' : document.getElementById('fSales1').value,
+    salesperson2: document.getElementById('fSales2').value === ADD_STAFF_VALUE ? '' : document.getElementById('fSales2').value,
     isCoManaged: document.getElementById('fCoManaged').value === '是',
     commissionBaseMode: document.getElementById('fCommBaseMode').value || 'base',
     commissionSalesAmount: numberValue('fCommSalesAmount'),
@@ -1098,6 +1106,21 @@ async function init() {
   });
   document.getElementById('importSalesFile').addEventListener('change', (event) => {
     importSales(event.target.files?.[0]);
+  });
+  document.getElementById('addSalesStaffBtn')?.addEventListener('click', async () => {
+    const siteId = document.getElementById('salesSite').value;
+    const result = await promptNewSalesStaff(siteId);
+    if (!result) return;
+    if (result.persisted && result.activeStaff?.length) activeStaff = result.activeStaff;
+    else if (!activeStaff.includes(result.name)) activeStaff.push(result.name);
+    fillStaffSelects();
+    const s1 = document.getElementById('fSales1');
+    if (s1 && !s1.value) s1.value = result.name;
+    else {
+      const s2 = document.getElementById('fSales2');
+      if (s2) s2.value = result.name;
+    }
+    showToast(result.persisted ? `已新增「${result.name}」` : `已加入本頁「${result.name}」`);
   });
   document.getElementById('newSalesBtn').addEventListener('click', () => {
     if (!document.getElementById('salesSite').value) {

@@ -110,7 +110,7 @@ function renderFieldCard(field) {
         <button type="button" class="btn-sm" data-select-none="${escapeHtml(field.key)}">${isStaff ? '全部離職' : '全不選'}</button>
       </div>
       ${staffHint}
-      <div class="checkbox-grid field-options-grid">${checks || '<p class="hint">尚無選項，請按「新增選項」</p>'}</div>
+      <div class="checkbox-grid field-options-grid">${checks || `<p class="hint">尚無選項，請按「${isStaff ? '新增人員' : '新增選項'}」</p>`}</div>
     </div>
   `;
 }
@@ -118,7 +118,7 @@ function renderFieldCard(field) {
 function addCustomOption(fieldKey) {
   const field = fieldItems.find((f) => f.key === fieldKey);
   if (!field) return;
-  const raw = window.prompt(`為「${field.label}」新增選項：`);
+  const raw = window.prompt(field.key === '__salesStaff__' ? '新增銷售人員姓名：' : `為「${field.label}」新增選項：`);
   if (raw === null) return;
   const value = raw.trim();
   if (!value) {

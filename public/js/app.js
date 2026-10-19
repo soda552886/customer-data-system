@@ -101,12 +101,12 @@ function buildForm() {
           options = fieldConfig.salesStaff[currentSiteId] || [];
         }
         // 案場尚無下拉選項時改為文字輸入，避免必填下拉無法選擇而無法送出
-        if (!options.length) {
+        if (!options.length && !field.dynamicStaff) {
           input = document.createElement('input');
           input.type = 'text';
           input.id = field.key;
           input.name = field.key;
-          input.placeholder = field.dynamicStaff ? '請輸入銷售人員姓名' : `請輸入${field.label}`;
+          input.placeholder = `請輸入${field.label}`;
           if (field.required) input.required = true;
         } else {
           input = document.createElement('select');
@@ -123,6 +123,23 @@ function buildForm() {
             o.textContent = opt;
             input.appendChild(o);
           });
+          if (field.dynamicStaff) {
+            appendAddStaffOption(input);
+            bindAddStaffSelect(input, () => currentSiteId, (result) => {
+              const list = fieldConfig.salesStaff[currentSiteId] || [];
+              fieldConfig.salesStaff[currentSiteId] = result.persisted && result.activeStaff?.length
+                ? result.activeStaff
+                : (list.includes(result.name) ? list : [...list, result.name]);
+              ['salesperson1', 'salesperson2'].forEach((key) => {
+                const el = document.getElementById(key);
+                if (el && el.tagName === 'SELECT') insertStaffOption(el, result.name);
+              });
+              input.value = result.name;
+              if (typeof showToast === 'function') {
+                showToast(result.persisted ? `已新增「${result.name}」` : `已加入本頁「${result.name}」`);
+              }
+            });
+          }
         }
       } else if (field.type === 'multiselect') {
         const wrap = document.createElement('div');
@@ -247,7 +264,7 @@ function collectFormData() {
         data[field.key] = Array.from(checked).map((cb) => cb.value);
       } else {
         const el = document.getElementById(field.key);
-        if (el) data[field.key] = el.value;
+        if (el) data[field.key] = el.value === ADD_STAFF_VALUE ? '' : el.value;
       }
     });
   });
