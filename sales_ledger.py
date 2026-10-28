@@ -1565,6 +1565,27 @@ def iter_week_deal_rows(conn: sqlite3.Connection, site_id: str, start, end):
             yield row, datetime.strptime(parsed, '%Y-%m-%d').date()
 
 
+def iter_deal_rows_before(conn: sqlite3.Connection, site_id: str, before):
+    """業主報售日早於 before（通常為本週週一）的成交／簽約戶別。"""
+    try:
+        rows = conn.execute(
+            "SELECT * FROM sales_deals WHERE site_id = ? AND record_type IN ('deal', 'signing')",
+            (site_id,),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return
+    for row in rows:
+        parsed = _row_owner_sale_report_raw(row)
+        if not parsed:
+            continue
+        try:
+            d = datetime.strptime(parsed, '%Y-%m-%d').date()
+        except ValueError:
+            continue
+        if d < before:
+            yield row, d
+
+
 def _on_or_before(date_s: Optional[str], end, *, include_blank=True) -> bool:
     parsed = _parse_date(date_s)
     if not parsed:

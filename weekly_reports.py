@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
-from sales_ledger import _units_from_area_ping, iter_week_deal_rows
+from sales_ledger import _units_from_area_ping, iter_deal_rows_before, iter_week_deal_rows
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
@@ -618,6 +618,43 @@ def _collect_week_sales(conn, site_id, start, end, cust_rows):
     return week_sales, covered
 
 
+def _collect_prior_sales(conn, site_id, start, cust_rows):
+    """本週之前的銷售總表成交／簽約（一戶一筆），帶入客資區域／媒體。"""
+    by_id, by_name, by_phone, by_unit = _index_customers_for_sales(cust_rows)
+    raw = _dedupe_week_sales_rows(list(iter_deal_rows_before(conn, site_id, start)))
+    prior_sales = []
+    for srow, sale_d in raw:
+        if not _sales_is_countable_unit(srow):
+            continue
+        cust, data = _match_customer_for_sales_row(
+            srow, by_id, by_name, by_phone, by_unit,
+        )
+        prior_sales.append((srow, sale_d, cust, data))
+    return prior_sales
+
+
+def _apply_sales_ledger_prior_deals(
+    prior_sales: list,
+    *,
+    dim_all: dict,
+    dim_new: dict,
+    period: dict,
+    add_dim,
+):
+    """前期成交與本週同一口徑：銷售總表戶別，不重算客資勾選成交。"""
+    for srow, _sale_d, cust, data in prior_sales:
+        dims = _customer_dim_values(data if cust else {})
+        amount = _sales_deal_amount(srow)
+        for dim_key, dim_val in dims.items():
+            add_dim(dim_all[dim_key], dim_val, 0.0, True, amount, False, True, deal_weight=1.0)
+            if dim_key in dim_new:
+                add_dim(dim_new[dim_key], dim_val, 0.0, True, amount, False, True, deal_weight=1.0)
+        period['prior']['deals'] += 1.0
+        period['prior']['amount'] += amount
+        if cust and (cust['visit_type'] or '') != '回訪':
+            period['prior']['newDeals'] += 1.0
+
+
 def _apply_sales_ledger_week_deals(
     week_sales: list,
     *,
@@ -809,6 +846,8 @@ def build_auto_stats(
     deals = []
     hope_customers = []
     week_sales, sales_covered_cids = _collect_week_sales(conn, site_id, start, end, rows)
+    prior_sales = _collect_prior_sales(conn, site_id, start, rows)
+    use_ledger_deals = bool(week_sales or prior_sales)
 
     month_start = start.replace(day=1)
     year_start = start.replace(month=1, day=1)
@@ -954,6 +993,8 @@ def build_auto_stats(
             else:
                 period[key]['return'] += w
             count_deal = (is_deal and not is_refund and not (key == 'week' and sales_cover_week))
+            if key == 'prior' and use_ledger_deals:
+                count_deal = False
             if count_deal:
                 period[key]['deals'] += w
                 period[key]['amount'] += amount * w
@@ -980,7 +1021,12 @@ def build_auto_stats(
         ):
             deal_flag = is_deal and not is_refund
             week_deal_flag = deal_flag and not sales_cover_week
-            dim_deal = week_deal_flag if use_week else deal_flag
+            if use_week:
+                dim_deal = week_deal_flag
+            elif in_prior and use_ledger_deals:
+                dim_deal = False
+            else:
+                dim_deal = deal_flag
             add_dim(dim_all[dim_key], dim_val, 1.0, dim_deal, amount, use_week, in_prior)
             if dim_key not in dim_new:
                 continue
@@ -1015,6 +1061,13 @@ def build_auto_stats(
     return_visits.sort(key=lambda x: (x['date'], x['id']))
     hope_customers.sort(key=lambda x: (x['date'], x['id']))
 
+    _apply_sales_ledger_prior_deals(
+        prior_sales,
+        dim_all=dim_all,
+        dim_new=dim_new,
+        period=period,
+        add_dim=add_dim,
+    )
     _apply_sales_ledger_week_deals(
         week_sales,
         dim_all=dim_all,
