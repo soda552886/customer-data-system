@@ -17,6 +17,7 @@ const DIM_HEADERS = `
     <th>佔本週來人%</th><th>佔累計來人%</th>
     <th>本週來電</th><th>佔本週來電%</th>
     <th>本週成交</th><th>佔本週成交%</th>
+    <th>累計成交</th><th>佔累計成交%</th>
   </tr>`;
 
 const DIM_HEADERS_BASIC = `
@@ -1287,7 +1288,7 @@ function renderDimTable(tableId, rows, withPhones = false) {
   const tbody = table.querySelector('tbody');
   const mode = document.getElementById('dimFilterMode')?.value || 'week';
   const filtered = filterDimRows(rows, mode);
-  const colSpan = withPhones ? 10 : 8;
+  const colSpan = withPhones ? 12 : 8;
   if (!filtered.length) {
     tbody.innerHTML = `<tr><td colspan="${colSpan}" class="empty-row">尚無資料</td></tr>`;
     return;
@@ -1306,6 +1307,8 @@ function renderDimTable(tableId, rows, withPhones = false) {
         <td>${r.weekPhonePct ?? 0}%</td>
         <td>${r.weekDeals ?? 0}</td>
         <td>${r.weekDealPct ?? 0}%</td>
+        <td><strong>${r.cumDeals ?? 0}</strong></td>
+        <td>${r.cumDealPct ?? 0}%</td>
       </tr>`;
     }
     return `<tr>

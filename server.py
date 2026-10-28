@@ -1923,19 +1923,23 @@ def export_weekly_csv():
     writer.writerow(['區域個案分析', manual.get('competitorNotes') or ''])
     writer.writerow(['備註', manual.get('memo') or ''])
     writer.writerow([])
-    writer.writerow(['【區域統計（新客＋來電）】', '本週來人', '本週來電', '佔來人%', '佔來電%', '前期', '累計'])
+    writer.writerow(['【區域統計（新客＋來電）】', '本週來人', '本週來電', '本週成交', '累計成交', '佔來人%', '佔來電%', '佔累計成交%', '前期', '累計來人'])
     for row in auto['byRegion']:
         writer.writerow([
             row['name'], row.get('weekVisits'), row.get('weekPhones', 0),
+            row.get('weekDeals'), row.get('cumDeals'),
             f"{row.get('weekVisitPct', 0)}%", f"{row.get('weekPhonePct', 0)}%",
+            f"{row.get('cumDealPct', 0)}%",
             row.get('priorVisits'), row.get('cumVisits'),
         ])
     writer.writerow([])
-    writer.writerow(['【媒體統計（新客＋來電）】', '本週來人', '本週來電', '佔來人%', '佔來電%', '前期', '累計'])
+    writer.writerow(['【媒體統計（新客＋來電）】', '本週來人', '本週來電', '本週成交', '累計成交', '佔來人%', '佔來電%', '佔累計成交%', '前期', '累計來人'])
     for row in auto['byMedia']:
         writer.writerow([
             row['name'], row.get('weekVisits'), row.get('weekPhones', 0),
+            row.get('weekDeals'), row.get('cumDeals'),
             f"{row.get('weekVisitPct', 0)}%", f"{row.get('weekPhonePct', 0)}%",
+            f"{row.get('cumDealPct', 0)}%",
             row.get('priorVisits'), row.get('cumVisits'),
         ])
     writer.writerow([])

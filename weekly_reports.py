@@ -1611,7 +1611,8 @@ def _append_dim_table(ws, title, rows, *, week_only=True, with_phones=False):
     if with_phones:
         ws.append([
             '項目', '本週來人', '佔本週來人%', '本週來電', '佔本週來電%',
-            '本週成交', '佔本週成交%', '前期來人', '累計來人',
+            '本週成交', '佔本週成交%', '累計成交', '佔累計成交%',
+            '前期來人', '累計來人',
         ])
     else:
         ws.append([
@@ -1639,9 +1640,10 @@ def _append_dim_table(ws, title, rows, *, week_only=True, with_phones=False):
                 r.get('name'), r.get('weekVisits'), r.get('weekVisitPct'),
                 r.get('weekPhones', 0), r.get('weekPhonePct', 0),
                 r.get('weekDeals'), r.get('weekDealPct'),
+                r.get('cumDeals'), r.get('cumDealPct'),
                 r.get('priorVisits'), r.get('cumVisits'),
             ])
-            for col in (3, 5, 7):
+            for col in (3, 5, 7, 9):
                 ws.cell(ws.max_row, col).number_format = '0.##"%"'
         else:
             ws.append([
@@ -1659,9 +1661,10 @@ def _append_dim_table(ws, title, rows, *, week_only=True, with_phones=False):
                 total_row.get('name'), total_row.get('weekVisits'), total_row.get('weekVisitPct'),
                 total_row.get('weekPhones', 0), total_row.get('weekPhonePct', 0),
                 total_row.get('weekDeals'), total_row.get('weekDealPct'),
+                total_row.get('cumDeals'), total_row.get('cumDealPct'),
                 total_row.get('priorVisits'), total_row.get('cumVisits'),
             ])
-            for col in (3, 5, 7):
+            for col in (3, 5, 7, 9):
                 ws.cell(ws.max_row, col).number_format = '0.##"%"'
         else:
             ws.append([
@@ -1688,15 +1691,18 @@ def _append_ppt_dim_rows(ws, rows):
         visits = _num(r.get('weekVisits'))
         phones = _num(r.get('weekPhones'))
         deals = _num(r.get('weekDeals'))
-        if not visits and not phones and not deals:
+        cum_deals = _num(r.get('cumDeals'))
+        if not visits and not phones and not deals and not cum_deals:
             continue
         ws.append([
             r.get('name'),
             visits,
             phones,
             deals,
+            cum_deals,
             f"{r.get('weekVisitPct', 0)}%",
             f"{r.get('weekPhonePct', 0)}%",
+            f"{r.get('cumDealPct', 0)}%",
         ])
         shown += 1
     if total_row:
@@ -1705,13 +1711,15 @@ def _append_ppt_dim_rows(ws, rows):
             total_row.get('weekVisits', 0),
             total_row.get('weekPhones', 0),
             total_row.get('weekDeals', 0),
+            total_row.get('cumDeals', 0),
             f"{total_row.get('weekVisitPct', 0)}%",
             f"{total_row.get('weekPhonePct', 0)}%",
+            f"{total_row.get('cumDealPct', 0)}%",
         ])
-        for col in range(1, 7):
+        for col in range(1, 9):
             ws.cell(ws.max_row, col).font = _font(bold=True)
     elif shown == 0:
-        ws.append(['（本週無資料）', '', '', '', '', ''])
+        ws.append(['（本週無資料）', '', '', '', '', '', '', ''])
 
 
 def _ppt_fill_row(ws, values, fill, end_col=None):
@@ -1982,16 +1990,16 @@ def _build_ppt_region_media_sheet(ws, auto):
     section_fill = PatternFill('solid', fgColor='D6EAF8')
     ws.append(['區域／媒體（貼 PPT 客況或分析頁用）'])
     ws['A1'].font = _font(bold=True, size=14, color='1A4D7C')
-    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=6)
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=8)
     ws.append([])
-    ws.append(['區域', '本週來人', '本週來電', '本週成交', '佔來人%', '佔來電%'])
+    ws.append(['區域', '本週來人', '本週來電', '本週成交', '累計成交', '佔來人%', '佔來電%', '佔累計成交%'])
     _style_header(ws, ws.max_row)
     _append_ppt_dim_rows(ws, auto.get('byRegion') or [])
     ws.append([])
-    ws.append(['媒體', '本週來人', '本週來電', '本週成交', '佔來人%', '佔來電%'])
+    ws.append(['媒體', '本週來人', '本週來電', '本週成交', '累計成交', '佔來人%', '佔來電%', '佔累計成交%'])
     _style_header(ws, ws.max_row)
     _append_ppt_dim_rows(ws, auto.get('byMedia') or [])
-    for col, width in enumerate([14, 12, 12, 12, 10, 10], start=1):
+    for col, width in enumerate([14, 12, 12, 12, 12, 10, 10, 12], start=1):
         ws.column_dimensions[get_column_letter(col)].width = width
 
 
@@ -2100,7 +2108,7 @@ def build_weekly_excel(site_name: str, start, end, week_number, manual: dict, au
     ws.append(['七、職業／年齡分析（新客）'])
     _append_dim_table(ws, '職業（新客）', auto.get('byOccupation') or [])
     _append_dim_table(ws, '年齡（新客）', auto.get('byAge') or [])
-    for col in range(1, 12):
+    for col in range(1, 13):
         ws.column_dimensions[get_column_letter(col)].width = 14
     ws.column_dimensions['A'].width = 22
 
