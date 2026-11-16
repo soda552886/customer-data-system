@@ -1571,33 +1571,33 @@ let stPlanIndex = 0;
 const SITE_FLOORPLANS = [
   {
     match: (id, name) => id === 'xinrun' || /世界都心/.test(name || ''),
-    plans: [{ tab: '標準層', title: '新潤世界都心｜全區標準層平面圖', src: '/img/floorplans/xinrun.jpg' }],
+    plans: [{ tab: '標準層', title: '新潤世界都心｜全區標準層平面圖', src: '/img/floorplans/xinrun.jpg?v=2' }],
   },
   {
     match: (id, name) => /如嶼|宏樸/.test(name || '') || /ruyu|hongpu/.test(id || ''),
-    plans: [{ tab: '3F–12F', title: '宏樸如嶼｜3F–12F 全區平面配置', src: '/img/floorplans/hongpu-ruyu.png' }],
+    plans: [{ tab: '3F–12F', title: '宏樸如嶼｜3F–12F 全區平面配置', src: '/img/floorplans/hongpu-ruyu.png?v=2' }],
   },
   {
     match: (id, name) => id === 'libao_duoyi' || /鐸藝/.test(name || ''),
     plans: [
-      { tab: '3F 事務所', title: '麗寶鐸藝｜3F 一般事務所', src: '/img/floorplans/libao-duoyi-3f.png' },
-      { tab: '8F 住宅', title: '麗寶鐸藝｜8F 住宅', src: '/img/floorplans/libao-duoyi-8f.png' },
+      { tab: '3F 事務所', title: '麗寶鐸藝｜3F 一般事務所', src: '/img/floorplans/libao-duoyi-3f.png?v=2' },
+      { tab: '8F 住宅', title: '麗寶鐸藝｜8F 住宅', src: '/img/floorplans/libao-duoyi-8f.png?v=2' },
     ],
   },
   {
     match: (id, name) => /m[eé]tro/i.test(`${id} ${name}`) || /圓山/.test(name || ''),
-    plans: [{ tab: '8F–10F 全棟', title: '麗寶Métro｜8F–10F 全棟平面配置', src: '/img/floorplans/libao-metro.jpg' }],
+    plans: [{ tab: '8F–10F 全棟', title: '麗寶Métro｜8F–10F 全棟平面配置', src: '/img/floorplans/libao-metro.jpg?v=2' }],
   },
   {
     match: (id, name) => id === 'shouyu' || /首御/.test(name || ''),
-    plans: [{ tab: '3F–5F', title: '首御臨沂｜3F–5F 平面配置', src: '/img/floorplans/shouyu.jpg' }],
+    plans: [{ tab: '3F–5F', title: '首御臨沂｜3F–5F 平面配置', src: '/img/floorplans/shouyu.jpg?v=2' }],
   },
   {
     match: (id, name) => id === 'shouxue' || /首學/.test(name || ''),
     plans: [
-      { tab: '8F–9F', title: '首學杭州｜8F–9F 平面配置', src: '/img/floorplans/shouxue-8f9f.jpg' },
-      { tab: '10F', title: '首學杭州｜10F 平面配置', src: '/img/floorplans/shouxue-10f.jpg' },
-      { tab: '14F', title: '首學杭州｜14F 平面配置', src: '/img/floorplans/shouxue-14f.jpg' },
+      { tab: '8F–9F', title: '首學杭州｜8F–9F 平面配置', src: '/img/floorplans/shouxue-8f9f.jpg?v=2' },
+      { tab: '10F', title: '首學杭州｜10F 平面配置', src: '/img/floorplans/shouxue-10f.jpg?v=2' },
+      { tab: '14F', title: '首學杭州｜14F 平面配置', src: '/img/floorplans/shouxue-14f.jpg?v=2' },
     ],
   },
 ];
@@ -1627,16 +1627,26 @@ function closeFloorplanLightbox() {
   const box = document.getElementById('stFloorplanLightbox');
   const img = document.getElementById('stFloorplanLightboxImg');
   if (box) box.classList.add('hidden');
-  if (img) img.removeAttribute('src');
+  if (img) {
+    img.classList.remove('is-native');
+    img.removeAttribute('src');
+  }
 }
 
 function openFloorplanLightbox(src, title) {
   const box = document.getElementById('stFloorplanLightbox');
   const img = document.getElementById('stFloorplanLightboxImg');
   if (!box || !img || !src) return;
+  img.classList.remove('is-native');
   img.src = src;
   img.alt = title || '平面圖放大';
   box.classList.remove('hidden');
+}
+
+function toggleFloorplanLightboxZoom(img) {
+  if (!img) return;
+  img.classList.toggle('is-native');
+  if (img.classList.contains('is-native')) img.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 }
 
 function renderFloorplanView(plans) {
@@ -1659,7 +1669,7 @@ function renderFloorplanView(plans) {
   wrap.innerHTML = `
     ${tabs}
     <div class="st-floorplan">
-      <p class="st-floorplan-caption">${escapeHtml(p.title || '平面圖')}（點圖放大）</p>
+      <p class="st-floorplan-caption">${escapeHtml(p.title || '平面圖')}（點圖放大，再點一次看原尺寸）</p>
       <img src="${escapeHtml(p.src)}" alt="${escapeHtml(p.title || '平面圖')}" data-st-floorplan="${escapeHtml(p.src)}" data-st-floorplan-title="${escapeHtml(p.title || '平面圖')}">
     </div>
   `;
@@ -2523,7 +2533,13 @@ async function init() {
     if (!hit) return;
     openSellthroughCellEditor(hit.dataset.stCol, Number(hit.dataset.stFloor));
   });
-  document.getElementById('stFloorplanLightbox')?.addEventListener('click', closeFloorplanLightbox);
+  document.getElementById('stFloorplanLightbox')?.addEventListener('click', (e) => {
+    if (e.target.id === 'stFloorplanLightboxImg') {
+      toggleFloorplanLightboxZoom(e.target);
+      return;
+    }
+    closeFloorplanLightbox();
+  });
   document.getElementById('stCellSaveBtn')?.addEventListener('click', saveSellthroughCell);
   document.getElementById('stCellCancelBtn')?.addEventListener('click', closeSellthroughCellEditor);
   document.getElementById('stCellModal')?.addEventListener('click', (e) => {

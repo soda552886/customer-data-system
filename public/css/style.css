@@ -1899,22 +1899,38 @@ tr.visitor-row-highlight td {
 }
 .st-floorplan img {
   display: block;
-  width: 100%;
-  max-width: 1080px;
+  width: auto;
+  max-width: 100%;
+  height: auto;
   margin: 0 auto;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: #fff;
   cursor: zoom-in;
 }
+.st-floorplan-lightbox {
+  overflow: auto;
+  padding: 0.6rem;
+  align-items: flex-start;
+  justify-content: center;
+}
 .st-floorplan-lightbox img {
-  max-width: min(96vw, 1400px);
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: min(96vw, 2560px);
   max-height: 94vh;
   object-fit: contain;
+  margin: 0 auto;
   border-radius: 8px;
   background: #fff;
-  cursor: zoom-out;
+  cursor: zoom-in;
   box-shadow: 0 12px 40px rgba(15, 23, 42, 0.28);
+}
+.st-floorplan-lightbox img.is-native {
+  max-width: none;
+  max-height: none;
+  cursor: zoom-out;
 }
 .st-empty {
   height: 4.1rem;
